@@ -1,0 +1,7 @@
+# One trusted root per line.
+# Keep your real local trusted roots in config\trusted-roots.txt.
+# Do not commit config\trusted-roots.txt because it may reveal personal paths or private project names.
+#
+# Example:
+# E:\path\to\project
+# D:\work\another-project

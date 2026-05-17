@@ -57,8 +57,21 @@ Before enabling shell or write-heavy workflows:
 - Do not hardcode secrets in `.bat`, `.ps1`, `.mjs`, or JSON config files.
 - Do not print secrets to console.
 - Do not commit `.env`.
+- Do not commit `config/trusted-roots.txt`; keep real trusted roots local and commit only `config/trusted-roots.example.txt`.
 - Keep `XAI_API_KEY` only in environment variables or `.env`.
 - Keep `MCP_AUTH_PASSWORD` only in `.env`.
 - Keep `MCP_BEARER_TOKEN` only in `.env`; rotate it if it is shared with another client or machine.
 - Use a long random `MCP_BEARER_TOKEN` when enabling Hermes/OpenClaw-style Bearer auth.
 - Rotate `MCP_BEARER_TOKEN` after sharing logs, screenshots, client configs, or tunnel URLs that may expose it.
+
+## Agent Tool Safety
+
+The expanded local tool set includes git, patching, zip packaging, deterministic review, tests, and secret scanning wrappers.
+
+- Every new path-taking tool validates paths against trusted roots.
+- `custom_delete_file` refuses trusted-root deletion and `.git` deletion.
+- `custom_secret_scan` redacts suspected secrets; it must never print full secret values.
+- `custom_zip_create` excludes `node_modules/`, `logs/`, `packages/`, `_zip_temp/`, and `.git/` by default. `.git/` is included only when `includeGit=true`; generated `packages/` artifacts are local release outputs and should not be committed.
+- `custom_run_tests` only allows safe project test commands. Use `custom_shell_execute` explicitly for arbitrary commands.
+- `custom_review_diff` is deterministic and rule-based. It is useful as a pre-commit signal, not as a complete human security review.
+- `custom_release_review` is a readiness gate. Treat warnings and blockers seriously before publishing, pushing, or zipping release artifacts.

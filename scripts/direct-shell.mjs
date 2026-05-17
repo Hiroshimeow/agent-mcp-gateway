@@ -21,11 +21,15 @@ export async function executeDirectShell(command, options = {}) {
       },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new Error(`Command execution failed: ${error.message}${stderr ? `\n${stderr}` : ''}`));
+          const wrapped = new Error(`Command execution failed: ${error.message}${stderr ? `\n${stderr}` : ''}`);
+          wrapped.stdout = stdout;
+          wrapped.stderr = stderr;
+          wrapped.exitCode = typeof error.code === 'number' ? error.code : 1;
+          reject(wrapped);
           return;
         }
 
-        resolve({ stdout, stderr });
+        resolve({ stdout, stderr, exitCode: 0 });
       }
     );
   });

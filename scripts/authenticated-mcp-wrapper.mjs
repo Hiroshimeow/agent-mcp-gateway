@@ -11,6 +11,7 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelconte
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { CallToolRequestSchema, isInitializeRequest, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
+import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
   buildTrustedRootsMetadata,
   buildTrustedRootsNotice,
@@ -26,6 +27,7 @@ import {
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
 
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8000');
 const publicBaseUrl = process.env.PUBLIC_BASE_URL;
@@ -53,13 +55,17 @@ function parseTrustedRoots(rawValue, fallbackRoot) {
   }
 
   for (const entry of String(rawValue || '').split(/[\r\n;]+/)) {
-    const value = entry.trim().replace(/^['"]|['"]$/g, '');
+    const value = entry
+      .trim()
+      .replace(/^['"]|['"]$/g, '')
+      .replace(/^\\\\\?\\/, '')
+      .replaceAll('/', '\\');
     if (value) {
       roots.push(value);
     }
   }
 
-  const resolvedRoots = [...new Set(roots.map(root => path.resolve(root)))];
+  const resolvedRoots = [...new Set(roots.map(root => path.resolve(String(root).replace(/^\\\\\?\\/, '').replaceAll('/', '\\'))))];
   const existingRoots = [];
   const missingRoots = [];
   for (const root of resolvedRoots) {
@@ -77,8 +83,35 @@ function parseTrustedRoots(rawValue, fallbackRoot) {
   return { existingRoots, missingRoots };
 }
 
-const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = parseTrustedRoots(
+function readTrustedRootsFile(filePath, baseDir = packageRoot) {
+  const value = String(filePath || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  const normalized = value.replace(/^['"]|['"]$/g, '').replace(/^\\\\\?\\/, '');
+  const resolvedPath = path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(baseDir, normalized);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`MCP_TRUSTED_ROOTS_FILE does not exist: ${resolvedPath}`);
+  }
+
+  return fs
+    .readFileSync(resolvedPath, 'utf8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+    .join('\n');
+}
+
+const trustedRootsRaw = [
   process.env.MCP_TRUSTED_ROOTS,
+  readTrustedRootsFile(process.env.MCP_TRUSTED_ROOTS_FILE)
+]
+  .filter(Boolean)
+  .join('\n');
+
+const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = parseTrustedRoots(
+  trustedRootsRaw,
   repoRoot
 );
 const resolvedRepoRoot = resolvedRepoRoots[0];
@@ -155,6 +188,8 @@ async function listMergedTools() {
     tools.push(...filesystemResult.tools.map(tool => normalizeToolForAutopilot(tool, { repoRoots: resolvedRepoRoots })));
   }
 
+  tools.push(...listCustomTools({ resolvedRepoRoots, resolvedRepoRoot }));
+
   if (enableShell) {
     tools.push({
       name: 'custom_shell_execute',
@@ -190,6 +225,15 @@ async function routeToolCall(request) {
   const toolName = request.params.name;
   const upstreamToolName = toUpstreamToolName(toolName);
   console.log(`[tool-call] ${toolName}`);
+
+  if (isLocalCustomTool(upstreamToolName)) {
+    return await callCustomTool(upstreamToolName, request.params.arguments || {}, {
+      resolvedRepoRoots,
+      resolvedRepoRoot,
+      executeDirectShell,
+      packageRoot: resolvedRepoRoot
+    });
+  }
 
   if (enableShell && upstreamToolName === 'shell_execute') {
     const validated = validateShellCommand(request.params.arguments, {

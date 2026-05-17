@@ -41,6 +41,7 @@ personal-mcp-launcher/
     filesystem.mcp.json
     shell.mcp.json
     gateway.config.json
+    trusted-roots.example.txt
   logs/
     .gitkeep
   .env.example
@@ -111,6 +112,8 @@ Ghi chú: nếu chọn `3=both`, OAuth issuer chính sẽ là Tailscale URL. Cha
 ```dotenv
 REPO_ROOT=E:\python_project\Screens-Trans-Chatbot
 MCP_TRUSTED_ROOTS=
+MCP_TRUSTED_ROOTS_FILE=
+# MCP_TRUSTED_ROOTS_FILE=config\trusted-roots.txt
 MCP_GATEWAY_PORT=8000
 MCP_TUNNEL_MODE=ngrok
 PUBLIC_BASE_URL=
@@ -126,7 +129,9 @@ MCP_BEARER_TOKEN=
 Ghi chú:
 
 - `REPO_ROOT` là root mặc định/đầu tiên.
-- `MCP_TRUSTED_ROOTS` là allowlist mở rộng, phân tách bằng `;` hoặc xuống dòng. Agent có thể dùng absolute path dưới bất kỳ root nào trong danh sách này mà không cần restart MCP.
+- `MCP_TRUSTED_ROOTS` là allowlist mở rộng inline, phân tách bằng `;`.
+- `MCP_TRUSTED_ROOTS_FILE` là allowlist dạng file local, mỗi path một dòng. Để trống theo mặc định; copy `config\trusted-roots.example.txt` thành `config\trusted-roots.txt` nếu cần danh sách dài.
+- Agent có thể dùng absolute path dưới bất kỳ root nào trong `REPO_ROOT` + `MCP_TRUSTED_ROOTS` + `MCP_TRUSTED_ROOTS_FILE` mà không cần restart MCP sau mỗi lần đổi repo. Nếu sửa file allowlist thì restart MCP để nạp lại. Không commit `config\trusted-roots.txt` thật vì file này có thể lộ path cá nhân/private project names.
 - CLI override được ưu tiên hơn `.env`: `-Path`, `-P`, `-Tunnel`, `-PublicBaseUrl`.
 - `MCP_TUNNEL_MODE=ngrok` hoặc `tailscale`.
 - `PUBLIC_BASE_URL` dùng cho server-only mode. Nếu dùng ngrok random, chạy tunnel trước rồi pass URL bằng `-PublicBaseUrl`.
@@ -189,6 +194,37 @@ Tool definitions sẽ liệt kê trusted roots. Mỗi `custom_*` tool có metada
 ```
 
 Description cũng có block `trusted_roots:` để client không expose `_meta` vẫn có context.
+
+## Tool set
+
+Mục tiêu hiện tại là đúng 30 visible `custom_*` tools:
+
+- 16 tools cũ từ filesystem/shell vẫn giữ nguyên: `custom_read_file`, `custom_read_text_file`, `custom_read_media_file`, `custom_read_multiple_files`, `custom_write_file`, `custom_edit_file`, `custom_create_directory`, `custom_list_directory`, `custom_list_directory_with_sizes`, `custom_directory_tree`, `custom_move_file`, `custom_search_files`, `custom_get_file_info`, `custom_list_allowed_directories`, `custom_shell_execute`, `custom_get_platform_info`.
+- 14 tools project-agent mới: `custom_grep`, `custom_apply_patch`, `custom_delete_file`, `custom_copy_file`, `custom_git_status`, `custom_git_diff`, `custom_git_add`, `custom_git_commit`, `custom_git_push`, `custom_zip_create`, `custom_secret_scan`, `custom_review_diff`, `custom_run_tests`, `custom_release_review`.
+
+Tool selection guide:
+
+- Đọc file: dùng `custom_read_text_file` cho một file, `custom_read_multiple_files` cho nhiều file, `custom_read_media_file` cho ảnh/audio, `custom_get_file_info` cho metadata.
+- Tìm kiếm: dùng `custom_search_files` để tìm tên/path file; dùng `custom_grep` để tìm text bên trong file.
+- Sửa file: dùng `custom_edit_file` cho replace nhỏ chính xác; dùng `custom_apply_patch` cho unified diff/multi-file; dùng `custom_write_file` khi tạo file mới hoặc chủ ý overwrite toàn bộ file.
+- File ops: dùng `custom_create_directory`, `custom_move_file`, `custom_copy_file`, `custom_delete_file`; tránh shell cho thao tác file cơ bản.
+- Git: dùng `custom_git_status`, `custom_git_diff`, `custom_git_add`, `custom_git_commit`, `custom_git_push`; tránh shell cho git flow đã có wrapper.
+- Test/review/release: dùng `custom_secret_scan`, `custom_review_diff`, `custom_run_tests`, `custom_release_review`, `custom_zip_create`.
+- Shell fallback: chỉ dùng `custom_shell_execute` khi không có dedicated tool, cần debug, user yêu cầu shell, hoặc wrapper tool fail và shell là recovery path.
+
+Release workflow đề xuất:
+
+```text
+custom_git_status
+custom_secret_scan
+custom_review_diff
+custom_run_tests
+custom_release_review
+custom_zip_create
+custom_git_add
+custom_git_commit
+custom_git_push
+```
 
 ## Log file
 

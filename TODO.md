@@ -15,6 +15,10 @@ Ship a Windows-first MCP launcher that ChatGPT Developer Mode can use through on
 - Direct PowerShell shell execution from wrapper
 - Merged tool surface exposed from one `/mcp` endpoint
 - Full yolo shell mode in `authenticated-mcp-wrapper.mjs`
+- Agent tool expansion from 16 to 30 visible `custom_*` tools per `.plan/agent-tool-expansion-plan.md`
+- Local custom tool registry in `scripts/custom-tools/`
+- Project-agent wrappers for grep, patch, copy/delete, git, zip, secret scan, diff review, tests, and release review
+- Unit/integration-style tests for custom tool utilities and wrappers
 
 ## Current shell policy
 
@@ -27,6 +31,10 @@ Ship a Windows-first MCP launcher that ChatGPT Developer Mode can use through on
 
 ## Remaining work
 
+- Keep `.plan/agent-tool-expansion-plan.md` as the implementation handoff record; do not add `.plan/` to `.gitignore`.
+- Keep real trusted roots in local-only `config/trusted-roots.txt`; commit only `config/trusted-roots.example.txt`.
+- Keep release artifacts in local-only `packages/`; do not commit generated zip files.
+- Run the release workflow before publishing: `custom_git_status`, `custom_secret_scan`, `custom_review_diff`, `custom_run_tests`, `custom_release_review`, `custom_zip_create`, `custom_git_add`, `custom_git_commit`, `custom_git_push`.
 - Persist OAuth client registration across restarts so ChatGPT app recreation is less likely
 - Add an explicit smoke-test script for MCP endpoint readiness
 - Improve shell policy around docker bind mounts if needed

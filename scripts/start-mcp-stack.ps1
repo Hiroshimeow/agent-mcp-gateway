@@ -309,6 +309,7 @@ if ($envValues.ContainsKey("SHELL_PROFILE") -and $envValues["SHELL_PROFILE"]) {
 $enableFilesystem = $enableFilesystemValue.ToLowerInvariant() -eq "true"
 $enableShell = $enableShellValue.ToLowerInvariant() -eq "true"
 $trustedRootsValue = $envValues["MCP_TRUSTED_ROOTS"]
+$trustedRootsFileValue = $envValues["MCP_TRUSTED_ROOTS_FILE"]
 $ngrokAuthtoken = $envValues["NGROK_AUTHTOKEN"]
 $authPassword = $envValues["MCP_AUTH_PASSWORD"]
 $bearerToken = $envValues["MCP_BEARER_TOKEN"]
@@ -384,6 +385,7 @@ $gatewayEnv = @(
     "set `"MCP_GATEWAY_PORT=$gatewayPort`"",
     "set `"PUBLIC_BASE_URL=$publicBaseUrl`"",
     "set `"MCP_TRUSTED_ROOTS=$trustedRootsValue`"",
+    "set `"MCP_TRUSTED_ROOTS_FILE=$trustedRootsFileValue`"",
     "set `"MCP_AUTH_PASSWORD=$authPassword`"",
     "set `"MCP_BEARER_TOKEN=$bearerToken`"",
     "set `"ENABLE_FILESYSTEM=$enableFilesystemValue`"",
