@@ -1,0 +1,15 @@
+{
+  "gatewayPackage": "mcp-proxy",
+  "gatewayMode": "stream",
+  "streamEndpoint": "/mcp",
+  "host": "127.0.0.1",
+  "port": "{{MCP_GATEWAY_PORT}}",
+  "upstream": {
+    "type": "stdio",
+    "command": "node",
+    "args": [
+      "node_modules\\@modelcontextprotocol\\server-filesystem\\dist\\index.js",
+      "{{REPO_ROOT}}"
+    ]
+  }
+}

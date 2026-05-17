@@ -1,0 +1,26 @@
+{
+  "name": "shell",
+  "enabledByDefault": true,
+  "activation": {
+    "envVar": "ENABLE_SHELL",
+    "truthyValue": "true"
+  },
+  "backend": {
+    "package": "internal-wrapper-shell",
+    "transport": "in-process",
+    "executedBy": "scripts/direct-shell.mjs"
+  },
+  "publicTools": [
+    "shell_execute",
+    "get_platform_info"
+  ],
+  "policy": {
+    "forceRepoWorkingDirectory": "REPO_ROOT only",
+    "launcherSideRestrictions": "none after authentication",
+    "notes": [
+      "Authenticated shell mode is full yolo.",
+      "Launcher does not add approval gates, executable whitelists, or blocked command patterns.",
+      "Filesystem scope still remains REPO_ROOT-bound."
+    ]
+  }
+}

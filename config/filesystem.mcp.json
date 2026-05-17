@@ -1,0 +1,12 @@
+{
+  "name": "filesystem",
+  "command": "node",
+  "args": [
+    "node_modules\\@modelcontextprotocol\\server-filesystem\\dist\\index.js",
+    "{{REPO_ROOT}}"
+  ],
+  "notes": [
+    "v1 exposes only the configured REPO_ROOT.",
+    "Do not set REPO_ROOT to a full drive or a broad home directory."
+  ]
+}
