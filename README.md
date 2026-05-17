@@ -338,6 +338,4 @@ git push -u origin main
 
 ## License
 
-This repository is currently marked as private/unlicensed in `package.json`.
-
-Before publishing publicly, choose and add a `LICENSE` file if you want other people to use, copy, or modify the project under explicit terms.
+MIT. See `LICENSE` for details.

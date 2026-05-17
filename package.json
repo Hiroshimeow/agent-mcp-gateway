@@ -1,9 +1,8 @@
 {
   "name": "agent-mcp-gateway",
   "version": "1.0.0",
-  "private": true,
   "description": "Windows-first MCP gateway for AI agents and ChatGPT Developer Mode, exposed through ngrok or Tailscale Funnel.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "start:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-stack.ps1",
     "stop:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-stack.ps1",
