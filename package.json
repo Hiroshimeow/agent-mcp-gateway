@@ -1,8 +1,8 @@
 {
-  "name": "personal-mcp-launcher",
+  "name": "agent-mcp-gateway",
   "version": "1.0.0",
   "private": true,
-  "description": "Windows-first launcher for a local filesystem MCP server exposed to ChatGPT Developer Mode through ngrok or Tailscale Funnel.",
+  "description": "Windows-first MCP gateway for AI agents and ChatGPT Developer Mode, exposed through ngrok or Tailscale Funnel.",
   "license": "UNLICENSED",
   "scripts": {
     "start:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-stack.ps1",

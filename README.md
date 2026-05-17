@@ -1,8 +1,8 @@
-# Local Dev MCP Launcher
+# Agent MCP Gateway
 
-A Windows-first launcher for exposing local development tools to MCP clients such as ChatGPT Developer Mode through a public HTTPS tunnel. It wraps local MCP servers behind OAuth/password authentication and provides project-oriented file, shell, git, test, review, packaging, and safety-check tools.
+A Windows-first MCP gateway for AI agents and ChatGPT Developer Mode. It exposes local development tools through a public HTTPS tunnel, wraps them behind OAuth/password authentication, and provides project-oriented file, shell, git, test, review, packaging, and safety-check tools.
 
-> Recommended GitHub repository name: `local-dev-mcp-launcher`
+> Recommended GitHub repository name: `agent-mcp-gateway`
 
 ## What this project does
 
@@ -27,21 +27,23 @@ It is designed for short-lived development sessions where you want an AI coding 
 Use this name for GitHub:
 
 ```text
-local-dev-mcp-launcher
+agent-mcp-gateway
 ```
 
 Why this name works:
 
-- It describes the actual purpose better than `personal-mcp-launcher`.
-- It is broad enough for public use without sounding tied to one machine or one user.
-- It contains the important search terms: `local`, `dev`, `mcp`, and `launcher`.
+- It says the project is primarily a gateway for AI agents.
+- It still includes the important MCP keyword.
+- It covers both generic MCP agents and ChatGPT Developer Mode without making the repo ChatGPT-only.
+- It sounds less personal and more reusable than `personal-mcp-launcher`.
 
 Other acceptable names:
 
 ```text
-mcp-dev-launcher
-windows-mcp-dev-gateway
-local-mcp-dev-gateway
+mcp-agent-gateway
+chatgpt-agent-mcp-gateway
+windows-agent-mcp-gateway
+local-agent-mcp-gateway
 ```
 
 ## Architecture
@@ -82,8 +84,8 @@ https://<your-tunnel-domain>/mcp
 Clone the repository:
 
 ```powershell
-git clone https://github.com/<your-user>/local-dev-mcp-launcher.git
-cd local-dev-mcp-launcher
+git clone https://github.com/<your-user>/agent-mcp-gateway.git
+cd agent-mcp-gateway
 ```
 
 Install dependencies:
@@ -329,7 +331,7 @@ config/trusted-roots.txt
 Recommended first push:
 
 ```powershell
-git remote add origin https://github.com/<your-user>/local-dev-mcp-launcher.git
+git remote add origin https://github.com/<your-user>/agent-mcp-gateway.git
 git branch -M main
 git push -u origin main
 ```
