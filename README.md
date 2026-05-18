@@ -17,8 +17,9 @@ It is designed for short-lived development sessions where you want an AI coding 
 - OAuth login flow for ChatGPT Developer Mode.
 - Optional static Bearer token support for MCP clients that do not support OAuth.
 - Filesystem MCP access scoped to configured trusted roots.
+- Project ids help agents route work across trusted roots, but filesystem and shell tools still use the global trusted-root set in v1.
 - Optional full-trust shell execution after authentication.
-- 30 visible `custom_*` tools for file operations, search, patching, git, tests, review, secret scanning, and zip packaging.
+- 31 visible `custom_*` tools, including project discovery, file operations, search, patching, git, tests, review, secret scanning, and zip packaging.
 - Local logs and OAuth session cache under `logs/`.
 - Portable zip packaging for moving the launcher between machines without vendored dependencies.
 
@@ -107,7 +108,7 @@ REPO_ROOT=E:\path\to\your\project
 MCP_AUTH_PASSWORD=replace-with-a-long-random-password
 ```
 
-Start the live stack:
+Start the live launcher:
 
 ```powershell
 .\start-mcp-live.bat
@@ -131,7 +132,7 @@ Authentication: OAuth
 
 When the browser login page opens, enter the value of `MCP_AUTH_PASSWORD` from `.env`.
 
-Stop the stack:
+Stop the live launcher:
 
 ```powershell
 .\stop-mcp-live.bat
@@ -143,6 +144,10 @@ Stop the stack:
 REPO_ROOT=E:\path\to\your\project
 MCP_TRUSTED_ROOTS=
 MCP_TRUSTED_ROOTS_FILE=
+MCP_DEFAULT_PROJECT_ID=
+MCP_REQUIRE_PROJECT_ID=false
+MCP_ENABLE_PROJECT_PATH_INFERENCE=true
+MCP_EXPOSE_PROJECT_PATHS=false
 MCP_GATEWAY_PORT=8000
 MCP_TUNNEL_MODE=ngrok
 PUBLIC_BASE_URL=
@@ -157,9 +162,13 @@ MCP_BEARER_TOKEN=
 
 Important variables:
 
-- `REPO_ROOT`: default trusted root and default working directory.
-- `MCP_TRUSTED_ROOTS`: optional semicolon-separated list of additional trusted roots.
+- `REPO_ROOT`: fallback trusted root and default working directory when no trusted-roots config is provided.
+- `MCP_TRUSTED_ROOTS`: optional newline- or semicolon-separated trusted roots using the same formats as `config/trusted-roots.txt`.
 - `MCP_TRUSTED_ROOTS_FILE`: optional file containing one trusted root per line. Keep the real file local and commit only `config/trusted-roots.example.txt`.
+- `MCP_DEFAULT_PROJECT_ID`: optional default project id for multi-project workflows.
+- `MCP_REQUIRE_PROJECT_ID`: set to `true` only when callers must pass explicit project ids to project-aware custom tools.
+- `MCP_ENABLE_PROJECT_PATH_INFERENCE`: defaults to `true`; allows absolute paths to infer project id by longest trusted-root prefix.
+- `MCP_EXPOSE_PROJECT_PATHS`: defaults to `false`; `custom_list_projects` hides full local paths unless this is set to `true`.
 - `MCP_GATEWAY_PORT`: local port for the OAuth MCP wrapper.
 - `MCP_TUNNEL_MODE`: `tailscale`, `ngrok`, or `both`.
 - `PUBLIC_BASE_URL`: explicit public base URL for server-only or preconfigured tunnel workflows.
@@ -171,7 +180,7 @@ Important variables:
 
 ## Tool set
 
-The launcher exposes 30 visible custom tools.
+The launcher exposes 31 visible custom tools.
 
 Filesystem and shell tools:
 
@@ -194,6 +203,7 @@ Filesystem and shell tools:
 
 Project-agent tools:
 
+- `custom_list_projects`
 - `custom_grep`
 - `custom_apply_patch`
 - `custom_delete_file`
@@ -214,6 +224,7 @@ Project-agent tools:
 Before making changes:
 
 ```text
+custom_list_projects
 custom_list_allowed_directories
 custom_git_status
 custom_git_diff
@@ -242,6 +253,24 @@ custom_git_add
 custom_git_commit
 custom_git_push
 ```
+
+## Trusted roots and project discovery
+
+`config/trusted-roots.txt` is the v1 source of truth for multi-project discovery. `config/projects.json` is not used.
+
+Supported formats:
+
+```text
+path
+path | projectId
+path | projectId | displayName
+```
+
+Repeat the same `projectId` on multiple lines to group multiple trusted roots under one project. Legacy path-only lines continue to work and receive generated project ids.
+
+Agents should call `custom_list_projects` to discover available `projectId` values. By default the tool returns project ids and display names, not full local paths. To expose paths explicitly, set `MCP_EXPOSE_PROJECT_PATHS=true` and call `custom_list_projects` with `showPaths: true`.
+
+Project discovery is routing metadata for multi-agent workflows. In this version, filesystem and shell tools still operate over the configured trusted roots; project ids are not hard sandbox isolation boundaries.
 
 ## Packaging for another machine
 
@@ -284,8 +313,7 @@ Runtime logs are written under `logs/`:
 - `shell.log`: shell runtime log or placeholder.
 - `ngrok.log`: ngrok tunnel output.
 - `tailscale.log`: Tailscale Funnel output.
-- `live-pids.json`: process IDs for the live stack.
-- `pids.json`: legacy stack process IDs.
+- `live-pids.json`: process IDs for the live launcher.
 - `auth-state.json`: OAuth client/token state cache.
 
 The `logs/` directory is local runtime state and should not be committed.

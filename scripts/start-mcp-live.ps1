@@ -23,7 +23,6 @@ $tailscaleLog = Join-Path $logsDir "tailscale-$runId.log"
 $authStateFile = Join-Path $logsDir "auth-state.json"
 $wrapperScript = Join-Path $projectRoot "scripts\authenticated-mcp-wrapper.mjs"
 $stopLiveScript = Join-Path $projectRoot "scripts\stop-mcp-live.ps1"
-$stopStackScript = Join-Path $projectRoot "scripts\stop-mcp-stack.ps1"
 
 function Write-Section {
     param([string]$Text)
@@ -243,6 +242,10 @@ $enableFilesystem = $enableFilesystemValue.ToLowerInvariant() -eq "true"
 $enableShell = $enableShellValue.ToLowerInvariant() -eq "true"
 $trustedRootsValue = $envValues["MCP_TRUSTED_ROOTS"]
 $trustedRootsFileValue = $envValues["MCP_TRUSTED_ROOTS_FILE"]
+$defaultProjectIdValue = $envValues["MCP_DEFAULT_PROJECT_ID"]
+$requireProjectIdValue = $envValues["MCP_REQUIRE_PROJECT_ID"]
+$enableProjectPathInferenceValue = $envValues["MCP_ENABLE_PROJECT_PATH_INFERENCE"]
+$exposeProjectPathsValue = $envValues["MCP_EXPOSE_PROJECT_PATHS"]
 $authPassword = $envValues["MCP_AUTH_PASSWORD"]
 $bearerToken = $envValues["MCP_BEARER_TOKEN"]
 if (-not $authPassword) {
@@ -280,14 +283,10 @@ if ($useNgrok) {
 
 New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 if (Test-Path $pidFile) {
-    Write-Host "Existing live PID file found. Stopping previous live stack first."
+    Write-Host "Existing live PID file found. Stopping previous live launcher first."
     & $stopLiveScript
 }
 
-if (Test-Path (Join-Path $logsDir "pids.json")) {
-    Write-Host "Existing legacy PID file found. Stopping previous legacy stack first."
-    & $stopStackScript
-}
 Stop-StaleLauncherProcessOnPort -Port $P
 
 Write-Section "Dependencies"
@@ -301,7 +300,7 @@ if (-not (Test-Path (Join-Path $projectRoot "node_modules"))) {
 try {
     Assert-PortAvailable -Port $P
 } catch {
-    throw "$($_.Exception.Message) If this is an old MCP process, run scripts\stop-mcp-stack.ps1 or stop PID manually."
+    throw "$($_.Exception.Message) If this is an old MCP process, run scripts\stop-mcp-live.ps1 or stop the PID manually."
 }
 if (-not (Test-Path $wrapperScript)) {
     throw "Authenticated wrapper script not found: $wrapperScript"
@@ -356,6 +355,10 @@ $gatewayEnv = @(
     "set `"PUBLIC_BASE_URL=$primaryPublicBaseUrl`"",
     "set `"MCP_TRUSTED_ROOTS=$trustedRootsValue`"",
     "set `"MCP_TRUSTED_ROOTS_FILE=$trustedRootsFileValue`"",
+    "set `"MCP_DEFAULT_PROJECT_ID=$defaultProjectIdValue`"",
+    "set `"MCP_REQUIRE_PROJECT_ID=$requireProjectIdValue`"",
+    "set `"MCP_ENABLE_PROJECT_PATH_INFERENCE=$enableProjectPathInferenceValue`"",
+    "set `"MCP_EXPOSE_PROJECT_PATHS=$exposeProjectPathsValue`"",
     "set `"MCP_AUTH_PASSWORD=$authPassword`"",
     "set `"MCP_BEARER_TOKEN=$bearerToken`"",
     "set `"ENABLE_FILESYSTEM=$enableFilesystemValue`"",
@@ -420,7 +423,7 @@ if ($useNgrok) {
 
 if ($FollowLogs) {
     Write-Section "Live Logs"
-    Write-Host "Streaming logs. Press Ctrl+C to stop watching. Stack keeps running until you call stop-mcp-live.ps1."
+    Write-Host "Streaming logs. Press Ctrl+C to stop watching. Live launcher keeps running until you call stop-mcp-live.ps1."
     $logPaths = @($gatewayLog, $filesystemLog, $shellLog)
     if ($useTailscale) {
         $logPaths += $tailscaleLog

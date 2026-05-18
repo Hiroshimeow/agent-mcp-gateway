@@ -26,6 +26,10 @@ import {
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
+import {
+  buildTrustedRootsProjectRegistryFromRaw,
+  resolveTrustedRootPaths
+} from './projects/trusted-roots-projects.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = process.env.REPO_ROOT;
@@ -48,39 +52,12 @@ if (!enableFilesystem && !enableShell) {
   throw new Error('At least one upstream MCP server must be enabled');
 }
 
-function parseTrustedRoots(rawValue, fallbackRoot) {
-  const roots = [];
-  if (fallbackRoot) {
-    roots.push(fallbackRoot);
-  }
-
-  for (const entry of String(rawValue || '').split(/[\r\n;]+/)) {
-    const value = entry
-      .trim()
-      .replace(/^['"]|['"]$/g, '')
-      .replace(/^\\\\\?\\/, '')
-      .replaceAll('/', '\\');
-    if (value) {
-      roots.push(value);
-    }
-  }
-
-  const resolvedRoots = [...new Set(roots.map(root => path.resolve(String(root).replace(/^\\\\\?\\/, '').replaceAll('/', '\\'))))];
-  const existingRoots = [];
-  const missingRoots = [];
-  for (const root of resolvedRoots) {
-    if (fs.existsSync(root)) {
-      existingRoots.push(root);
-    } else {
-      missingRoots.push(root);
-    }
-  }
-
-  if (existingRoots.length === 0) {
-    throw new Error(`No trusted roots exist. Configured roots: ${resolvedRoots.join('; ')}`);
-  }
-
-  return { existingRoots, missingRoots };
+function envFlag(value, defaultValue = false) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return defaultValue;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(text)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(text)) return false;
+  return defaultValue;
 }
 
 function readTrustedRootsFile(filePath, baseDir = packageRoot) {
@@ -110,11 +87,19 @@ const trustedRootsRaw = [
   .filter(Boolean)
   .join('\n');
 
-const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = parseTrustedRoots(
+const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = resolveTrustedRootPaths(
   trustedRootsRaw,
   repoRoot
 );
 const resolvedRepoRoot = resolvedRepoRoots[0];
+const projectRegistry = buildTrustedRootsProjectRegistryFromRaw(trustedRootsRaw, {
+  fallbackRoot: repoRoot,
+  defaultProjectId: process.env.MCP_DEFAULT_PROJECT_ID,
+  requireProjectId: envFlag(process.env.MCP_REQUIRE_PROJECT_ID, false),
+  pathInference: envFlag(process.env.MCP_ENABLE_PROJECT_PATH_INFERENCE, true),
+  exposeProjectPaths: envFlag(process.env.MCP_EXPOSE_PROJECT_PATHS, false),
+  checkExists: true
+});
 const filesystemEntrypointPath = fileURLToPath(
   new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
 );
@@ -188,7 +173,7 @@ async function listMergedTools() {
     tools.push(...filesystemResult.tools.map(tool => normalizeToolForAutopilot(tool, { repoRoots: resolvedRepoRoots })));
   }
 
-  tools.push(...listCustomTools({ resolvedRepoRoots, resolvedRepoRoot }));
+  tools.push(...listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry }));
 
   if (enableShell) {
     tools.push({
@@ -230,6 +215,7 @@ async function routeToolCall(request) {
     return await callCustomTool(upstreamToolName, request.params.arguments || {}, {
       resolvedRepoRoots,
       resolvedRepoRoot,
+      projectRegistry,
       executeDirectShell,
       packageRoot: resolvedRepoRoot
     });
@@ -522,6 +508,9 @@ const serverInstance = app.listen(gatewayPort, '127.0.0.1', () => {
   console.log(`OAuth issuer: ${issuerUrl.href}`);
   console.log(`MCP resource URL: ${resourceServerUrl.href}`);
   console.log(`Trusted roots: ${resolvedRepoRoots.join('; ')}`);
+  console.log(
+    `Project registry: ${projectRegistry.projects.size} project(s), default=${projectRegistry.defaultProjectId || 'none'}`
+  );
   if (missingTrustedRoots.length > 0) {
     console.log(`Skipped missing trusted roots: ${missingTrustedRoots.join('; ')}`);
   }

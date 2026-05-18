@@ -1,6 +1,6 @@
 .env
 logs/*.log
-logs/pids.json
+logs/*.json
 logs/npm-install.log
 node_modules/
 npm-debug.log*

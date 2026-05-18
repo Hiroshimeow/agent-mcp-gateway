@@ -4,8 +4,8 @@
   "description": "Windows-first MCP gateway for AI agents and ChatGPT Developer Mode, exposed through ngrok or Tailscale Funnel.",
   "license": "MIT",
   "scripts": {
-    "start:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-stack.ps1",
-    "stop:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-stack.ps1",
+    "start:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-live.ps1",
+    "stop:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-live.ps1",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
