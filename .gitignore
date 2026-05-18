@@ -9,3 +9,4 @@ logs/
 packages/
 config/trusted-roots.txt
 *.zip
+.plan/
