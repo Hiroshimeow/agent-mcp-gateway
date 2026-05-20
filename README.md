@@ -107,6 +107,14 @@ uv run main.py --repo E:\path\to\your\project --ip 127.0.0.1 --port 8101
 
 To bind to a Tailscale IP or all interfaces, change `--ip`, for example `--ip 100.x.y.z` or `--ip 0.0.0.0`.
 
+If the gateway is exposed through a reverse proxy, SSH tunnel, or HTTPS domain, keep binding local but advertise the public OAuth URL:
+
+```powershell
+uv run main.py --ip 127.0.0.1 --port 8101 --advertise-url https://mcp.hcu-lab.me
+```
+
+Without this, OAuth discovery may publish `http://127.0.0.1:8101/register`, and external clients such as ChatGPT cannot complete Dynamic Client Registration.
+
 Windows prompt-based launcher:
 
 ```powershell
@@ -157,6 +165,8 @@ MCP_ENABLE_PROJECT_PATH_INFERENCE=true
 MCP_EXPOSE_PROJECT_PATHS=false
 MCP_GATEWAY_HOST=127.0.0.1
 MCP_ADVERTISE_HOST=
+# Optional public HTTPS base URL for OAuth metadata behind a reverse proxy or SSH tunnel.
+MCP_ADVERTISE_URL=
 MCP_GATEWAY_PORT=8101
 ENABLE_FILESYSTEM=true
 ENABLE_SHELL=true
@@ -178,6 +188,7 @@ Important variables:
 - `MCP_EXPOSE_PROJECT_PATHS`: defaults to `false`; `custom_list_projects` hides full local paths unless this is set to `true`.
 - `MCP_GATEWAY_HOST`: bind IP/host for direct Node wrapper runs. Use `127.0.0.1` for local-only, a Tailscale IP for tailnet access, or `0.0.0.0` to bind all interfaces.
 - `MCP_ADVERTISE_HOST`: optional host used in OAuth metadata and printed MCP URLs for direct Node wrapper runs. If empty, it follows `MCP_GATEWAY_HOST`; for `0.0.0.0`, it defaults to `127.0.0.1`.
+- `MCP_ADVERTISE_URL`: optional full public base URL, such as `https://mcp.hcu-lab.me`, used in OAuth metadata when the local gateway is exposed through a reverse proxy or SSH tunnel.
 - `MCP_GATEWAY_PORT`: local port for direct Node wrapper runs.
 - `ENABLE_FILESYSTEM`: enables filesystem tools.
 - `ENABLE_SHELL`: enables shell execution tools.

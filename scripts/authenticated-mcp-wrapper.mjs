@@ -36,7 +36,8 @@ const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
 const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() || '127.0.0.1';
 const advertisedHost = String(process.env.MCP_ADVERTISE_HOST || '').trim() || (gatewayHost === '0.0.0.0' ? '127.0.0.1' : gatewayHost);
-const localBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
+const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
+const baseUrl = advertisedUrl ? advertisedUrl.replace(/\/+$/, '') : `http://${advertisedHost}:${gatewayPort}`;
 const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const shellProfile = String(process.env.SHELL_PROFILE || 'yolo').toLowerCase();
@@ -394,8 +395,8 @@ app.use((req, _res, next) => {
   next();
 });
 
-const issuerUrl = new URL(localBaseUrl);
-const resourceServerUrl = new URL('/mcp', `${localBaseUrl}/`);
+const issuerUrl = new URL(baseUrl);
+const resourceServerUrl = new URL('/mcp', `${baseUrl}/`);
 app.use(
   mcpAuthRouter({
     provider,

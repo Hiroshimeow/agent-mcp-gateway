@@ -3,6 +3,7 @@ param(
     [string]$Path,
     [string]$Ip = "127.0.0.1",
     [int]$P = 8101,
+    [string]$AdvertiseUrl = "",
     [switch]$FollowLogs
 )
 
@@ -261,7 +262,8 @@ if (-not (Test-Path $wrapperScript)) {
 
 $records = New-Object System.Collections.Generic.List[object]
 $advertisedHost = if ($bindHost -eq "0.0.0.0") { "127.0.0.1" } else { $bindHost }
-$localBaseUrl = "http://$advertisedHost`:$P"
+$cleanAdvertiseUrl = $AdvertiseUrl.Trim().TrimEnd("/")
+$localBaseUrl = if ($cleanAdvertiseUrl) { $cleanAdvertiseUrl } else { "http://$advertisedHost`:$P" }
 
 Write-Section "Starting MCP Server"
 if (-not $enableShell) {
@@ -273,6 +275,7 @@ $gatewayEnv = @(
     "set `"MCP_GATEWAY_PORT=$P`"",
     "set `"MCP_GATEWAY_HOST=$bindHost`"",
     "set `"MCP_ADVERTISE_HOST=$advertisedHost`"",
+    "set `"MCP_ADVERTISE_URL=$cleanAdvertiseUrl`"",
     "set `"MCP_TRUSTED_ROOTS=$trustedRootsValue`"",
     "set `"MCP_TRUSTED_ROOTS_FILE=$trustedRootsFileValue`"",
     "set `"MCP_DEFAULT_PROJECT_ID=$defaultProjectIdValue`"",
@@ -307,6 +310,9 @@ Write-Host "Shell profile: $shellProfileValue"
 Write-Host "Active repo root: $repoRoot"
 Write-Host "Bind host: $bindHost"
 Write-Host "Gateway port: $P"
+if ($cleanAdvertiseUrl) {
+    Write-Host "Advertise URL: $cleanAdvertiseUrl"
+}
 Write-Host "Local base URL: $localBaseUrl"
 Write-Host "MCP URL: $localBaseUrl/mcp"
 Write-Host ""

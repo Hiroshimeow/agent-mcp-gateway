@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--repo", default=None, help="Trusted repo root. Defaults to REPO_ROOT from .env, then current directory.")
     parser.add_argument("--ip", default=None, help="Bind IP/host. Defaults to MCP_GATEWAY_HOST, then 127.0.0.1.")
     parser.add_argument("--port", type=int, default=None, help="Bind port. Defaults to MCP_GATEWAY_PORT, then 8101.")
+    parser.add_argument("--advertise-url", default=None, help="Public HTTPS base URL to advertise in OAuth metadata, for reverse proxies or SSH tunnels.")
     parser.add_argument("--token", default=None, help="OAuth password and Bearer token. Defaults to env token/password or a generated token.")
     parser.add_argument("--no-install", action="store_true", help="Do not run npm install when node_modules is missing.")
     args = parser.parse_args()
@@ -54,7 +55,9 @@ def main() -> int:
     bind_host = args.ip or "127.0.0.1"
     port = args.port or 8101
     token = args.token or env.get("MCP_BEARER_TOKEN") or env.get("MCP_AUTH_PASSWORD") or secrets.token_urlsafe(24)
+    advertise_url = args.advertise_url or env.get("MCP_ADVERTISE_URL") or ""
     advertised_host = env.get("MCP_ADVERTISE_HOST") or ("127.0.0.1" if bind_host == "0.0.0.0" else bind_host)
+    advertised_base_url = advertise_url.rstrip("/") if advertise_url else f"http://{advertised_host}:{port}"
 
     if not args.no_install and not (ROOT / "node_modules").exists():
         run(["npm", "install", "--no-fund", "--no-audit"])
@@ -67,6 +70,7 @@ def main() -> int:
             "REPO_ROOT": str(repo_root),
             "MCP_GATEWAY_HOST": bind_host,
             "MCP_ADVERTISE_HOST": advertised_host,
+            "MCP_ADVERTISE_URL": advertise_url,
             "MCP_GATEWAY_PORT": str(port),
             "MCP_AUTH_PASSWORD": token,
             "MCP_BEARER_TOKEN": token,
@@ -76,7 +80,7 @@ def main() -> int:
         }
     )
 
-    print(f"MCP endpoint: http://{advertised_host}:{port}/mcp")
+    print(f"MCP endpoint: {advertised_base_url}/mcp")
     print(f"Bearer token: {token}")
     print(f"Trusted repo root: {repo_root}")
 
