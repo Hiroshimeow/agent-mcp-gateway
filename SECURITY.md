@@ -1,6 +1,6 @@
 # SECURITY
 
-This launcher exposes local MCP tools to a public tunnel behind OAuth, with an optional static Bearer token for clients that cannot complete OAuth.
+This launcher exposes local MCP tools on `127.0.0.1` behind OAuth, with an optional static Bearer token for clients that cannot complete OAuth.
 
 Use it only while actively developing.
 
@@ -11,7 +11,6 @@ Stop the stack when done.
 - Demo OAuth with a password gate is better than `No Auth`, but it is still not production-grade security.
 - Optional static Bearer auth (`MCP_BEARER_TOKEN`) gives non-OAuth clients access to the same tools as OAuth clients.
 - Static Bearer token auth is a shared secret. Anyone with the token can call `/mcp` until you rotate it.
-- Public `ngrok` means anyone with the URL can try to reach the MCP endpoint.
 - This project is for temporary development use, not production exposure.
 
 ## Safe REPO_ROOT Rules

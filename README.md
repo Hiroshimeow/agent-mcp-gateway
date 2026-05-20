@@ -1,19 +1,18 @@
 # Agent MCP Gateway
 
-A Windows-first MCP gateway for AI agents and ChatGPT Developer Mode. It exposes local development tools through a public HTTPS tunnel, wraps them behind OAuth/password authentication, and provides project-oriented file, shell, git, test, review, packaging, and safety-check tools.
+A Windows-first local MCP gateway for AI agents. It exposes local development tools on a chosen bind IP, defaults to `127.0.0.1:8101`, wraps them behind OAuth/password or Bearer-token authentication, and provides project-oriented file, shell, git, test, review, packaging, and safety-check tools.
 
 > Recommended GitHub repository name: `agent-mcp-gateway`
 
 ## What this project does
 
-This project starts a local MCP gateway on Windows, exposes it through Tailscale Funnel or ngrok, and lets an authenticated MCP client work inside explicitly trusted local directories.
+This project starts a local MCP gateway on Windows and lets an authenticated MCP client work inside explicitly trusted local directories.
 
 It is designed for short-lived development sessions where you want an AI coding assistant to inspect, edit, test, review, package, and optionally commit code in local repositories.
 
 ## Features
 
 - Windows-first startup scripts with `.bat` and PowerShell entrypoints.
-- Public HTTPS tunnel support through Tailscale Funnel, ngrok, or both.
 - OAuth login flow for ChatGPT Developer Mode.
 - Optional static Bearer token support for MCP clients that do not support OAuth.
 - Filesystem MCP access scoped to configured trusted roots.
@@ -51,7 +50,6 @@ local-agent-mcp-gateway
 
 ```text
 MCP client
-  -> HTTPS tunnel
   -> OAuth/password wrapper
   -> local MCP gateway
   -> filesystem, shell, git, tests, review, packaging tools
@@ -64,19 +62,10 @@ The local wrapper listens on:
 http://127.0.0.1:<MCP_GATEWAY_PORT>/mcp
 ```
 
-The public URL exposed to the MCP client is usually:
-
-```text
-https://<your-tunnel-domain>/mcp
-```
-
 ## Requirements
 
 - Windows 10 or Windows 11.
 - Node.js LTS with `npm` and `npx` available on `PATH`.
-- One tunnel provider:
-  - Tailscale with Funnel enabled, or
-  - ngrok.
 - Git, if you want the git tools to work.
 - A dedicated project directory to use as `REPO_ROOT`.
 
@@ -114,19 +103,27 @@ Start the live launcher:
 .\start-mcp-live.bat
 ```
 
-When prompted, choose a tunnel mode and enter the repository path that should become the active trusted root.
+When prompted, enter the repository path that should become the active trusted root. The default bind address is `127.0.0.1` and the default port is `8101`.
 
-Copy the printed MCP URL into your MCP client:
+You can also run the gateway directly with Python/uv:
+
+```powershell
+uv run main.py --repo E:\path\to\your\project --ip 127.0.0.1 --port 8101
+```
+
+To bind to a Tailscale IP or all interfaces, change `--ip`, for example `--ip 100.x.y.z` or `--ip 0.0.0.0`.
+
+Use the printed local MCP URL in your MCP client:
 
 ```text
-https://<your-tunnel-domain>/mcp
+http://127.0.0.1:<MCP_GATEWAY_PORT>/mcp
 ```
 
 For ChatGPT Developer Mode, configure the connector as:
 
 ```text
 Name: Local Dev MCP
-MCP Server URL: https://<your-tunnel-domain>/mcp
+MCP Server URL: http://127.0.0.1:<MCP_GATEWAY_PORT>/mcp
 Authentication: OAuth
 ```
 
@@ -141,20 +138,19 @@ Stop the live launcher:
 ## Environment variables
 
 ```dotenv
-REPO_ROOT=E:\path\to\your\project
+REPO_ROOT=.
 MCP_TRUSTED_ROOTS=
 MCP_TRUSTED_ROOTS_FILE=
 MCP_DEFAULT_PROJECT_ID=
 MCP_REQUIRE_PROJECT_ID=false
 MCP_ENABLE_PROJECT_PATH_INFERENCE=true
 MCP_EXPOSE_PROJECT_PATHS=false
-MCP_GATEWAY_PORT=8000
-MCP_TUNNEL_MODE=ngrok
-PUBLIC_BASE_URL=
+MCP_GATEWAY_HOST=127.0.0.1
+MCP_ADVERTISE_HOST=
+MCP_GATEWAY_PORT=8101
 ENABLE_FILESYSTEM=true
 ENABLE_SHELL=true
 SHELL_PROFILE=yolo
-NGROK_AUTHTOKEN=
 XAI_API_KEY=
 MCP_AUTH_PASSWORD=change-me-now
 MCP_BEARER_TOKEN=
@@ -169,9 +165,9 @@ Important variables:
 - `MCP_REQUIRE_PROJECT_ID`: set to `true` only when callers must pass explicit project ids to project-aware custom tools.
 - `MCP_ENABLE_PROJECT_PATH_INFERENCE`: defaults to `true`; allows absolute paths to infer project id by longest trusted-root prefix.
 - `MCP_EXPOSE_PROJECT_PATHS`: defaults to `false`; `custom_list_projects` hides full local paths unless this is set to `true`.
+- `MCP_GATEWAY_HOST`: bind IP/host. Use `127.0.0.1` for local-only, a Tailscale IP for tailnet access, or `0.0.0.0` to bind all interfaces.
+- `MCP_ADVERTISE_HOST`: optional host used in OAuth metadata and printed MCP URLs. If empty, it follows `MCP_GATEWAY_HOST`; for `0.0.0.0`, it defaults to `127.0.0.1`.
 - `MCP_GATEWAY_PORT`: local port for the OAuth MCP wrapper.
-- `MCP_TUNNEL_MODE`: `tailscale`, `ngrok`, or `both`.
-- `PUBLIC_BASE_URL`: explicit public base URL for server-only or preconfigured tunnel workflows.
 - `ENABLE_FILESYSTEM`: enables filesystem tools.
 - `ENABLE_SHELL`: enables shell execution tools.
 - `SHELL_PROFILE`: currently defaults to full-trust `yolo` behavior.
@@ -311,8 +307,6 @@ Runtime logs are written under `logs/`:
 - `gateway.log`: OAuth wrapper and MCP gateway logs.
 - `filesystem-<timestamp>.log`: filesystem MCP runtime logs.
 - `shell.log`: shell runtime log or placeholder.
-- `ngrok.log`: ngrok tunnel output.
-- `tailscale.log`: Tailscale Funnel output.
 - `live-pids.json`: process IDs for the live launcher.
 - `auth-state.json`: OAuth client/token state cache.
 
@@ -322,7 +316,7 @@ The `logs/` directory is local runtime state and should not be committed.
 
 This project is intended for local development, not production hosting.
 
-The public tunnel is protected by OAuth/password authentication and can optionally accept a static Bearer token. After authentication, enabled tools can read, write, delete, execute shell commands, run tests, and perform git operations inside trusted roots.
+The local MCP endpoint is protected by OAuth/password authentication and can optionally accept a static Bearer token. After authentication, enabled tools can read, write, delete, execute shell commands, run tests, and perform git operations inside trusted roots.
 
 Important warnings:
 

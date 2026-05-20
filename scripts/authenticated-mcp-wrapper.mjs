@@ -33,8 +33,10 @@ import {
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = process.env.REPO_ROOT;
-const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8000');
-const publicBaseUrl = process.env.PUBLIC_BASE_URL;
+const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
+const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() || '127.0.0.1';
+const advertisedHost = String(process.env.MCP_ADVERTISE_HOST || '').trim() || (gatewayHost === '0.0.0.0' ? '127.0.0.1' : gatewayHost);
+const localBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const shellProfile = String(process.env.SHELL_PROFILE || 'yolo').toLowerCase();
@@ -44,9 +46,10 @@ const authStatePath = process.env.AUTH_STATE_PATH;
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
 const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLowerCase() === 'true';
 const enableShell = String(process.env.ENABLE_SHELL || 'false').toLowerCase() === 'true';
+const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
+const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
-if (!publicBaseUrl) throw new Error('PUBLIC_BASE_URL is required');
 if (!authPassword) throw new Error('MCP_AUTH_PASSWORD is required');
 if (!enableFilesystem && !enableShell) {
   throw new Error('At least one upstream MCP server must be enabled');
@@ -58,6 +61,12 @@ function envFlag(value, defaultValue = false) {
   if (['1', 'true', 'yes', 'y', 'on'].includes(text)) return true;
   if (['0', 'false', 'no', 'n', 'off'].includes(text)) return false;
   return defaultValue;
+}
+
+function normalizeDurationMs(value, defaultValue) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
+  return parsed;
 }
 
 function readTrustedRootsFile(filePath, baseDir = packageRoot) {
@@ -103,6 +112,13 @@ const projectRegistry = buildTrustedRootsProjectRegistryFromRaw(trustedRootsRaw,
 const filesystemEntrypointPath = fileURLToPath(
   new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
 );
+
+function isSamePathOrInside(basePath, targetPath) {
+  const base = path.resolve(basePath);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(base, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 const shellExecuteSchema = {
   type: 'object',
@@ -209,8 +225,6 @@ async function listMergedTools() {
 async function routeToolCall(request) {
   const toolName = request.params.name;
   const upstreamToolName = toUpstreamToolName(toolName);
-  console.log(`[tool-call] ${toolName}`);
-
   if (isLocalCustomTool(upstreamToolName)) {
     return await callCustomTool(upstreamToolName, request.params.arguments || {}, {
       resolvedRepoRoots,
@@ -226,7 +240,7 @@ async function routeToolCall(request) {
       resolvedRepoRoots,
       defaultCwd: resolvedRepoRoot
     });
-    console.log(`[shell] ${validated.command}`);
+    console.log('[shell] accepted');
     const result = await executeDirectShell(validated.command, { cwd: validated.cwd || resolvedRepoRoot, timeout: 300000 });
     return {
       content: [
@@ -264,6 +278,26 @@ async function routeToolCall(request) {
   throw new Error(`Unknown or disabled tool: ${toolName}`);
 }
 
+async function routeObservedToolCall(request) {
+  const toolName = request.params?.name || 'unknown';
+  const startedAt = Date.now();
+  console.log(`[tool-call:start] ${toolName}`);
+
+  try {
+    const result = await routeToolCall(request);
+    const durationMs = Date.now() - startedAt;
+    console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
+    if (durationMs > slowToolThresholdMs) {
+      console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
+    }
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    console.log(`[tool-call:error] ${toolName} durationMs=${durationMs}`);
+    throw error;
+  }
+}
+
 function createProxyServer() {
   const server = new Server(
     { name: 'personal-mcp-launcher', version: '1.3.0' },
@@ -275,7 +309,7 @@ function createProxyServer() {
   });
 
   server.setRequestHandler(CallToolRequestSchema, async request => {
-    return await routeToolCall(request);
+    return await routeObservedToolCall(request);
   });
 
   return server;
@@ -360,8 +394,8 @@ app.use((req, _res, next) => {
   next();
 });
 
-const issuerUrl = new URL(publicBaseUrl);
-const resourceServerUrl = new URL('/mcp', `${publicBaseUrl.replace(/\/$/, '')}/`);
+const issuerUrl = new URL(localBaseUrl);
+const resourceServerUrl = new URL('/mcp', `${localBaseUrl}/`);
 app.use(
   mcpAuthRouter({
     provider,
@@ -386,10 +420,10 @@ function mcpAuthMiddleware(req, res, next) {
     return;
   }
 
-  if (req.headers.authorization && staticBearerToken) {
+  if (debugAuth && req.headers.authorization && staticBearerToken) {
     const providedToken = getProvidedAuthorizationToken(req.headers.authorization);
     console.log(
-      `[auth] static-bearer mismatch provided=${fingerprint(providedToken)} expected=${fingerprint(staticBearerToken)}`
+      `[auth] static-bearer not matched; trying OAuth provided=${fingerprint(providedToken)} expected=${fingerprint(staticBearerToken)}`
     );
   }
 
@@ -503,8 +537,8 @@ app.post('/mcp', mcpAuthMiddleware, mcpPostHandler);
 app.get('/mcp', mcpAuthMiddleware, mcpGetHandler);
 app.delete('/mcp', mcpAuthMiddleware, mcpDeleteHandler);
 
-const serverInstance = app.listen(gatewayPort, '127.0.0.1', () => {
-  console.log(`Authenticated MCP wrapper listening on http://127.0.0.1:${gatewayPort}/mcp`);
+const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
+  console.log(`Authenticated MCP wrapper listening on http://${gatewayHost}:${gatewayPort}/mcp`);
   console.log(`OAuth issuer: ${issuerUrl.href}`);
   console.log(`MCP resource URL: ${resourceServerUrl.href}`);
   console.log(`Trusted roots: ${resolvedRepoRoots.join('; ')}`);

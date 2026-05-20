@@ -2,7 +2,7 @@
 
 ## Current target
 
-Ship a Windows-first MCP launcher that ChatGPT Developer Mode can use through one HTTPS endpoint, with filesystem support on by default and shell support available behind auth.
+Ship a Windows-first local MCP launcher that binds to `127.0.0.1:<port>`, with filesystem support on by default and shell support available behind auth.
 
 ## Implemented
 
@@ -10,7 +10,7 @@ Ship a Windows-first MCP launcher that ChatGPT Developer Mode can use through on
 - Live PowerShell launcher and stop script
 - OAuth + local password gate
 - Filesystem MCP limited to configured trusted roots
-- ngrok tunnel with host-header rewrite
+- Local-only gateway on `127.0.0.1:<port>`
 - PID tracking in `logs/live-pids.json`
 - Direct PowerShell shell execution from wrapper
 - Merged tool surface exposed from one `/mcp` endpoint
@@ -39,5 +39,4 @@ Ship a Windows-first MCP launcher that ChatGPT Developer Mode can use through on
 - Persist OAuth client registration across restarts so ChatGPT app recreation is less likely
 - Add an explicit smoke-test script for MCP endpoint readiness
 - Improve shell policy around docker bind mounts if needed
-- Evaluate Cloudflare Tunnel or Tailscale as a more stable public endpoint than ngrok free
 - Add hard per-project filesystem/shell isolation later; current project ids are routing metadata over global trusted roots

@@ -1,8 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Path,
-    [string]$TunnelChoice = "1",
-    [int]$P = 8000,
+    [string]$Ip = "127.0.0.1",
+    [int]$P = 8101,
     [switch]$FollowLogs
 )
 
@@ -18,8 +18,6 @@ $pidFile = Join-Path $logsDir "live-pids.json"
 $gatewayLog = Join-Path $logsDir "gateway.log"
 $filesystemLog = Join-Path $logsDir "filesystem-$runId.log"
 $shellLog = Join-Path $logsDir "shell.log"
-$ngrokLog = Join-Path $logsDir "ngrok-$runId.log"
-$tailscaleLog = Join-Path $logsDir "tailscale-$runId.log"
 $authStateFile = Join-Path $logsDir "auth-state.json"
 $wrapperScript = Join-Path $projectRoot "scripts\authenticated-mcp-wrapper.mjs"
 $stopLiveScript = Join-Path $projectRoot "scripts\stop-mcp-live.ps1"
@@ -151,35 +149,6 @@ function Wait-ForPort {
     return $false
 }
 
-function Get-NgrokPublicUrl {
-    param([int]$TimeoutSeconds = 45)
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        try {
-            $response = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -TimeoutSec 5
-            $tunnel = $response.tunnels | Where-Object { $_.public_url -like "https://*" } | Select-Object -First 1
-            if ($tunnel) {
-                return $tunnel.public_url
-            }
-        } catch {
-        }
-        Start-Sleep -Seconds 1
-    } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for ngrok public URL."
-}
-
-function Get-TailscalePublicUrl {
-    $status = tailscale status --json | ConvertFrom-Json
-    if (-not $status.Self -or -not $status.Self.DNSName) {
-        throw "Tailscale DNSName not found. Check that Tailscale is running and MagicDNS is enabled."
-    }
-    $dnsName = ([string]$status.Self.DNSName).TrimEnd(".")
-    if (-not $dnsName) {
-        throw "Tailscale DNSName is empty."
-    }
-    return "https://$dnsName"
-}
-
 function New-ProcessRecord {
     param([string]$Name, [int]$ProcessId, [string]$LogPath, [int]$LaunchPid = 0, [int]$Port = 0)
     return [pscustomobject]@{
@@ -209,20 +178,10 @@ if ($repoRoot -match '^[A-Za-z]:\\$') {
 if ($P -lt 1 -or $P -gt 65535) {
     throw "Port must be between 1 and 65535: $P"
 }
-
-$choice = $TunnelChoice.Trim().ToLowerInvariant()
-$useTailscale = $false
-$useNgrok = $false
-if ($choice -in @("1", "tailscale", "funnel", "ts", "t")) {
-    $useTailscale = $true
-} elseif ($choice -in @("2", "ngrok", "grok", "n", "g")) {
-    $useNgrok = $true
-} elseif ($choice -in @("3", "both", "all")) {
-    $useTailscale = $true
-    $useNgrok = $true
-} else {
-    throw "Tunnel choice must be 1/tailscale, 2/ngrok, or 3/both: $TunnelChoice"
+if (-not $Ip.Trim()) {
+    throw "IP/host is required."
 }
+$bindHost = $Ip.Trim()
 
 $envValues = Load-DotEnv -Path $envPath
 
@@ -274,12 +233,6 @@ if ($authPassword -eq "change-me-now") {
 Write-Section "Prerequisites"
 $prereqs = & (Join-Path $projectRoot "scripts\check-prereqs.ps1") -Tunnel none
 $prereqs | Format-List | Out-String | Write-Host
-if ($useTailscale) {
-    & (Join-Path $projectRoot "scripts\check-prereqs.ps1") -Tunnel tailscale | Format-List | Out-String | Write-Host
-}
-if ($useNgrok) {
-    & (Join-Path $projectRoot "scripts\check-prereqs.ps1") -Tunnel ngrok | Format-List | Out-String | Write-Host
-}
 
 New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 if (Test-Path $pidFile) {
@@ -307,42 +260,8 @@ if (-not (Test-Path $wrapperScript)) {
 }
 
 $records = New-Object System.Collections.Generic.List[object]
-$publicUrls = @()
-$primaryPublicBaseUrl = $null
-
-if ($useTailscale) {
-    Write-Section "Starting Tailscale Funnel"
-    $tailscaleOutput = tailscale funnel --bg --yes $P 2>&1
-    $tailscaleOutput | Set-Content -Path $tailscaleLog -Encoding ASCII
-    if ($LASTEXITCODE -ne 0) {
-        throw "tailscale funnel failed. Check $tailscaleLog"
-    }
-    $tailscaleUrl = Get-TailscalePublicUrl
-    $publicUrls += [pscustomobject]@{ name = "tailscale"; url = $tailscaleUrl }
-    $primaryPublicBaseUrl = $tailscaleUrl
-    $records.Add((New-ProcessRecord -Name "tailscale-funnel" -ProcessId 0 -LaunchPid 0 -Port 443 -LogPath $tailscaleLog))
-}
-
-if ($useNgrok) {
-    Write-Section "Starting ngrok"
-    $ngrokAuthtoken = $envValues["NGROK_AUTHTOKEN"]
-    if ($ngrokAuthtoken) {
-        ngrok config add-authtoken $ngrokAuthtoken | Out-Null
-    }
-    $ngrokCommand = "ngrok http $P --host-header=localhost:$P 1>> `"$ngrokLog`" 2>&1"
-    $ngrokProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $ngrokCommand) -WorkingDirectory $projectRoot -PassThru -WindowStyle Hidden
-    $ngrokPid = Get-ListeningOwningProcessId -Port 4040
-    $records.Add((New-ProcessRecord -Name "ngrok" -ProcessId $ngrokPid -LaunchPid $ngrokProcess.Id -Port 4040 -LogPath $ngrokLog))
-    $ngrokUrl = Get-NgrokPublicUrl
-    $publicUrls += [pscustomobject]@{ name = "ngrok"; url = $ngrokUrl }
-    if (-not $primaryPublicBaseUrl) {
-        $primaryPublicBaseUrl = $ngrokUrl
-    }
-}
-
-if (-not $primaryPublicBaseUrl) {
-    throw "No tunnel URL was created."
-}
+$advertisedHost = if ($bindHost -eq "0.0.0.0") { "127.0.0.1" } else { $bindHost }
+$localBaseUrl = "http://$advertisedHost`:$P"
 
 Write-Section "Starting MCP Server"
 if (-not $enableShell) {
@@ -352,7 +271,8 @@ if (-not $enableShell) {
 $gatewayEnv = @(
     "set `"REPO_ROOT=$repoRoot`"",
     "set `"MCP_GATEWAY_PORT=$P`"",
-    "set `"PUBLIC_BASE_URL=$primaryPublicBaseUrl`"",
+    "set `"MCP_GATEWAY_HOST=$bindHost`"",
+    "set `"MCP_ADVERTISE_HOST=$advertisedHost`"",
     "set `"MCP_TRUSTED_ROOTS=$trustedRootsValue`"",
     "set `"MCP_TRUSTED_ROOTS_FILE=$trustedRootsFileValue`"",
     "set `"MCP_DEFAULT_PROJECT_ID=$defaultProjectIdValue`"",
@@ -371,7 +291,7 @@ $gatewayEnv = @(
 ) -join " && "
 $gatewayProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $gatewayEnv) -WorkingDirectory $projectRoot -PassThru -WindowStyle Hidden
 
-if (-not (Wait-ForPort -HostName "127.0.0.1" -Port $P -TimeoutSeconds 30)) {
+if (-not (Wait-ForPort -HostName $advertisedHost -Port $P -TimeoutSeconds 30)) {
     throw "Gateway did not become ready. Check $gatewayLog"
 }
 $gatewayPid = Get-ListeningOwningProcessId -Port $P
@@ -385,28 +305,19 @@ Write-Host "Filesystem tools: $enableFilesystem"
 Write-Host "Shell tools: $enableShell"
 Write-Host "Shell profile: $shellProfileValue"
 Write-Host "Active repo root: $repoRoot"
+Write-Host "Bind host: $bindHost"
 Write-Host "Gateway port: $P"
-Write-Host "OAuth issuer/public base URL: $primaryPublicBaseUrl"
-Write-Host "Final MCP URL: $primaryPublicBaseUrl/mcp"
-if ($publicUrls.Count -gt 1) {
-    Write-Host ""
-    Write-Host "Additional tunnel URLs:"
-    foreach ($entry in $publicUrls) {
-        if ($entry.url -ne $primaryPublicBaseUrl) {
-            Write-Host "  $($entry.name): $($entry.url)/mcp"
-        }
-    }
-}
+Write-Host "Local base URL: $localBaseUrl"
+Write-Host "MCP URL: $localBaseUrl/mcp"
 Write-Host ""
-Write-Host "ChatGPT Developer Mode"
+Write-Host "Local MCP client"
 Write-Host "Name: Local Dev MCP"
-Write-Host "MCP Server URL: $primaryPublicBaseUrl/mcp"
-Write-Host "Authentication: OAuth"
-Write-Host "OAuth login password: read MCP_AUTH_PASSWORD from .env"
+Write-Host "MCP Server URL: $localBaseUrl/mcp"
+Write-Host "Authentication: OAuth or Bearer token"
 if ($bearerToken) {
     Write-Host ""
     Write-Host "Hermes / OpenClaw"
-    Write-Host "MCP Server URL: $primaryPublicBaseUrl/mcp"
+    Write-Host "MCP Server URL: $localBaseUrl/mcp"
     Write-Host "API key / Bearer token: read MCP_BEARER_TOKEN from .env"
 }
 Write-Host ""
@@ -414,23 +325,11 @@ Write-Host "Logs:"
 Write-Host "  Gateway: $gatewayLog"
 Write-Host "  Filesystem: $filesystemLog"
 Write-Host "  Shell: $shellLog"
-if ($useTailscale) {
-    Write-Host "  Tailscale: $tailscaleLog"
-}
-if ($useNgrok) {
-    Write-Host "  Ngrok: $ngrokLog"
-}
 
 if ($FollowLogs) {
     Write-Section "Live Logs"
     Write-Host "Streaming logs. Press Ctrl+C to stop watching. Live launcher keeps running until you call stop-mcp-live.ps1."
     $logPaths = @($gatewayLog, $filesystemLog, $shellLog)
-    if ($useTailscale) {
-        $logPaths += $tailscaleLog
-    }
-    if ($useNgrok) {
-        $logPaths += $ngrokLog
-    }
     $existingPaths = @($logPaths | Where-Object { Test-Path $_ })
     if ($existingPaths.Count -eq 0) {
         Write-Host "No log files found to follow."

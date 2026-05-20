@@ -1,12 +1,14 @@
 {
   "name": "agent-mcp-gateway",
   "version": "1.0.0",
-  "description": "Windows-first MCP gateway for AI agents and ChatGPT Developer Mode, exposed through ngrok or Tailscale Funnel.",
+  "description": "Windows-first local MCP gateway for AI agents.",
   "license": "MIT",
   "scripts": {
+    "start": "node scripts/authenticated-mcp-wrapper.mjs",
     "start:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-live.ps1",
     "stop:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-live.ps1",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "smoke:mcp": "node scripts/smoke-mcp-endpoint.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
