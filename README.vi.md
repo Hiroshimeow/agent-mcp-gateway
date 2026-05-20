@@ -4,7 +4,30 @@ README tiếng Việt tóm tắt cho cấu hình xác thực, trusted roots và 
 
 ## Chạy hiện tại
 
-Entrypoint chính là:
+Entrypoint nhanh nhất là:
+
+```powershell
+uv run main.py
+```
+
+Nếu không truyền tham số, lệnh này dùng:
+
+```text
+repo root: thư mục hiện tại
+bind IP:   127.0.0.1
+port:      8101
+MCP URL:   http://127.0.0.1:8101/mcp
+```
+
+Muốn chọn repo/IP/port:
+
+```powershell
+uv run main.py --repo E:\path\to\project --ip 127.0.0.1 --port 8101
+```
+
+`--ip` có thể là IP Tailscale, `0.0.0.0`, hoặc `127.0.0.1`.
+
+Entrypoint có prompt trên Windows là:
 
 ```powershell
 .\start-mcp-live.bat
@@ -17,6 +40,8 @@ Dừng phiên đang chạy bằng:
 ```
 
 Flow `start-mcp-stack.bat` và các script `start/stop-mcp-stack.ps1` đã bị loại bỏ. `start-mcp-live.bat` là launcher được khuyến nghị.
+
+`.env` dùng cho token, trusted roots và cấu hình nâng cao. Riêng `uv run main.py` không lấy `REPO_ROOT`, `MCP_GATEWAY_HOST`, `MCP_GATEWAY_PORT` từ `.env` làm default; muốn đổi thì truyền `--repo`, `--ip`, `--port`.
 
 ## Xác thực
 

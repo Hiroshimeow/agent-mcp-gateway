@@ -84,20 +84,30 @@ Install dependencies:
 npm install
 ```
 
-Create your local environment file:
+Fastest local run:
 
 ```powershell
-Copy-Item .env.example .env
+uv run main.py
 ```
 
-Edit `.env` and set at least:
+With no arguments, `main.py` uses:
 
-```dotenv
-REPO_ROOT=E:\path\to\your\project
-MCP_AUTH_PASSWORD=replace-with-a-long-random-password
+```text
+repo root: current directory
+bind IP:   127.0.0.1
+port:      8101
+MCP URL:   http://127.0.0.1:8101/mcp
 ```
 
-Start the live launcher:
+To choose another repo, bind address, or port:
+
+```powershell
+uv run main.py --repo E:\path\to\your\project --ip 127.0.0.1 --port 8101
+```
+
+To bind to a Tailscale IP or all interfaces, change `--ip`, for example `--ip 100.x.y.z` or `--ip 0.0.0.0`.
+
+Windows prompt-based launcher:
 
 ```powershell
 .\start-mcp-live.bat
@@ -105,13 +115,13 @@ Start the live launcher:
 
 When prompted, enter the repository path that should become the active trusted root. The default bind address is `127.0.0.1` and the default port is `8101`.
 
-You can also run the gateway directly with Python/uv:
+Optional `.env` setup:
 
 ```powershell
-uv run main.py --repo E:\path\to\your\project --ip 127.0.0.1 --port 8101
+Copy-Item .env.example .env
 ```
 
-To bind to a Tailscale IP or all interfaces, change `--ip`, for example `--ip 100.x.y.z` or `--ip 0.0.0.0`.
+Use `.env` for auth tokens, trusted roots, shell/filesystem settings, and direct `npm start`/Node wrapper runs. `uv run main.py` intentionally keeps its no-argument defaults as current directory, `127.0.0.1`, and `8101`; pass `--repo`, `--ip`, and `--port` to change those.
 
 Use the printed local MCP URL in your MCP client:
 
@@ -127,7 +137,7 @@ MCP Server URL: http://127.0.0.1:<MCP_GATEWAY_PORT>/mcp
 Authentication: OAuth
 ```
 
-When the browser login page opens, enter the value of `MCP_AUTH_PASSWORD` from `.env`.
+When the browser login page opens, enter `MCP_AUTH_PASSWORD`. If you run `uv run main.py` without a configured password or token, it generates and prints a temporary token for that session.
 
 Stop the live launcher:
 
@@ -152,22 +162,23 @@ ENABLE_FILESYSTEM=true
 ENABLE_SHELL=true
 SHELL_PROFILE=yolo
 XAI_API_KEY=
+# Placeholder only. Set a real value for .bat or direct Node wrapper runs.
 MCP_AUTH_PASSWORD=change-me-now
 MCP_BEARER_TOKEN=
 ```
 
 Important variables:
 
-- `REPO_ROOT`: fallback trusted root and default working directory when no trusted-roots config is provided.
+- `REPO_ROOT`: fallback trusted root for direct `npm start` or `node scripts/authenticated-mcp-wrapper.mjs` runs. `uv run main.py` defaults to the current directory unless `--repo` is passed.
 - `MCP_TRUSTED_ROOTS`: optional newline- or semicolon-separated trusted roots using the same formats as `config/trusted-roots.txt`.
 - `MCP_TRUSTED_ROOTS_FILE`: optional file containing one trusted root per line. Keep the real file local and commit only `config/trusted-roots.example.txt`.
 - `MCP_DEFAULT_PROJECT_ID`: optional default project id for multi-project workflows.
 - `MCP_REQUIRE_PROJECT_ID`: set to `true` only when callers must pass explicit project ids to project-aware custom tools.
 - `MCP_ENABLE_PROJECT_PATH_INFERENCE`: defaults to `true`; allows absolute paths to infer project id by longest trusted-root prefix.
 - `MCP_EXPOSE_PROJECT_PATHS`: defaults to `false`; `custom_list_projects` hides full local paths unless this is set to `true`.
-- `MCP_GATEWAY_HOST`: bind IP/host. Use `127.0.0.1` for local-only, a Tailscale IP for tailnet access, or `0.0.0.0` to bind all interfaces.
-- `MCP_ADVERTISE_HOST`: optional host used in OAuth metadata and printed MCP URLs. If empty, it follows `MCP_GATEWAY_HOST`; for `0.0.0.0`, it defaults to `127.0.0.1`.
-- `MCP_GATEWAY_PORT`: local port for the OAuth MCP wrapper.
+- `MCP_GATEWAY_HOST`: bind IP/host for direct Node wrapper runs. Use `127.0.0.1` for local-only, a Tailscale IP for tailnet access, or `0.0.0.0` to bind all interfaces.
+- `MCP_ADVERTISE_HOST`: optional host used in OAuth metadata and printed MCP URLs for direct Node wrapper runs. If empty, it follows `MCP_GATEWAY_HOST`; for `0.0.0.0`, it defaults to `127.0.0.1`.
+- `MCP_GATEWAY_PORT`: local port for direct Node wrapper runs.
 - `ENABLE_FILESYSTEM`: enables filesystem tools.
 - `ENABLE_SHELL`: enables shell execution tools.
 - `SHELL_PROFILE`: currently defaults to full-trust `yolo` behavior.
