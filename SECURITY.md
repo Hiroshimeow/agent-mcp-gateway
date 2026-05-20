@@ -55,6 +55,7 @@ Before enabling shell or write-heavy workflows:
 
 - Do not hardcode secrets in `.bat`, `.ps1`, `.mjs`, or JSON config files.
 - Do not print secrets to console.
+- `uv run main.py` must not print tokens loaded from `.env`, environment variables, or `--token`; it may print only a generated temporary token when no token is configured.
 - Do not commit `.env`.
 - Do not commit `config/trusted-roots.txt`; keep real trusted roots local and commit only `config/trusted-roots.example.txt`.
 - Keep `XAI_API_KEY` only in environment variables or `.env`.

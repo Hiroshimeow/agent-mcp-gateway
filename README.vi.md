@@ -51,6 +51,12 @@ Flow `start-mcp-stack.bat` và các script `start/stop-mcp-stack.ps1` đã bị 
 
 `.env` dùng cho token, trusted roots và cấu hình nâng cao. Riêng `uv run main.py` không lấy `REPO_ROOT`, `MCP_GATEWAY_HOST`, `MCP_GATEWAY_PORT` từ `.env` làm default; muốn đổi thì truyền `--repo`, `--ip`, `--port`.
 
+Quy tắc log token:
+
+- Token lấy từ `.env`, biến môi trường, hoặc `--token` sẽ không bị in ra console.
+- Nếu chưa cấu hình token, `uv run main.py` sẽ sinh token tạm thời cho phiên hiện tại và in ra một lần để bạn đăng nhập.
+- Token tạm thời vẫn là secret; tắt server để hủy giá trị runtime này.
+
 ## Xác thực
 
 Launcher luôn giữ OAuth làm cơ chế xác thực chính cho ChatGPT Developer Mode. OAuth vẫn giữ nguyên cho ChatGPT.

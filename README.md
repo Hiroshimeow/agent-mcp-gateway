@@ -145,7 +145,7 @@ MCP Server URL: http://127.0.0.1:<MCP_GATEWAY_PORT>/mcp
 Authentication: OAuth
 ```
 
-When the browser login page opens, enter `MCP_AUTH_PASSWORD`. If you run `uv run main.py` without a configured password or token, it generates and prints a temporary token for that session.
+When the browser login page opens, enter `MCP_AUTH_PASSWORD`. `uv run main.py` never prints tokens loaded from `.env`, environment variables, or `--token`. If no token is configured, it generates and prints a temporary token for that session only.
 
 Stop the live launcher:
 
@@ -195,6 +195,12 @@ Important variables:
 - `SHELL_PROFILE`: currently defaults to full-trust `yolo` behavior.
 - `MCP_AUTH_PASSWORD`: password used by the OAuth login page.
 - `MCP_BEARER_TOKEN`: optional static Bearer token for clients that cannot complete OAuth.
+
+Token logging rules:
+
+- Tokens loaded from `.env`, environment variables, or `--token` are never printed.
+- If no token is configured, `uv run main.py` generates a temporary session token and prints it once so you can complete login.
+- Treat generated temporary tokens as secrets; close the server to invalidate the runtime-only value.
 
 ## Tool set
 

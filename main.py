@@ -54,7 +54,20 @@ def main() -> int:
 
     bind_host = args.ip or "127.0.0.1"
     port = args.port or 8101
-    token = args.token or env.get("MCP_BEARER_TOKEN") or env.get("MCP_AUTH_PASSWORD") or secrets.token_urlsafe(24)
+    token_source = "generated"
+    token = args.token
+    if token:
+        token_source = "command line"
+    else:
+        token = env.get("MCP_BEARER_TOKEN")
+        if token:
+            token_source = "MCP_BEARER_TOKEN"
+        else:
+            token = env.get("MCP_AUTH_PASSWORD")
+            if token:
+                token_source = "MCP_AUTH_PASSWORD"
+            else:
+                token = secrets.token_urlsafe(24)
     advertise_url = args.advertise_url or env.get("MCP_ADVERTISE_URL") or ""
     advertised_host = env.get("MCP_ADVERTISE_HOST") or ("127.0.0.1" if bind_host == "0.0.0.0" else bind_host)
     advertised_base_url = advertise_url.rstrip("/") if advertise_url else f"http://{advertised_host}:{port}"
@@ -80,9 +93,12 @@ def main() -> int:
         }
     )
 
-    print(f"MCP endpoint: {advertised_base_url}/mcp")
-    print(f"Bearer token: {token}")
-    print(f"Trusted repo root: {repo_root}")
+    print(f"MCP endpoint: {advertised_base_url}/mcp", flush=True)
+    if token_source == "generated":
+        print(f"Generated temporary bearer token: {token}", flush=True)
+    else:
+        print(f"Bearer token: configured via {token_source} (not printed)", flush=True)
+    print(f"Trusted repo root: {repo_root}", flush=True)
 
     subprocess.run(["node", str(ROOT / "scripts" / "authenticated-mcp-wrapper.mjs")], cwd=ROOT, env=env)
     return 0
