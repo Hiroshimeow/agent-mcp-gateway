@@ -18,6 +18,13 @@ test('.env.example does not enable a local trusted roots file by default', () =>
   assert.match(envExample, /^# MCP_TRUSTED_ROOTS_FILE=config\\trusted-roots\.txt$/m);
 });
 
+test('batch live launcher does not prompt for public advertise URL', () => {
+  const batch = read('start-mcp-live.bat');
+  assert.doesNotMatch(batch, /Advertise URL/i);
+  assert.doesNotMatch(batch, /MCP_ADVERTISE_URL_INPUT/);
+  assert.doesNotMatch(batch, /-AdvertiseUrl\s+\$env:MCP_ADVERTISE_URL_INPUT/);
+});
+
 test('trusted-roots.example.txt contains placeholders only', () => {
   const example = read('config/trusted-roots.example.txt');
   assert.match(example, /One trusted root per line/);

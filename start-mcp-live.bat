@@ -3,7 +3,6 @@ setlocal
 set "REPO_ROOT_INPUT="
 set "MCP_IP_INPUT="
 set "MCP_PORT_INPUT="
-set "MCP_ADVERTISE_URL_INPUT="
 
 echo MCP local gateway
 
@@ -19,8 +18,6 @@ if "%MCP_IP_INPUT%"=="" set "MCP_IP_INPUT=127.0.0.1"
 set /p "MCP_PORT_INPUT=Port [8101]: "
 if "%MCP_PORT_INPUT%"=="" set "MCP_PORT_INPUT=8101"
 
-set /p "MCP_ADVERTISE_URL_INPUT=Advertise URL for OAuth metadata [blank for local]: "
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0scripts\start-mcp-live.ps1' -Path $env:REPO_ROOT_INPUT -Ip $env:MCP_IP_INPUT -P ([int]$env:MCP_PORT_INPUT) -AdvertiseUrl $env:MCP_ADVERTISE_URL_INPUT -FollowLogs"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0scripts\start-mcp-live.ps1' -Path $env:REPO_ROOT_INPUT -Ip $env:MCP_IP_INPUT -P ([int]$env:MCP_PORT_INPUT) -FollowLogs"
 if errorlevel 1 exit /b %errorlevel%
 pause

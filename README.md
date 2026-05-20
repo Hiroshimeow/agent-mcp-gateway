@@ -121,7 +121,7 @@ Windows prompt-based launcher:
 .\start-mcp-live.bat
 ```
 
-When prompted, enter the repository path that should become the active trusted root. The default bind address is `127.0.0.1` and the default port is `8101`.
+When prompted, enter the repository path that should become the active trusted root. The default bind address is `127.0.0.1` and the default port is `8101`. The batch launcher does not ask for a public URL; use the local MCP URL it prints unless you explicitly run `uv run main.py --advertise-url ...` or `scripts\start-mcp-live.ps1 -AdvertiseUrl ...` behind a public proxy.
 
 Optional `.env` setup:
 
