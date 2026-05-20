@@ -43,16 +43,16 @@ def main() -> int:
         print("Node.js LTS with npm is required.", file=sys.stderr)
         return 1
 
-    env = os.environ.copy()
-    env.update({key: value for key, value in load_dotenv(ROOT / ".env").items() if value})
+    env = {key: value for key, value in load_dotenv(ROOT / ".env").items() if value}
+    env.update(os.environ)
 
-    repo_root = Path(args.repo or env.get("REPO_ROOT") or os.getcwd()).expanduser().resolve()
+    repo_root = Path(args.repo or os.getcwd()).expanduser().resolve()
     if not repo_root.exists():
         print(f"Repo root does not exist: {repo_root}", file=sys.stderr)
         return 1
 
-    bind_host = args.ip or env.get("MCP_GATEWAY_HOST") or "127.0.0.1"
-    port = args.port or int(env.get("MCP_GATEWAY_PORT") or "8101")
+    bind_host = args.ip or "127.0.0.1"
+    port = args.port or 8101
     token = args.token or env.get("MCP_BEARER_TOKEN") or env.get("MCP_AUTH_PASSWORD") or secrets.token_urlsafe(24)
     advertised_host = env.get("MCP_ADVERTISE_HOST") or ("127.0.0.1" if bind_host == "0.0.0.0" else bind_host)
 

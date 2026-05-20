@@ -11,4 +11,3 @@ packages/
 config/trusted-roots.txt
 *.zip
 g8-sshr.bat
-local_mcp_8101.bat
