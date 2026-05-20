@@ -107,13 +107,13 @@ uv run main.py --repo E:\path\to\your\project --ip 127.0.0.1 --port 8101
 
 To bind to a Tailscale IP or all interfaces, change `--ip`, for example `--ip 100.x.y.z` or `--ip 0.0.0.0`.
 
-If the gateway is exposed through a reverse proxy, SSH tunnel, or HTTPS domain, keep binding local but advertise the public OAuth URL:
+When the gateway is reached through a public HTTPS reverse proxy or SSH tunnel, it derives OAuth metadata from the request `Host`/`X-Forwarded-*` headers. If your proxy does not preserve those headers, set the public base URL explicitly:
 
 ```powershell
 uv run main.py --ip 127.0.0.1 --port 8101 --advertise-url https://mcp.hcu-lab.me
 ```
 
-Without this, OAuth discovery may publish `http://127.0.0.1:8101/register`, and external clients such as ChatGPT cannot complete Dynamic Client Registration.
+This should make OAuth discovery publish `https://mcp.hcu-lab.me/register` instead of a local loopback URL, which external clients such as ChatGPT cannot use.
 
 Windows prompt-based launcher:
 
@@ -188,7 +188,7 @@ Important variables:
 - `MCP_EXPOSE_PROJECT_PATHS`: defaults to `false`; `custom_list_projects` hides full local paths unless this is set to `true`.
 - `MCP_GATEWAY_HOST`: bind IP/host for direct Node wrapper runs. Use `127.0.0.1` for local-only, a Tailscale IP for tailnet access, or `0.0.0.0` to bind all interfaces.
 - `MCP_ADVERTISE_HOST`: optional host used in OAuth metadata and printed MCP URLs for direct Node wrapper runs. If empty, it follows `MCP_GATEWAY_HOST`; for `0.0.0.0`, it defaults to `127.0.0.1`.
-- `MCP_ADVERTISE_URL`: optional full public base URL, such as `https://mcp.hcu-lab.me`, used in OAuth metadata when the local gateway is exposed through a reverse proxy or SSH tunnel.
+- `MCP_ADVERTISE_URL`: optional full public base URL, such as `https://mcp.hcu-lab.me`, used as an override when proxy headers do not expose the public origin.
 - `MCP_GATEWAY_PORT`: local port for direct Node wrapper runs.
 - `ENABLE_FILESYSTEM`: enables filesystem tools.
 - `ENABLE_SHELL`: enables shell execution tools.

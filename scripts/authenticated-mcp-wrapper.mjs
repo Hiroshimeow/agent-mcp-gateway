@@ -37,7 +37,7 @@ const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
 const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() || '127.0.0.1';
 const advertisedHost = String(process.env.MCP_ADVERTISE_HOST || '').trim() || (gatewayHost === '0.0.0.0' ? '127.0.0.1' : gatewayHost);
 const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
-const baseUrl = advertisedUrl ? advertisedUrl.replace(/\/+$/, '') : `http://${advertisedHost}:${gatewayPort}`;
+const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const shellProfile = String(process.env.SHELL_PROFILE || 'yolo').toLowerCase();
@@ -395,23 +395,84 @@ app.use((req, _res, next) => {
   next();
 });
 
-const issuerUrl = new URL(baseUrl);
-const resourceServerUrl = new URL('/mcp', `${baseUrl}/`);
-app.use(
-  mcpAuthRouter({
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function requestBaseUrl(req) {
+  const explicitBaseUrl = normalizeBaseUrl(advertisedUrl);
+  if (explicitBaseUrl) {
+    return explicitBaseUrl;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = forwardedHost || req.headers.host;
+  if (!host) {
+    return fallbackBaseUrl;
+  }
+
+  let hostname = String(host).toLowerCase();
+  try {
+    hostname = new URL(`http://${host}`).hostname.toLowerCase();
+  } catch {
+    hostname = hostname.split(':')[0];
+  }
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+  const proto = forwardedProto || (isLocalHost ? req.protocol || (req.secure ? 'https' : 'http') : 'https');
+  return normalizeBaseUrl(`${proto}://${host}`);
+}
+
+function buildAuthUrls(baseUrl) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || fallbackBaseUrl;
+  const issuerUrl = new URL(normalizedBaseUrl);
+  const resourceServerUrl = new URL('/mcp', `${normalizedBaseUrl}/`);
+  return { issuerUrl, resourceServerUrl };
+}
+
+const authRouters = new Map();
+
+function getAuthRouterForBaseUrl(baseUrl) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || fallbackBaseUrl;
+  const cached = authRouters.get(normalizedBaseUrl);
+  if (cached) {
+    return cached;
+  }
+
+  const { issuerUrl, resourceServerUrl } = buildAuthUrls(normalizedBaseUrl);
+  const router = mcpAuthRouter({
     provider,
     issuerUrl,
     resourceServerUrl,
     scopesSupported: ['mcp:tools'],
     resourceName: 'Local Dev MCP'
-  })
-);
+  });
+  authRouters.set(normalizedBaseUrl, router);
+  return router;
+}
 
-const oauthAuthMiddleware = requireBearerAuth({
-  verifier: provider,
-  requiredScopes: [],
-  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl)
+app.use((req, res, next) => {
+  getAuthRouterForBaseUrl(requestBaseUrl(req))(req, res, next);
 });
+
+const oauthAuthMiddlewares = new Map();
+
+function getOAuthAuthMiddlewareForBaseUrl(baseUrl) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || fallbackBaseUrl;
+  const cached = oauthAuthMiddlewares.get(normalizedBaseUrl);
+  if (cached) {
+    return cached;
+  }
+
+  const { resourceServerUrl } = buildAuthUrls(normalizedBaseUrl);
+  const middleware = requireBearerAuth({
+    verifier: provider,
+    requiredScopes: [],
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl)
+  });
+  oauthAuthMiddlewares.set(normalizedBaseUrl, middleware);
+  return middleware;
+}
 
 function mcpAuthMiddleware(req, res, next) {
   if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) {
@@ -428,7 +489,7 @@ function mcpAuthMiddleware(req, res, next) {
     );
   }
 
-  oauthAuthMiddleware(req, res, next);
+  getOAuthAuthMiddlewareForBaseUrl(requestBaseUrl(req))(req, res, next);
 }
 
 const transports = {};
@@ -539,6 +600,7 @@ app.get('/mcp', mcpAuthMiddleware, mcpGetHandler);
 app.delete('/mcp', mcpAuthMiddleware, mcpDeleteHandler);
 
 const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
+  const { issuerUrl, resourceServerUrl } = buildAuthUrls(normalizeBaseUrl(advertisedUrl) || fallbackBaseUrl);
   console.log(`Authenticated MCP wrapper listening on http://${gatewayHost}:${gatewayPort}/mcp`);
   console.log(`OAuth issuer: ${issuerUrl.href}`);
   console.log(`MCP resource URL: ${resourceServerUrl.href}`);

@@ -27,13 +27,13 @@ uv run main.py --repo E:\path\to\project --ip 127.0.0.1 --port 8101
 
 `--ip` có thể là IP Tailscale, `0.0.0.0`, hoặc `127.0.0.1`.
 
-Nếu expose qua domain HTTPS/reverse proxy/SSH tunnel, vẫn bind local nhưng phải advertise URL public cho OAuth metadata:
+Khi expose qua domain HTTPS/reverse proxy/SSH tunnel, gateway tự derive OAuth metadata từ `Host`/`X-Forwarded-*` headers. Nếu proxy không giữ các header này, set public base URL thủ công:
 
 ```powershell
 uv run main.py --ip 127.0.0.1 --port 8101 --advertise-url https://mcp.hcu-lab.me
 ```
 
-Nếu không set, metadata có thể trả về `http://127.0.0.1:8101/register`, khiến ChatGPT không hoàn tất Dynamic Client Registration.
+Mục tiêu là metadata trả về `https://mcp.hcu-lab.me/register`, không phải loopback local mà ChatGPT không gọi được.
 
 Entrypoint có prompt trên Windows là:
 
