@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -9,7 +9,12 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
-import { CallToolRequestSchema, isInitializeRequest, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  isInitializeRequest,
+  ListRootsRequestSchema,
+  ListToolsRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
 import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
@@ -148,8 +153,8 @@ function appendStderrToLog(transport, logPath) {
   transport.stderr.pipe(stderrLog);
 }
 
-function createClient(name, version, transport) {
-  return new Client({ name, version }, { capabilities: {} });
+function createClient(name, version, transport, capabilities = {}) {
+  return new Client({ name, version }, { capabilities });
 }
 
 function createFilesystemTransport() {
@@ -167,9 +172,18 @@ const filesystemTransport = enableFilesystem ? createFilesystemTransport() : nul
 const shellTransport = null;
 
 const filesystemClient = filesystemTransport
-  ? createClient('personal-mcp-launcher-filesystem', '1.3.0', filesystemTransport)
+  ? createClient('personal-mcp-launcher-filesystem', '1.3.0', filesystemTransport, { roots: {} })
   : null;
 const shellClient = null;
+
+if (filesystemClient) {
+  filesystemClient.setRequestHandler(ListRootsRequestSchema, async () => ({
+    roots: resolvedRepoRoots.map(root => ({
+      uri: pathToFileURL(root).href,
+      name: path.basename(root) || root
+    }))
+  }));
+}
 
 if (filesystemClient && filesystemTransport) {
   await filesystemClient.connect(filesystemTransport);
@@ -444,6 +458,26 @@ function getAuthRouterForBaseUrl(baseUrl) {
     provider,
     issuerUrl,
     resourceServerUrl,
+    authorizationOptions: {
+      rateLimit: {
+        validate: { creationStack: false }
+      }
+    },
+    tokenOptions: {
+      rateLimit: {
+        validate: { creationStack: false }
+      }
+    },
+    clientRegistrationOptions: {
+      rateLimit: {
+        validate: { creationStack: false }
+      }
+    },
+    revocationOptions: {
+      rateLimit: {
+        validate: { creationStack: false }
+      }
+    },
     scopesSupported: ['mcp:tools'],
     resourceName: 'Local Dev MCP'
   });
