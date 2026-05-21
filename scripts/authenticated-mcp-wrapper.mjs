@@ -16,6 +16,7 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
+import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
   buildTrustedRootsMetadata,
@@ -209,16 +210,10 @@ async function listMergedTools() {
   if (enableShell) {
     tools.push({
       name: 'custom_shell_execute',
-      description:
-        `${repoRootNotice}\n\nExecute a shell command on the local Windows machine after authentication. Use working_directory to choose a trusted root. Full yolo mode: launcher does not add shell blocklists, approval prompts, or executable whitelists.`,
+      description: buildShellExecuteDescription(repoRootNotice),
       inputSchema: shellExecuteSchema,
       _meta: repoRootMetadata,
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: false,
-        destructiveHint: false,
-        openWorldHint: false
-      }
+      annotations: buildShellExecuteAnnotations()
     });
     tools.push({
       name: 'custom_get_platform_info',

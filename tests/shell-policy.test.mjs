@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { validateShellCommand } from '../scripts/shell-policy.mjs';
-import { getDirectPlatformInfo } from '../scripts/direct-shell.mjs';
+import { getDirectPlatformInfo, getDirectShell } from '../scripts/direct-shell.mjs';
+import { buildShellExecuteAnnotations, buildShellExecuteDescription } from '../scripts/shell-tool-descriptor.mjs';
 import {
   buildRepoRootMetadata,
   buildRepoRootNotice,
@@ -27,12 +28,78 @@ test('validateShellCommand rejects empty command', () => {
   });
 });
 
-test('direct shell platform info reports wrapper execution mode', () => {
-  const info = getDirectPlatformInfo({ repoRoot: 'E:\\python_project\\epubot' });
+test('direct shell keeps the existing PowerShell backend on Windows', () => {
+  const shell = getDirectShell('win32', { POWERSHELL_EXE: 'C:\\Tools\\pwsh.exe' });
+  const info = getDirectPlatformInfo({ repoRoot: 'E:\\python_project\\epubot', platform: 'win32', env: { POWERSHELL_EXE: 'C:\\Tools\\pwsh.exe' } });
 
+  assert.deepEqual(shell, {
+    executable: 'C:\\Tools\\pwsh.exe',
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command'],
+    executionMode: 'direct-wrapper-powershell'
+  });
+  assert.equal(info.shell, 'C:\\Tools\\pwsh.exe');
   assert.equal(info.executionMode, 'direct-wrapper-powershell');
   assert.equal(info.timeoutMs, 300000);
   assert.equal(info.repoRoot, 'E:\\python_project\\epubot');
+});
+
+test('direct shell selects a non-login POSIX shell on Linux', () => {
+  const shell = getDirectShell('linux', { POSIX_SHELL: '/bin/bash' });
+  const info = getDirectPlatformInfo({ repoRoot: '/home/ayumi/Workspace/git_project', platform: 'linux', env: { POSIX_SHELL: '/bin/bash' } });
+
+  assert.deepEqual(shell, {
+    executable: '/bin/bash',
+    args: ['-c'],
+    executionMode: 'direct-wrapper-posix-shell'
+  });
+  assert.equal(info.shell, '/bin/bash');
+  assert.equal(info.executionMode, 'direct-wrapper-posix-shell');
+  assert.equal(info.repoRoot, '/home/ayumi/Workspace/git_project');
+});
+
+test('direct shell uses portable POSIX args for /bin/sh fallback', () => {
+  const shell = getDirectShell('linux', {});
+
+  assert.deepEqual(shell, {
+    executable: '/bin/sh',
+    args: ['-c'],
+    executionMode: 'direct-wrapper-posix-shell'
+  });
+});
+
+test('direct shell selects a non-login POSIX shell on macOS', () => {
+  const shell = getDirectShell('darwin', { SHELL: '/bin/zsh' });
+
+  assert.deepEqual(shell, {
+    executable: '/bin/zsh',
+    args: ['-c'],
+    executionMode: 'direct-wrapper-posix-shell'
+  });
+});
+
+test('direct shell trims whitespace-only shell overrides before fallback', () => {
+  assert.equal(getDirectShell('win32', { POWERSHELL_EXE: '   ' }).executable, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.equal(getDirectShell('linux', { POSIX_SHELL: '   ', SHELL: ' /bin/bash ' }).executable, '/bin/bash');
+  assert.equal(getDirectShell('linux', { POSIX_SHELL: '   ', SHELL: '   ' }).executable, '/bin/sh');
+});
+
+test('shell execute descriptor is cross-platform, destructive, and explicit about command syntax', () => {
+  const description = buildShellExecuteDescription('trusted_roots:\n- /tmp/project');
+  const annotations = buildShellExecuteAnnotations();
+
+  assert.match(description, /trusted_roots:/);
+  assert.match(description, /local machine/);
+  assert.match(description, /Windows.*PowerShell/);
+  assert.match(description, /Linux\/macOS.*POSIX shell/);
+  assert.match(description, /executed as-is/);
+  assert.match(description, /does not translate PowerShell syntax to POSIX syntax/);
+  assert.doesNotMatch(description, /local Windows machine/);
+  assert.deepEqual(annotations, {
+    readOnlyHint: false,
+    idempotentHint: false,
+    destructiveHint: true,
+    openWorldHint: false
+  });
 });
 
 test('normalizeToolForAutopilot strips destructive approval hints from filesystem tools', () => {

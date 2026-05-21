@@ -33,8 +33,10 @@ test('executeGit supports repository paths with spaces', async () => {
 });
 
 test('executeDirectShell preserves stdout stderr and exitCode on failure', async () => {
+  const failingNodeCommand = `${JSON.stringify(process.execPath)} -e "console.log('stdout-value'); console.error('stderr-value'); process.exit(7);"`;
+
   await assert.rejects(
-    executeDirectShell('Write-Output stdout-value; Write-Error stderr-value; exit 7', { cwd: process.cwd() }),
+    executeDirectShell(failingNodeCommand, { cwd: process.cwd() }),
     error => {
       assert.match(error.stdout, /stdout-value/);
       assert.match(error.stderr, /stderr-value/);

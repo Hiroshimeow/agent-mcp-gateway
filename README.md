@@ -13,6 +13,7 @@ It is designed for short-lived development sessions where you want an AI coding 
 ## Features
 
 - Windows-first startup scripts with `.bat` and PowerShell entrypoints.
+- Direct OS shell execution: PowerShell on Windows and a POSIX shell on Linux/macOS. Command strings run as-is; the gateway does not translate command syntax between PowerShell and POSIX.
 - OAuth login flow for ChatGPT Developer Mode.
 - Optional static Bearer token support for MCP clients that do not support OAuth.
 - Filesystem MCP access scoped to configured trusted roots.

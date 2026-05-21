@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { executeDirectShell } from '../scripts/direct-shell.mjs';
 
 import { callCustomTool } from '../scripts/custom-tools/index.mjs';
 
@@ -13,15 +13,7 @@ function parse(result) {
 
 async function shell(command, cwdOrOptions) {
   const cwd = typeof cwdOrOptions === 'string' ? cwdOrOptions : cwdOrOptions?.cwd;
-  return await new Promise((resolve, reject) => {
-    execFile('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd, windowsHide: true }, (error, stdout, stderr) => {
-      if (error) {
-        error.stdout = stdout;
-        error.stderr = stderr;
-        reject(error);
-      } else resolve({ stdout, stderr });
-    });
-  });
+  return await executeDirectShell(command, { cwd });
 }
 
 async function fixture() {
