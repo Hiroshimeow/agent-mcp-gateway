@@ -17,12 +17,24 @@ export function normalizeCapabilityName(name) {
   return normalized || 'unnamed';
 }
 
+function stripDuplicatePrefix(prefix, capabilityName) {
+  const normalizedPrefix = normalizeCapabilityName(validateUpstreamId(prefix, 'capability prefix'));
+  const normalizedName = normalizeCapabilityName(capabilityName);
+  const marker = `${normalizedPrefix}_`;
+  if (normalizedName.startsWith(marker) && normalizedName.length > marker.length) {
+    return normalizedName.slice(marker.length);
+  }
+  return normalizedName;
+}
+
 export function toExternalToolName(serverPrefix, upstreamToolName) {
-  return `custom_${validateUpstreamId(serverPrefix, 'tool prefix')}_${normalizeCapabilityName(upstreamToolName)}`;
+  const prefix = validateUpstreamId(serverPrefix, 'tool prefix');
+  return `${prefix}_${stripDuplicatePrefix(prefix, upstreamToolName)}`;
 }
 
 export function toExternalPromptName(serverPrefix, upstreamPromptName) {
-  return `external_${validateUpstreamId(serverPrefix, 'prompt prefix')}_${normalizeCapabilityName(upstreamPromptName)}`;
+  const prefix = validateUpstreamId(serverPrefix, 'prompt prefix');
+  return `${prefix}_${stripDuplicatePrefix(prefix, upstreamPromptName)}`;
 }
 
 export function assertNoNameCollision(name, seen, kind = 'capability') {

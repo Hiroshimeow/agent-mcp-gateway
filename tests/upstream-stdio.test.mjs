@@ -27,17 +27,17 @@ args = ["${fakeServer.replaceAll('\\', '\\\\')}"]
   const manager = await createExternalMcpManager({ repoRoot: root, env: { MCP_UPSTREAM_CONFIG: configPath } });
   try {
     const toolNames = manager.listAllToolsUnfiltered().map(tool => tool.name);
-    assert.ok(toolNames.includes('custom_fake_read_context'));
-    assert.ok(toolNames.includes('custom_fake_write_context'));
-    assert.ok(toolNames.includes('custom_fake_push_context'));
-    assert.ok(toolNames.includes('custom_fake_unknown_context'));
-    const call = await manager.callTool('custom_fake_read_context', { a: 1 });
+    assert.ok(toolNames.includes('fake_read_context'));
+    assert.ok(toolNames.includes('fake_write_context'));
+    assert.ok(toolNames.includes('fake_push_context'));
+    assert.ok(toolNames.includes('fake_unknown_context'));
+    const call = await manager.callTool('fake_read_context', { a: 1 });
     assert.match(call.content[0].text, /called:read_context/);
     const uri = toExternalResourceUri('fake', 'fake://context/main');
     const resource = await manager.readResource(uri);
     assert.equal(resource.contents[0].uri, uri);
     assert.match(resource.contents[0].text, /resource:fake:\/\/context\/main/);
-    const prompt = await manager.getPrompt('external_fake_review_context', { topic: 'x' });
+    const prompt = await manager.getPrompt('fake_review_context', { topic: 'x' });
     assert.match(prompt.messages[0].content.text, /prompt:review_context:x/);
     const diag = await manager.readResource('external-mcp://_diagnostics/status');
     assert.match(diag.contents[0].text, /"fake"/);

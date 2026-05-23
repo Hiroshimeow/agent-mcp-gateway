@@ -11,6 +11,8 @@ test('validates upstream ids and prefixes', () => {
 test('normalizes capability names', () => {
   assert.equal(normalizeCapabilityName('repo.summary'), 'repo_summary');
   assert.equal(normalizeCapabilityName('search/symbols'), 'search_symbols');
-  assert.equal(toExternalToolName('gitnexus', 'repo.summary'), 'custom_gitnexus_repo_summary');
-  assert.equal(toExternalPromptName('gitnexus', 'explain-history'), 'external_gitnexus_explain_history');
+  assert.equal(toExternalToolName('gitnexus', 'repo.summary'), 'gitnexus_repo_summary');
+  assert.equal(toExternalToolName('gitnexus', 'gitnexus.search'), 'gitnexus_search');
+  assert.equal(toExternalPromptName('gitnexus', 'explain-history'), 'gitnexus_explain_history');
+  assert.equal(toExternalPromptName('gitnexus', 'gitnexus.review'), 'gitnexus_review');
 });

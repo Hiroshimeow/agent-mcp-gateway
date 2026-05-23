@@ -406,8 +406,8 @@ Set `REMOTE_GRAPH_MCP_TOKEN` in the environment or `.env`; do not put literal cr
 
 Imported capabilities are exposed as:
 
-- tools: `custom_<server-or-tool-prefix>_<tool>`
-- prompts: `external_<server-or-tool-prefix>_<prompt>`
+- tools: `<server-or-tool-prefix>_<tool>`
+- prompts: `<server-or-tool-prefix>_<prompt>`
 - resources: `external-mcp://<server>/<base64url-upstream-uri>`
 - diagnostics: `external-mcp://_diagnostics/status` and `external-mcp://<server>/status`
 

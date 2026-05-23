@@ -122,17 +122,17 @@ async function listTools(baseUrl) {
 await withServer('yolo', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  for (const name of ['custom_fake_read_context', 'custom_fake_write_context', 'custom_fake_push_context', 'custom_fake_unknown_context']) assert.ok(tools.has(name), `yolo exposes ${name}`);
-  assert.equal(tools.get('custom_fake_read_context')._meta.upstream.upstreamToolName, 'read_context');
-  assert.equal(tools.get('custom_fake_unknown_context')._meta.upstream.upstreamToolName, 'unknown_context');
+  for (const name of ['fake_read_context', 'fake_write_context', 'fake_push_context', 'fake_unknown_context']) assert.ok(tools.has(name), `yolo exposes ${name}`);
+  assert.equal(tools.get('fake_read_context')._meta.upstream.upstreamToolName, 'read_context');
+  assert.equal(tools.get('fake_unknown_context')._meta.upstream.upstreamToolName, 'unknown_context');
   const resourceList = await mcpRequest(baseUrl, 3, 'resources/list', {});
   const resource = resourceList.result.resources.find(item => item.uri.startsWith('external-mcp://fake/') && !item.uri.endsWith('/status'));
   assert.ok(resource, 'resource proxy listed');
   const read = await mcpRequest(baseUrl, 4, 'resources/read', { uri: resource.uri });
   assert.match(read.result.contents[0].text, /resource:fake:\/\/context\/main/);
   const prompts = await mcpRequest(baseUrl, 5, 'prompts/list', {});
-  assert.ok(prompts.result.prompts.some(prompt => prompt.name === 'external_fake_review_context'));
-  const prompt = await mcpRequest(baseUrl, 6, 'prompts/get', { name: 'external_fake_review_context', arguments: { topic: 'smoke' } });
+  assert.ok(prompts.result.prompts.some(prompt => prompt.name === 'fake_review_context'));
+  const prompt = await mcpRequest(baseUrl, 6, 'prompts/get', { name: 'fake_review_context', arguments: { topic: 'smoke' } });
   assert.match(prompt.result.messages[0].content.text, /smoke/);
   const diag = await mcpRequest(baseUrl, 7, 'resources/read', { uri: 'external-mcp://_diagnostics/status' });
   const data = JSON.parse(diag.result.contents[0].text);
@@ -143,11 +143,11 @@ await withServer('yolo', async ({ baseUrl }) => {
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.ok(tools.has('custom_fake_read_context'));
-  assert.ok(tools.has('custom_fake_write_context'));
-  assert.ok(tools.has('custom_fake_push_context'));
-  assert.ok(tools.has('custom_fake_unknown_context'));
-  const call = await mcpRequest(baseUrl, 8, 'tools/call', { name: 'custom_fake_unknown_context', arguments: {} });
+  assert.ok(tools.has('fake_read_context'));
+  assert.ok(tools.has('fake_write_context'));
+  assert.ok(tools.has('fake_push_context'));
+  assert.ok(tools.has('fake_unknown_context'));
+  const call = await mcpRequest(baseUrl, 8, 'tools/call', { name: 'fake_unknown_context', arguments: {} });
   assert.ok(call.result);
 });
 
