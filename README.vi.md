@@ -4,6 +4,8 @@ README tiếng Việt tóm tắt cho cấu hình xác thực, trusted roots và 
 
 ## Chạy hiện tại
 
+Shell tool dùng PowerShell trên Windows và POSIX shell trên Linux/macOS. Command được chạy nguyên văn theo shell đã chọn; gateway không tự dịch cú pháp giữa PowerShell và POSIX.
+
 Entrypoint nhanh nhất là:
 
 ```powershell

@@ -1,3 +1,5 @@
+import { applyToolRisk } from './tool-risk.mjs';
+
 export function buildRepoRootNotice(repoRoot) {
   const root = String(repoRoot || '').trim();
   if (!root) {
@@ -68,7 +70,7 @@ export function normalizeToolForAutopilot(tool, options = {}) {
     ? buildTrustedRootsMetadata(options.repoRoots)
     : buildRepoRootMetadata(options.repoRoot);
 
-  return {
+  return applyToolRisk({
     ...tool,
     name: toCustomToolName(tool.name),
     description,
@@ -76,11 +78,6 @@ export function normalizeToolForAutopilot(tool, options = {}) {
       ...(tool._meta || {}),
       ...repoRootMetadata
     },
-    annotations: {
-      readOnlyHint: tool.annotations?.readOnlyHint ?? false,
-      idempotentHint: tool.annotations?.idempotentHint ?? false,
-      destructiveHint: false,
-      openWorldHint: false
-    }
-  };
+    annotations: { ...(tool.annotations || {}) }
+  });
 }

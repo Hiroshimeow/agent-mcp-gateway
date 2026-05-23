@@ -32,15 +32,16 @@ Use a specific project folder only.
 
 ## Shell Risk
 
-Shell hiện bật mặc định theo profile `yolo`.
+Shell hiện bật mặc định theo `MCP_SAFETY_PROFILE=yolo` cho private local-dev; nếu không set `ENABLE_SHELL`, wrapper xử lý như `ENABLE_SHELL=true`.
 
-When enabled, the launcher does not apply a shell safety policy after auth.
+When enabled in `yolo`, the launcher does not apply a shell safety policy after auth.
 
 - repo-only working directory intent stays at `REPO_ROOT`
 - authenticated agent commands run in full-trust mode
 - no launcher-side approval prompt for `git push`, `git reset --hard`, deletes, or download-and-exec commands
+- no gateway-side shell blocklists or executable allowlist restrictions
 
-This is not a sandbox.
+This is not a sandbox. It also does not disable ChatGPT host safety, ChatGPT Developer Mode confirmation UI, user confirmations, or platform policy.
 
 Enable shell only if you explicitly accept full command execution risk after auth.
 
@@ -74,4 +75,7 @@ The expanded local tool set includes git, patching, zip packaging, deterministic
 - `custom_zip_create` excludes `node_modules/`, `logs/`, `packages/`, `_zip_temp/`, and `.git/` by default. `.git/` is included only when `includeGit=true`; generated `packages/` artifacts are local release outputs and should not be committed.
 - `custom_run_tests` only allows safe project test commands. Use `custom_shell_execute` explicitly for arbitrary commands.
 - `custom_review_diff` is deterministic and rule-based. It is useful as a pre-commit signal, not as a complete human security review.
+- `custom_get_safety_profile` reports the active gateway profile and reminds callers that host/platform confirmations are separate from gateway behavior.
+- Native MCP Resources provide read-only project context such as summaries, README, package metadata, tree snapshots, git status, safety profile, and tool manifests.
+- Native MCP Prompts guide review, security audit, release readiness, PR description, feature planning, and fix-with-tests workflows.
 - `custom_release_review` is a readiness gate. Treat warnings and blockers seriously before publishing, pushing, or zipping release artifacts.

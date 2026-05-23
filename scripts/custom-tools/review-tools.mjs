@@ -19,6 +19,50 @@ function addFinding(findings, severity, category, pathName, line, title, detail,
   findings.push({ severity, category, path: pathName, line, title, detail, suggestion });
 }
 
+function normalizeGitPath(filePath) {
+  return String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function parseUntrackedFiles(statusText) {
+  return String(statusText || '')
+    .split(/\r?\n/)
+    .map(line => line.trimEnd())
+    .filter(line => line.startsWith('?? '))
+    .map(line => normalizeGitPath(line.slice(3)));
+}
+
+function resolveRelativeImportTargets(importer, specifier) {
+  const cleaned = String(specifier || '').replace(/[?#].*$/, '');
+  if (!cleaned.startsWith('./') && !cleaned.startsWith('../')) return [];
+  const base = normalizeGitPath(path.posix.join(path.posix.dirname(normalizeGitPath(importer)), cleaned));
+  return path.posix.extname(base)
+    ? [base]
+    : [`${base}.mjs`, `${base}.js`, `${base}.cjs`, `${base}.json`, `${base}/index.mjs`, `${base}/index.js`];
+}
+
+function findImportSpecifiers(source) {
+  const specifiers = [];
+  const quoted = /(?:import|export)\s+(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]|(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  let match;
+  while ((match = quoted.exec(source))) specifiers.push(match[1] || match[2]);
+  return specifiers;
+}
+
+async function findUntrackedImportedFiles(repoRoot, trackedFiles, untrackedFiles) {
+  const untrackedSet = new Set(untrackedFiles.map(normalizeGitPath));
+  const findings = [];
+  for (const importer of trackedFiles.filter(file => /\.(?:mjs|js|cjs|ts|tsx|jsx)$/.test(file))) {
+    const abs = path.join(repoRoot, importer);
+    if (!fs.existsSync(abs)) continue;
+    const source = await fs.promises.readFile(abs, 'utf8');
+    for (const specifier of findImportSpecifiers(source)) {
+      const target = resolveRelativeImportTargets(importer, specifier).find(candidate => untrackedSet.has(candidate));
+      if (target) findings.push({ importer, specifier, target });
+    }
+  }
+  return findings;
+}
+
 export async function reviewDiffTool(args = {}, context = {}) {
   try {
     const target = resolveInsideTrustedRoots(args.path, context, { mustExist: true });
@@ -98,6 +142,11 @@ export async function releaseReviewTool(args = {}, context = {}) {
       const tests = parseJsonResult(await runTestsTool({ path: target.path }, context));
       check('tests', tests.ok && tests.data.passed ? 'pass' : 'fail', 'Tests failed.');
     }
+    const rawStatus = await runGit(context, target.path, ['status', '--porcelain']);
+    const untrackedFiles = parseUntrackedFiles(rawStatus.stdout);
+    const untrackedImports = await findUntrackedImportedFiles(target.path, trackedFiles, untrackedFiles);
+    check('untracked_imports', untrackedImports.length === 0 ? 'pass' : 'fail', `Tracked source files import untracked files: ${untrackedImports.map(item => `${item.importer} -> ${item.target}`).join(', ')}`);
+
     const status = parseJsonResult(await gitStatusTool({ path: target.path }, context));
     if (status.ok && !status.data.clean) check('git_status', args.requireCleanGit ? 'fail' : 'warn', 'Git working tree has uncommitted or untracked files.'); else check('git_status', 'pass');
     if (fs.existsSync(path.join(target.path, 'packages'))) check('packages_artifacts', 'warn', 'Untracked release artifacts may exist in packages/.');

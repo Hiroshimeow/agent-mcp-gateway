@@ -13,12 +13,15 @@ It is designed for short-lived development sessions where you want an AI coding 
 ## Features
 
 - Windows-first startup scripts with `.bat` and PowerShell entrypoints.
+- Direct OS shell execution: PowerShell on Windows and a POSIX shell on Linux/macOS. Command strings run as-is; the gateway does not translate command syntax between PowerShell and POSIX.
 - OAuth login flow for ChatGPT Developer Mode.
 - Optional static Bearer token support for MCP clients that do not support OAuth.
 - Filesystem MCP access scoped to configured trusted roots.
 - Project ids help agents route work across trusted roots, but filesystem and shell tools still use the global trusted-root set in v1.
-- Optional full-trust shell execution after authentication.
-- 31 visible `custom_*` tools, including project discovery, file operations, search, patching, git, tests, review, secret scanning, and zip packaging.
+- `MCP_SAFETY_PROFILE` with `yolo` as the default private local-dev mode, plus narrower `safe` and `assisted` profiles.
+- Optional full-trust shell execution after authentication in `yolo` only.
+- Native read-only MCP Resources and MCP Prompts for repo summaries, manifests, review flows, and release workflows.
+- 32 visible `custom_*` tools in `yolo`, including project discovery, safety-profile inspection, file operations, search, patching, git, tests, review, secret scanning, and zip packaging.
 - Local logs and OAuth session cache under `logs/`.
 - Portable zip packaging for moving the launcher between machines without vendored dependencies.
 
@@ -170,6 +173,7 @@ MCP_ADVERTISE_URL=
 MCP_GATEWAY_PORT=8101
 ENABLE_FILESYSTEM=true
 ENABLE_SHELL=true
+MCP_SAFETY_PROFILE=yolo
 SHELL_PROFILE=yolo
 XAI_API_KEY=
 # Placeholder only. Set a real value for .bat or direct Node wrapper runs.
@@ -191,8 +195,9 @@ Important variables:
 - `MCP_ADVERTISE_URL`: optional full public base URL, such as `https://mcp.hcu-lab.me`, used as an override when proxy headers do not expose the public origin.
 - `MCP_GATEWAY_PORT`: local port for direct Node wrapper runs.
 - `ENABLE_FILESYSTEM`: enables filesystem tools.
-- `ENABLE_SHELL`: enables shell execution tools.
-- `SHELL_PROFILE`: currently defaults to full-trust `yolo` behavior.
+- `ENABLE_SHELL`: enables shell execution tools and defaults to `true` for this private local-dev gateway. `custom_shell_execute` is still hidden and rejected unless the active safety profile exposes shell.
+- `MCP_SAFETY_PROFILE`: defaults to `yolo`. `safe` exposes read-only tools/resources/prompts, `assisted` allows non-open-world mutating helper tools but hides raw shell and open-world tools such as `custom_git_push`, and `yolo` exposes the private full local-dev surface.
+- `SHELL_PROFILE`: backward-compatible alias for older configs; `MCP_SAFETY_PROFILE` wins when both are set.
 - `MCP_AUTH_PASSWORD`: password used by the OAuth login page.
 - `MCP_BEARER_TOKEN`: optional static Bearer token for clients that cannot complete OAuth.
 
@@ -204,7 +209,7 @@ Token logging rules:
 
 ## Tool set
 
-The launcher exposes 31 visible custom tools.
+The launcher exposes 32 visible custom tools in the default `yolo` profile. The active safety profile may intentionally hide risky tools from `tools/list`, and hidden tools are also rejected at call time.
 
 Filesystem and shell tools:
 
@@ -228,6 +233,7 @@ Filesystem and shell tools:
 Project-agent tools:
 
 - `custom_list_projects`
+- `custom_get_safety_profile`
 - `custom_grep`
 - `custom_apply_patch`
 - `custom_delete_file`
@@ -244,6 +250,8 @@ Project-agent tools:
 - `custom_release_review`
 
 ## Recommended agent workflow
+
+Read-only context can also be gathered via native MCP Resources such as `repo://projects`, `repo://project/<projectId>/summary`, `repo://project/<projectId>/readme`, `repo://project/<projectId>/package`, `repo://project/<projectId>/tree`, `repo://project/<projectId>/git/status`, `repo://project/<projectId>/safety-profile`, and `repo://project/<projectId>/tool-manifest`. Native MCP Prompts include `review_repo`, `security_audit`, `cross_platform_review`, `release_readiness`, `explain_diff`, `generate_pr_description`, `plan_feature`, and `fix_with_tests`.
 
 Before making changes:
 
@@ -352,7 +360,10 @@ Important warnings:
 - Use a narrow project folder as `REPO_ROOT`.
 - Do not commit `.env`.
 - Do not commit `config/trusted-roots.txt` if it contains real local paths.
-- Treat `ENABLE_SHELL=true` as full command execution access after authentication.
+- By default, unset `ENABLE_SHELL` behaves like `ENABLE_SHELL=true`; with default `MCP_SAFETY_PROFILE=yolo`, raw shell is exposed after authentication.
+- Treat `ENABLE_SHELL=true` plus `MCP_SAFETY_PROFILE=yolo` as full command execution access after authentication.
+- Yolo removes extra gateway-side approval prompts, shell blocklists, and executable allowlist restrictions for trusted private local development, but it does not bypass ChatGPT host safety, ChatGPT Developer Mode confirmation UI, user confirmations, or platform policy.
+- Risky tools are annotated honestly. For example, raw shell and `custom_git_push` are destructive and open-world, while read-only resources/tools use `readOnlyHint: true` where accurate.
 - Public tunnel URLs should be treated as sensitive operational information.
 - Rotate `MCP_AUTH_PASSWORD` and `MCP_BEARER_TOKEN` if they are shared or exposed.
 

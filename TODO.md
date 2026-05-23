@@ -7,14 +7,14 @@ Ship a Windows-first local MCP launcher that binds to `127.0.0.1:<port>`, with f
 ## Implemented
 
 - Double-click entrypoint via `start-mcp-live.bat`
-- Live PowerShell launcher and stop script
+- Live Windows PowerShell launcher and stop script
 - OAuth + local password gate
 - Filesystem MCP limited to configured trusted roots
 - Local-only gateway on `127.0.0.1:<port>`
 - PID tracking in `logs/live-pids.json`
-- Direct PowerShell shell execution from wrapper
+- Direct OS shell execution from wrapper: PowerShell on Windows, POSIX shell on Linux/macOS
 - Merged tool surface exposed from one `/mcp` endpoint
-- Full yolo shell mode in `authenticated-mcp-wrapper.mjs`
+- Full yolo shell mode in `authenticated-mcp-wrapper.mjs`; command strings run as-is and are not translated between PowerShell and POSIX
 - Agent tool expansion from 16 to 31 visible `custom_*` tools including `custom_list_projects`
 - Local custom tool registry in `scripts/custom-tools/`
 - Project-agent wrappers for project discovery, grep, patch, copy/delete, git, zip, secret scan, diff review, tests, and release review

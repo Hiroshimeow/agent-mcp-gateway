@@ -8,10 +8,11 @@ import { parseToolResult } from '../scripts/custom-tools/response-utils.mjs';
 import { buildTrustedRootsProjectRegistry } from '../scripts/projects/trusted-roots-projects.mjs';
 
 const EXISTING_TOOL_COUNT = 16;
-const TARGET_VISIBLE_TOOL_COUNT = 31;
+const TARGET_VISIBLE_TOOL_COUNT = 32;
 
 const EXPECTED = [
   'custom_list_projects',
+  'custom_get_safety_profile',
   'custom_grep',
   'custom_apply_patch',
   'custom_delete_file',
@@ -30,7 +31,7 @@ const EXPECTED = [
 
 test('registry exposes custom project discovery plus the planned local custom tools', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  assert.equal(tools.length, 15);
+  assert.equal(tools.length, 16);
   assert.equal(EXISTING_TOOL_COUNT + tools.length, TARGET_VISIBLE_TOOL_COUNT);
   assert.deepEqual(tools.map(tool => tool.name), EXPECTED);
   assert.deepEqual(LOCAL_TOOL_NAMES.map(name => `custom_${name}`), EXPECTED);
@@ -40,16 +41,17 @@ test('registry descriptors include required wording and annotations', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
   for (const tool of tools) {
     assert.match(tool.description, /^Use this (read-only )?tool to /);
-    assert.equal(tool.annotations.openWorldHint, false);
+    assert.equal(typeof tool.annotations.openWorldHint, 'boolean');
     assert.equal(tool.inputSchema.type, 'object');
   }
   assert.equal(tools.find(tool => tool.name === 'custom_list_projects').annotations.readOnlyHint, true);
   assert.equal(tools.find(tool => tool.name === 'custom_delete_file').annotations.destructiveHint, true);
+  assert.equal(tools.find(tool => tool.name === 'custom_git_push').annotations.openWorldHint, true);
 });
 
 test('project-scoped registry descriptors mention project discovery guidance', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  for (const tool of tools.filter(item => item.name !== 'custom_list_projects')) {
+  for (const tool of tools.filter(item => !['custom_list_projects', 'custom_get_safety_profile'].includes(item.name))) {
     assert.match(tool.description, /Use custom_list_projects to discover projectId values/);
   }
 });

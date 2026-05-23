@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { executeDirectShell } from '../scripts/direct-shell.mjs';
 
 import { callCustomTool } from '../scripts/custom-tools/index.mjs';
 
@@ -13,15 +13,7 @@ function parse(result) {
 
 async function shell(command, cwdOrOptions) {
   const cwd = typeof cwdOrOptions === 'string' ? cwdOrOptions : cwdOrOptions?.cwd;
-  return await new Promise((resolve, reject) => {
-    execFile('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd, windowsHide: true }, (error, stdout, stderr) => {
-      if (error) {
-        error.stdout = stdout;
-        error.stderr = stderr;
-        reject(error);
-      } else resolve({ stdout, stderr });
-    });
-  });
+  return await executeDirectShell(command, { cwd });
 }
 
 async function fixture() {
@@ -78,6 +70,18 @@ test('custom_release_review warns or blocks on dirty git depending on requireCle
   assert.equal(out.data.warnings.some(item => item.includes('Git working tree')), true);
   out = parse(await callCustomTool('release_review', { path: root, runTests: false, scanSecrets: false, requireCleanGit: true }, context));
   assert.equal(out.data.ready, false);
+});
+
+test('custom_release_review fails when tracked source imports an untracked file', async () => {
+  const { root, context } = await fixture();
+  await fs.writeFile(path.join(root, 'index.mjs'), "import './new-module.mjs';\nconsole.log('fixture');\n");
+  await shell('git add index.mjs; git commit -m tracked-importer', root);
+  await fs.writeFile(path.join(root, 'new-module.mjs'), 'export const value = 1;\n');
+
+  const out = parse(await callCustomTool('release_review', { path: root, runTests: false, scanSecrets: false }, context));
+  assert.equal(out.data.ready, false);
+  assert.equal(out.data.checks.some(check => check.name === 'untracked_imports' && check.status === 'fail'), true);
+  assert.equal(out.data.blockers.some(item => item.includes('index.mjs -> new-module.mjs')), true);
 });
 
 test('custom_release_review respects checkPackage and checkDocs flags', async () => {
