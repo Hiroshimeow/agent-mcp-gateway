@@ -3,7 +3,7 @@ import { createStdioUpstreamClient } from './stdio-client.mjs';
 import { createHttpUpstreamClient } from './http-client.mjs';
 import { createCatalogCache } from './catalog-cache.mjs';
 import { toExternalToolName, toExternalPromptName, assertNoNameCollision } from './names.mjs';
-import { isExternalResourceUri, parseExternalResourceUri, toExternalResourceUri } from './resource-uri.mjs';
+import { encodeUpstreamResourceUri, isExternalResourceUri, parseExternalResourceUri, toExternalResourceUri } from './resource-uri.mjs';
 import { diagnosticsResource, summarizeDiagnostics } from './diagnostics.mjs';
 
 function safeError(error) {
@@ -78,12 +78,27 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
         cache.resourceRoutes.set(exposedUri, { serverId: server.id, upstreamUri: resource.uri });
       }
 
-      for (const template of templateResult.resourceTemplates || []) {
+      const upstreamTemplates = templateResult.resourceTemplates || [];
+      if (upstreamTemplates.length > 0) {
         cache.resourceTemplates.push({
-          ...template,
           uriTemplate: `external-mcp://${server.id}/{encodedUpstreamUri}`,
-          name: template.name ? `${server.id}: ${template.name}` : `${server.id} resource template`,
-          _meta: { ...(template._meta || {}), upstream: { upstreamId: server.id, upstreamUriTemplate: template.uriTemplate, source: 'external-mcp' } }
+          name: `${server.id} external resource`,
+          description: `Read an encoded upstream resource URI from ${server.id}. Upstream templates are listed in _meta.upstream.resourceTemplates.`,
+          mimeType: 'application/octet-stream',
+          _meta: {
+            upstream: {
+              upstreamId: server.id,
+              source: 'external-mcp',
+              routeFormat: `external-mcp://${server.id}/<base64url-upstream-uri>`,
+              resourceTemplates: upstreamTemplates.map(template => ({
+                name: template.name || null,
+                uriTemplate: template.uriTemplate,
+                mimeType: template.mimeType || null,
+                description: template.description || null,
+                encodedTemplate: encodeUpstreamResourceUri(template.uriTemplate)
+              }))
+            }
+          }
         });
       }
 
