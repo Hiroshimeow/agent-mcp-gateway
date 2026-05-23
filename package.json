@@ -10,12 +10,14 @@
     "test": "node --test tests/*.test.mjs",
     "smoke:mcp": "node scripts/smoke-mcp-endpoint.mjs",
     "smoke:mcp-schemas": "node scripts/smoke-mcp-schemas.mjs",
-    "smoke:mcp:tools": "node scripts/smoke-mcp-tools.mjs"
+    "smoke:mcp:tools": "node scripts/smoke-mcp-tools.mjs",
+    "smoke:mcp:upstreams": "node scripts/smoke-mcp-upstreams.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "@modelcontextprotocol/server-filesystem": "2026.1.14",
     "express": "5.1.0",
-    "mcp-proxy": "6.4.6"
+    "mcp-proxy": "6.4.6",
+    "smol-toml": "^1.4.2"
   }
 }

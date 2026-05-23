@@ -106,7 +106,7 @@ export function applyToolRisk(tool) {
 
 export function shouldExposeToolForProfile(toolOrName, safetyProfile) {
   const name = normalizeRiskToolName(toolOrName);
-  const risk = getToolRisk(name);
+  const risk = getToolRisk(toolOrName);
   if (name === 'shell_execute') return Boolean(safetyProfile.exposeShell);
   if (risk.openWorldHint && !safetyProfile.exposeOpenWorldTools) return false;
   if (risk.destructiveHint && !safetyProfile.exposeDestructiveTools) return false;
