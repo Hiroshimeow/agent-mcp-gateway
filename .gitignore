@@ -11,3 +11,5 @@ packages/
 config/trusted-roots.txt
 *.zip
 g8-sshr.bat
+
+.codegraph/
