@@ -72,6 +72,18 @@ test('custom_release_review warns or blocks on dirty git depending on requireCle
   assert.equal(out.data.ready, false);
 });
 
+test('custom_release_review fails when tracked source imports an untracked file', async () => {
+  const { root, context } = await fixture();
+  await fs.writeFile(path.join(root, 'index.mjs'), "import './new-module.mjs';\nconsole.log('fixture');\n");
+  await shell('git add index.mjs; git commit -m tracked-importer', root);
+  await fs.writeFile(path.join(root, 'new-module.mjs'), 'export const value = 1;\n');
+
+  const out = parse(await callCustomTool('release_review', { path: root, runTests: false, scanSecrets: false }, context));
+  assert.equal(out.data.ready, false);
+  assert.equal(out.data.checks.some(check => check.name === 'untracked_imports' && check.status === 'fail'), true);
+  assert.equal(out.data.blockers.some(item => item.includes('index.mjs -> new-module.mjs')), true);
+});
+
 test('custom_release_review respects checkPackage and checkDocs flags', async () => {
   const { root, context } = await fixture();
   await fs.rm(path.join(root, 'package.json'));

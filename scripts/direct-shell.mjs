@@ -66,6 +66,7 @@ export function getDirectPlatformInfo(options = {}) {
     platform,
     architecture: os.arch(),
     shell: shell.executable,
+    shellArgs: shell.args,
     executionMode: shell.executionMode,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     repoRoot: options.repoRoot,

@@ -8,6 +8,8 @@ import { releaseReviewTool, reviewDiffTool } from './review-tools.mjs';
 import { runTestsTool } from './test-tool.mjs';
 import { fail, ok } from './response-utils.mjs';
 import { listProjectSummaries } from '../projects/trusted-roots-projects.mjs';
+import { buildSafetyProfileStatus } from '../safety-profile.mjs';
+import { applyToolRisk } from '../tool-risk.mjs';
 
 function schema(properties = {}, required = []) {
   return { type: 'object', properties, required, additionalProperties: false };
@@ -33,8 +35,13 @@ function listProjectsTool(args = {}, context = {}) {
   });
 }
 
+function getSafetyProfileTool(_args = {}, context = {}) {
+  return ok('get_safety_profile', 'Reported current MCP safety profile', buildSafetyProfileStatus(context.env || process.env));
+}
+
 const TOOL_DEFINITIONS = [
   ['list_projects', 'Use this read-only tool to discover configured projectId values for multi-project workflows. It returns project ids, display names, default project settings, and guidance. It does not expose full local paths by default.', schema({ showPaths: { type: 'boolean', default: false } }), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, listProjectsTool, false],
+  ['get_safety_profile', 'Use this read-only tool to inspect the active MCP safety profile and understand which classes of tools are exposed by the private local gateway.', schema(), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, getSafetyProfileTool, false],
   ['grep', projectToolDescription('Use this tool to search text inside files under trusted roots. Use it for code/content search; do not use it to search filenames only. It reads files and rejects paths outside trusted roots.'), schema({ path: { type: 'string' }, query: { type: 'string' }, regex: { type: 'boolean', default: false }, caseSensitive: { type: 'boolean', default: false }, include: STRING_ARRAY, exclude: STRING_ARRAY, maxResults: { type: 'number', default: 100 }, contextLines: { type: 'number', default: 0 } }, ['query']), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, grepTool, true],
   ['apply_patch', projectToolDescription('Use this tool to apply unified diff patches under trusted roots. Use it for multi-file edits; do not use it for a single exact replacement. It modifies files unless dryRun=true and rejects patch paths outside trusted roots. It validates patches with git apply --check before applying.'), schema({ patch: { type: 'string' }, workingDirectory: { type: 'string' }, dryRun: { type: 'boolean', default: true } }, ['patch']), { readOnlyHint: false, idempotentHint: false, destructiveHint: false }, applyPatchTool, true],
   ['delete_file', projectToolDescription('Use this tool to delete a file or directory under trusted roots. Use it for safe file removal; do not use it for .git deletion or deleting a trusted root. It modifies files unless dryRun=true and rejects paths outside trusted roots.'), schema({ path: { type: 'string' }, recursive: { type: 'boolean', default: false }, force: { type: 'boolean', default: false }, dryRun: { type: 'boolean', default: false } }, ['path']), { readOnlyHint: false, idempotentHint: false, destructiveHint: true }, deleteFileTool, true],
@@ -64,11 +71,11 @@ export function isLocalCustomTool(name) {
 
 export function listCustomTools(context = {}) {
   const meta = { trusted_roots: context.resolvedRepoRoots || [], root_repo: context.resolvedRepoRoot, repo_root: context.resolvedRepoRoot };
-  return [...LOCAL_TOOLS.values()].map(tool => ({
+  return [...LOCAL_TOOLS.values()].map(tool => applyToolRisk({
     name: `custom_${tool.name}`,
     description: tool.description,
     inputSchema: tool.inputSchema,
-    annotations: { ...tool.annotations, openWorldHint: false },
+    annotations: { ...tool.annotations },
     _meta: meta
   }));
 }

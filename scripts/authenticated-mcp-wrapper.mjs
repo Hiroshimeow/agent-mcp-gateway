@@ -11,11 +11,20 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelconte
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
   isInitializeRequest,
+  ListPromptsRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
   ListRootsRequestSchema,
-  ListToolsRequestSchema
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
+import { getSafetyProfile } from './safety-profile.mjs';
+import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
+import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
+import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
@@ -46,13 +55,13 @@ const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
 const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
-const shellProfile = String(process.env.SHELL_PROFILE || 'yolo').toLowerCase();
+const safetyProfile = getSafetyProfile(process.env);
 const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
 const shellLogPath = process.env.SHELL_LOG_PATH;
 const authStatePath = process.env.AUTH_STATE_PATH;
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
 const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLowerCase() === 'true';
-const enableShell = String(process.env.ENABLE_SHELL || 'false').toLowerCase() === 'true';
+const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
 
@@ -197,7 +206,7 @@ function isWithinRepo(targetPath) {
   });
 }
 
-async function listMergedTools() {
+async function listAllMergedToolsUnfiltered() {
   const tools = [];
 
   if (filesystemClient) {
@@ -229,19 +238,25 @@ async function listMergedTools() {
     });
   }
 
-  return tools;
+  return tools.map(applyToolRisk);
+}
+
+async function listMergedTools() {
+  return (await listAllMergedToolsUnfiltered()).filter(tool => shouldExposeToolForProfile(tool, safetyProfile));
 }
 
 async function routeToolCall(request) {
   const toolName = request.params.name;
   const upstreamToolName = toUpstreamToolName(toolName);
+  assertToolAllowedForProfile(upstreamToolName, safetyProfile);
   if (isLocalCustomTool(upstreamToolName)) {
     return await callCustomTool(upstreamToolName, request.params.arguments || {}, {
       resolvedRepoRoots,
       resolvedRepoRoot,
       projectRegistry,
       executeDirectShell,
-      packageRoot: resolvedRepoRoot
+      packageRoot: resolvedRepoRoot,
+      env: process.env
     });
   }
 
@@ -311,7 +326,13 @@ async function routeObservedToolCall(request) {
 function createProxyServer() {
   const server = new Server(
     { name: 'personal-mcp-launcher', version: '1.3.0' },
-    { capabilities: { tools: { listChanged: false } } }
+    {
+      capabilities: {
+        tools: { listChanged: false },
+        resources: { subscribe: false, listChanged: false },
+        prompts: { listChanged: false }
+      }
+    }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -321,6 +342,22 @@ function createProxyServer() {
   server.setRequestHandler(CallToolRequestSchema, async request => {
     return await routeObservedToolCall(request);
   });
+
+  const resourceContext = {
+    resolvedRepoRoots,
+    resolvedRepoRoot,
+    projectRegistry,
+    packageRoot,
+    env: process.env,
+    listTools: listAllMergedToolsUnfiltered
+  };
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: listRepoResources(resourceContext) }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: listRepoResourceTemplates(resourceContext) }));
+  server.setRequestHandler(ReadResourceRequestSchema, async request => await readRepoResource(request.params.uri, resourceContext));
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: listRepoPrompts({ safetyProfile }) }));
+  server.setRequestHandler(GetPromptRequestSchema, async request => getRepoPrompt(request.params.name, request.params.arguments || {}, { safetyProfile, defaultProjectId: projectRegistry.defaultProjectId }));
 
   return server;
 }
@@ -642,7 +679,7 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   }
   console.log(`Filesystem enabled: ${enableFilesystem}`);
   console.log(`Shell enabled: ${enableShell}`);
-  console.log(`Shell profile: ${shellProfile}`);
+  console.log(`Safety profile: ${safetyProfile.name}`);
   console.log(`Static bearer enabled: ${staticBearerToken ? 'true' : 'false'}`);
   console.log(`MCP transport mode: ${useStatefulMcpSessions ? 'stateful' : 'stateless'}`);
 });

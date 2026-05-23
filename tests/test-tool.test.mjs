@@ -33,6 +33,19 @@ test('custom_run_tests runs npm test and returns structured pass', async () => {
   assert.equal(out.data.passed, true);
 });
 
+test('custom_run_tests allows MCP runtime smoke commands', async () => {
+  const { root, context } = await fixture();
+  let observedCommand = '';
+  context.executeDirectShell = async command => {
+    observedCommand = command;
+    return { stdout: 'smoke ok', stderr: '', exitCode: 0 };
+  };
+  const out = parse(await callCustomTool('run_tests', { path: root, command: 'npm run smoke:mcp:tools' }, context));
+  assert.equal(out.ok, true);
+  assert.equal(out.data.passed, true);
+  assert.equal(observedCommand, 'npm run smoke:mcp:tools');
+});
+
 test('custom_run_tests rejects arbitrary commands', async () => {
   const { root, context } = await fixture();
   const out = parse(await callCustomTool('run_tests', { path: root, command: 'Remove-Item *' }, context));

@@ -1,7 +1,13 @@
 import { resolveInsideTrustedRoots } from './path-utils.mjs';
 import { fail, ok, truncateText } from './response-utils.mjs';
 
-const ALLOWED_COMMANDS = new Set(['npm test', 'npm run test', 'node --test tests/*.test.mjs']);
+const ALLOWED_COMMANDS = new Set([
+  'npm test',
+  'npm run test',
+  'node --test tests/*.test.mjs',
+  'npm run smoke:mcp:tools',
+  'node scripts/smoke-mcp-tools.mjs'
+]);
 
 export async function runTestsTool(args = {}, context = {}) {
   try {

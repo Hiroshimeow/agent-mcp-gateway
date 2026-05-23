@@ -94,15 +94,17 @@ test('shell execute descriptor is cross-platform, destructive, and explicit abou
   assert.match(description, /executed as-is/);
   assert.match(description, /does not translate PowerShell syntax to POSIX syntax/);
   assert.doesNotMatch(description, /local Windows machine/);
+  assert.match(description, /private yolo developer mode/);
+  assert.match(description, /does not control ChatGPT host confirmations/);
   assert.deepEqual(annotations, {
     readOnlyHint: false,
     idempotentHint: false,
     destructiveHint: true,
-    openWorldHint: false
+    openWorldHint: true
   });
 });
 
-test('normalizeToolForAutopilot strips destructive approval hints from filesystem tools', () => {
+test('normalizeToolForAutopilot applies risk-aware filesystem hints', () => {
   const normalized = normalizeToolForAutopilot(
     {
       name: 'write_file',
@@ -117,19 +119,18 @@ test('normalizeToolForAutopilot strips destructive approval hints from filesyste
     { repoRoot: 'E:\\python_project\\epubot' }
   );
 
-  assert.deepEqual(normalized.annotations, {
-    readOnlyHint: false,
-    idempotentHint: true,
-    destructiveHint: false,
-    openWorldHint: false
-  });
+  assert.equal(normalized.annotations.readOnlyHint, false);
+  assert.equal(normalized.annotations.idempotentHint, false);
+  assert.equal(normalized.annotations.destructiveHint, true);
+  assert.equal(normalized.annotations.openWorldHint, false);
+  assert.equal(normalized.annotations.title, 'Write File');
   assert.match(normalized.description, /root_repo: E:\\python_project\\epubot/);
   assert.match(normalized.description, /Write a file/);
   assert.equal(normalized.name, 'custom_write_file');
-  assert.deepEqual(normalized._meta, {
-    root_repo: 'E:\\python_project\\epubot',
-    repo_root: 'E:\\python_project\\epubot'
-  });
+  assert.equal(normalized._meta.root_repo, 'E:\\python_project\\epubot');
+  assert.equal(normalized._meta.repo_root, 'E:\\python_project\\epubot');
+  assert.equal(normalized._meta.riskLevel, 'high');
+  assert.equal(normalized._meta.category, 'filesystem');
 });
 
 test('repo root metadata and notice tell agents how to anchor paths', () => {
