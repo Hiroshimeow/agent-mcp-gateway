@@ -70,3 +70,18 @@ Possible controls, if desired later:
 ## Host/platform boundary
 
 Host-level behavior is outside the gateway. The gateway should not claim to control host UI or platform policy. Runtime code should not contain extra operational caveats for external MCP; notes belong here until a final model is chosen.
+
+## Hot refresh Plan B note
+
+The planned catalog refresh work in `.plan/external-mcp-refresh-b.md` must preserve the current yolo runtime philosophy.
+
+Refresh modes (`startup`, `ttl`, `none`) are cache freshness controls only. They must not become risk controls. They must not introduce:
+
+- gateway-side risk filtering;
+- gateway-side safety classification;
+- provider-specific allow or deny rules;
+- hidden metadata rewriting;
+- tool execution prompts;
+- shell command blocklists for external MCP.
+
+If an upstream publishes a new tool during refresh, yolo runtime exposes it after the refreshed snapshot is committed, subject only to name-collision correctness. Any future safety model must be designed separately and explicitly.
