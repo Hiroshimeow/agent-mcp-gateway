@@ -32,14 +32,22 @@ function exposePaths(context) {
   return Boolean(context.projectRegistry?.exposeProjectPaths || context.env?.MCP_EXPOSE_PROJECT_PATHS === 'true');
 }
 
+function hasReadme(project) {
+  return fs.existsSync(path.join(project.repoRoot, 'README.md')) || fs.existsSync(path.join(project.repoRoot, 'README.vi.md'));
+}
+
+function hasPackageJson(project) {
+  return fs.existsSync(path.join(project.repoRoot, 'package.json'));
+}
+
 function projectSummary(project, context) {
   const data = {
     projectId: project.projectId,
     displayName: project.displayName,
     defaultRootName: path.basename(project.repoRoot) || project.projectId,
     default: context.projectRegistry?.defaultProjectId === project.projectId,
-    hasPackageJson: fs.existsSync(path.join(project.repoRoot, 'package.json')),
-    hasReadme: fs.existsSync(path.join(project.repoRoot, 'README.md')) || fs.existsSync(path.join(project.repoRoot, 'README.vi.md')),
+    hasPackageJson: hasPackageJson(project),
+    hasReadme: hasReadme(project),
     safetyProfile: getSafetyProfile(context.env || process.env).name
   };
   if (exposePaths(context)) data.repoRoot = project.repoRoot;
@@ -55,11 +63,11 @@ export function listRepoResources(context = {}) {
       { uri: `${base}/summary`, name: `${p.displayName} summary`, mimeType: 'application/json' },
       { uri: `${base}/safety-profile`, name: `${p.displayName} safety profile`, mimeType: 'application/json' },
       { uri: `${base}/tool-manifest`, name: `${p.displayName} tool manifest`, mimeType: 'application/json' },
-      { uri: `${base}/readme`, name: `${p.displayName} README`, mimeType: 'text/markdown' },
-      { uri: `${base}/package`, name: `${p.displayName} package.json`, mimeType: 'application/json' },
       { uri: `${base}/tree`, name: `${p.displayName} directory tree`, mimeType: 'application/json' },
       { uri: `${base}/git/status`, name: `${p.displayName} git status`, mimeType: 'application/json' }
     );
+    if (hasReadme(p)) resources.push({ uri: `${base}/readme`, name: `${p.displayName} README`, mimeType: 'text/markdown' });
+    if (hasPackageJson(p)) resources.push({ uri: `${base}/package`, name: `${p.displayName} package.json`, mimeType: 'application/json' });
   }
   return resources;
 }

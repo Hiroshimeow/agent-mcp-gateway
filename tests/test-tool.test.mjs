@@ -40,10 +40,15 @@ test('custom_run_tests allows MCP runtime smoke commands', async () => {
     observedCommand = command;
     return { stdout: 'smoke ok', stderr: '', exitCode: 0 };
   };
-  const out = parse(await callCustomTool('run_tests', { path: root, command: 'npm run smoke:mcp:tools' }, context));
-  assert.equal(out.ok, true);
-  assert.equal(out.data.passed, true);
+  const toolsOut = parse(await callCustomTool('run_tests', { path: root, command: 'npm run smoke:mcp:tools' }, context));
+  assert.equal(toolsOut.ok, true);
+  assert.equal(toolsOut.data.passed, true);
   assert.equal(observedCommand, 'npm run smoke:mcp:tools');
+
+  const upstreamsOut = parse(await callCustomTool('run_tests', { path: root, command: 'npm run smoke:mcp:upstreams' }, context));
+  assert.equal(upstreamsOut.ok, true);
+  assert.equal(upstreamsOut.data.passed, true);
+  assert.equal(observedCommand, 'npm run smoke:mcp:upstreams');
 });
 
 test('custom_run_tests rejects arbitrary commands', async () => {

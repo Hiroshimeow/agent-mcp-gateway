@@ -54,16 +54,26 @@ Before enabling shell or write-heavy workflows:
 
 ## Secrets
 
-- Do not hardcode secrets in `.bat`, `.ps1`, `.mjs`, or JSON config files.
+- Do not hardcode secrets in `.bat`, `.ps1`, `.mjs`, TOML, or JSON config files.
 - Do not print secrets to console.
 - `uv run main.py` must not print tokens loaded from `.env`, environment variables, or `--token`; it may print only a generated temporary token when no token is configured.
 - Do not commit `.env`.
 - Do not commit `config/trusted-roots.txt`; keep real trusted roots local and commit only `config/trusted-roots.example.txt`.
+- Do not commit real external MCP upstream configs; commit only `config/mcp-servers.example.toml`.
+- HTTP upstream bearer credentials must use `bearer_token_env`; keep token values in environment variables or `.env`.
 - Keep `XAI_API_KEY` only in environment variables or `.env`.
 - Keep `MCP_AUTH_PASSWORD` only in `.env`.
 - Keep `MCP_BEARER_TOKEN` only in `.env`; rotate it if it is shared with another client or machine.
 - Use a long random `MCP_BEARER_TOKEN` when enabling Hermes/OpenClaw-style Bearer auth.
 - Rotate `MCP_BEARER_TOKEN` after sharing logs, screenshots, client configs, or tunnel URLs that may expose it.
+
+## Dynamic External MCP Upstreams
+
+Configured upstream MCP servers are started or connected at gateway startup and imported into the gateway catalog. Optional upstream startup failures are reported through diagnostics resources unless `fail_gateway_on_startup_error = true`.
+
+External upstream tools are yolo by default when configured, but `safe`, `assisted`, and `yolo` profile filtering is enforced at both list-time and call-time. Complete upstream annotations are preserved; missing or incomplete annotations are classified conservatively rather than downgraded to avoid confirmations.
+
+Treat any enabled upstream process as trusted local development automation with the permissions of the gateway process.
 
 ## Agent Tool Safety
 

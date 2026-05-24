@@ -25,12 +25,15 @@ import { getSafetyProfile } from './safety-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
+import { createExternalMcpManager } from './upstreams/manager.mjs';
+import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
   buildTrustedRootsMetadata,
   buildTrustedRootsNotice,
   normalizeToolForAutopilot,
+  toCustomToolName,
   toUpstreamToolName
 } from './tool-metadata.mjs';
 import {
@@ -199,6 +202,30 @@ if (filesystemClient && filesystemTransport) {
   await filesystemClient.connect(filesystemTransport);
 }
 
+async function listLocalToolNamesForCollisionCheck() {
+  const names = new Set();
+  if (filesystemClient) {
+    const filesystemResult = await filesystemClient.listTools();
+    for (const tool of filesystemResult.tools || []) {
+      names.add(tool.name);
+      names.add(toCustomToolName(tool.name));
+    }
+  }
+  for (const tool of listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry })) names.add(tool.name);
+  if (enableShell) {
+    names.add('custom_shell_execute');
+    names.add('custom_get_platform_info');
+  }
+  return [...names];
+}
+
+const externalMcpManager = await createExternalMcpManager({
+  env: process.env,
+  repoRoot: packageRoot,
+  localToolNames: await listLocalToolNamesForCollisionCheck(),
+  localPromptNames: listRepoPrompts({ safetyProfile }).map(prompt => prompt.name)
+});
+
 function isWithinRepo(targetPath) {
   return resolvedRepoRoots.some(root => {
     const relative = path.relative(root, targetPath);
@@ -238,7 +265,9 @@ async function listAllMergedToolsUnfiltered() {
     });
   }
 
-  return tools.map(applyToolRisk);
+  tools.push(...await externalMcpManager.listAllToolsUnfiltered());
+
+  return tools.map(tool => tool._meta?.upstream ? tool : applyToolRisk(tool));
 }
 
 async function listMergedTools() {
@@ -294,6 +323,10 @@ async function routeToolCall(request) {
         }
       ]
     };
+  }
+
+  if (externalMcpManager.isExternalToolName(toolName)) {
+    return await externalMcpManager.callTool(toolName, request.params.arguments || {}, safetyProfile);
   }
 
   if (filesystemClient) {
@@ -352,12 +385,18 @@ function createProxyServer() {
     listTools: listAllMergedToolsUnfiltered
   };
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: listRepoResources(resourceContext) }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: listRepoResourceTemplates(resourceContext) }));
-  server.setRequestHandler(ReadResourceRequestSchema, async request => await readRepoResource(request.params.uri, resourceContext));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [...listRepoResources(resourceContext), ...await externalMcpManager.listResources()] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [...listRepoResourceTemplates(resourceContext), ...await externalMcpManager.listResourceTemplates()] }));
+  server.setRequestHandler(ReadResourceRequestSchema, async request => {
+    if (isExternalResourceUri(request.params.uri)) return await externalMcpManager.readResource(request.params.uri);
+    return await readRepoResource(request.params.uri, resourceContext);
+  });
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: listRepoPrompts({ safetyProfile }) }));
-  server.setRequestHandler(GetPromptRequestSchema, async request => getRepoPrompt(request.params.name, request.params.arguments || {}, { safetyProfile, defaultProjectId: projectRegistry.defaultProjectId }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ safetyProfile }), ...await externalMcpManager.listPrompts()] }));
+  server.setRequestHandler(GetPromptRequestSchema, async request => {
+    if (externalMcpManager.isExternalPromptName(request.params.name)) return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
+    return getRepoPrompt(request.params.name, request.params.arguments || {}, { safetyProfile, defaultProjectId: projectRegistry.defaultProjectId });
+  });
 
   return server;
 }
@@ -686,6 +725,7 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
 
 async function shutdown() {
   serverInstance.close();
+  await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});
   process.exit(0);

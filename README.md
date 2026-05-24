@@ -336,6 +336,83 @@ The test suite covers:
 - release review;
 - zip creation.
 
+## Dynamic external MCP upstreams
+
+The gateway remains the only MCP server registered with ChatGPT while importing tools, resources, and prompts from configured upstream MCP servers. By default `catalog_cache = "startup"` builds the imported catalog once when the gateway starts. `catalog_cache = "ttl"` refreshes the complete upstream catalog atomically after `catalog_cache_ttl_ms` expires on a catalog list request. `catalog_cache = "none"` refreshes atomically on every tools/resources/templates/prompts list request. Calls and reads always route through the latest committed catalog snapshot; if a refresh fails or detects a name/URI collision, the previous snapshot stays active.
+
+Config lookup order:
+
+1. `MCP_UPSTREAM_CONFIG`
+2. `config/mcp-servers.toml`
+3. `.mcp-gateway/mcp-servers.toml`
+4. no upstreams when none exists
+
+Quick start after cloning:
+
+```bash
+npm install
+cp .env.example .env
+cp config/mcp-servers.example.toml config/mcp-servers.toml
+npm start
+```
+
+Windows PowerShell equivalent:
+
+```powershell
+npm install
+Copy-Item .env.example .env
+Copy-Item config/mcp-servers.example.toml config/mcp-servers.toml
+npm start
+```
+
+Use `config/mcp-servers.toml` for a repo-local config, or `.mcp-gateway/mcp-servers.toml` for a private local config. `.mcp-gateway/` is gitignored. Do not commit real local config containing machine-specific paths or credentials.
+
+Stdio upstream example:
+
+```toml
+[mcp_servers.codegraph]
+enabled = true
+transport = "stdio"
+command = "codegraph"
+args = ["serve", "--mcp"]
+cwd = "."
+tool_prefix = "codegraph"
+```
+
+Another stdio upstream example:
+
+```toml
+[mcp_servers.gitnexus]
+enabled = true
+transport = "stdio"
+command = "npx"
+args = ["-y", "gitnexus@latest", "mcp"]
+cwd = "."
+tool_prefix = "gitnexus"
+```
+
+HTTP / streamable HTTP upstream example:
+
+```toml
+[mcp_servers.remote_graph]
+enabled = true
+transport = "http"
+url = "http://127.0.0.1:8123/mcp"
+bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
+tool_prefix = "remote_graph"
+```
+
+Set `REMOTE_GRAPH_MCP_TOKEN` in the environment or `.env`; do not put literal credential values in TOML.
+
+Imported capabilities are exposed as:
+
+- tools: `<server-or-tool-prefix>_<tool>`
+- prompts: `<server-or-tool-prefix>_<prompt>`
+- resources: `external-mcp://<server>/<base64url-upstream-uri>`
+- diagnostics: `external-mcp://_diagnostics/status` and `external-mcp://<server>/status`
+
+External upstream tools are yolo dynamic proxy capabilities. The gateway imports enabled upstream tools, preserves upstream annotations and metadata when provided, adds `_meta.upstream` for routing provenance, and routes calls back to the owning upstream. The gateway does not add provider-specific allowlists, generic catch-all MCP call tools, or gateway-side risk filtering for external MCP. Risk-model notes are tracked in `.plan/risk.md`.
+
 ## Logs
 
 Runtime logs are written under `logs/`:

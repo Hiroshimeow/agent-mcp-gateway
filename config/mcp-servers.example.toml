@@ -1,0 +1,47 @@
+# Example dynamic upstream server config for agent-mcp-gateway.
+#
+# Linux/macOS:
+#   cp config/mcp-servers.example.toml config/mcp-servers.toml
+# Windows PowerShell:
+#   Copy-Item config/mcp-servers.example.toml config/mcp-servers.toml
+#
+# Do not commit real local upstream configs or secrets.
+# catalog_cache controls how imported upstream catalogs refresh:
+#   startup: build once at gateway startup.
+#   ttl: atomically refresh after catalog_cache_ttl_ms expires on list requests.
+#   none: atomically refresh on every catalog list request.
+
+[external_mcp]
+enabled = true
+fail_gateway_on_startup_error = false
+catalog_cache = "startup"
+# catalog_cache = "ttl"
+# catalog_cache_ttl_ms = 30000
+# catalog_cache = "none"
+startup_timeout_ms = 15000
+shutdown_timeout_ms = 5000
+default_transport = "stdio"
+default_enabled = true
+
+[mcp_servers.codegraph]
+enabled = true
+transport = "stdio"
+command = "codegraph"
+args = ["serve", "--mcp"]
+cwd = "."
+tool_prefix = "codegraph"
+
+[mcp_servers.gitnexus]
+enabled = true
+transport = "stdio"
+command = "npx"
+args = ["-y", "gitnexus@latest", "mcp"]
+tool_prefix = "gitnexus"
+
+# HTTP / streamable HTTP example. Use bearer_token_env for secrets.
+# [mcp_servers.remote_graph]
+# enabled = true
+# transport = "http"
+# url = "http://127.0.0.1:8123/mcp"
+# bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
+# tool_prefix = "remote_graph"
