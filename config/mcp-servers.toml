@@ -1,0 +1,57 @@
+# Public external MCP upstreams loaded by default.
+#
+# This file is intentionally safe to commit: it contains only public upstream URLs
+# and npm package names, no API keys or bearer tokens.
+#
+# Private/local overrides can still live in .mcp-gateway/mcp-servers.toml or in a
+# file pointed to by MCP_UPSTREAM_CONFIG. Config lookup order is documented in README.md.
+
+[external_mcp]
+enabled = true
+fail_gateway_on_startup_error = false
+catalog_cache = "startup"
+startup_timeout_sec = 30.0
+shutdown_timeout_sec = 5.0
+default_enabled = true
+
+# Public HTTP MCP servers. transport = "http" is inferred from url.
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+startup_timeout_sec = 30.0
+
+[mcp_servers.exa]
+url = "https://mcp.exa.ai/mcp"
+startup_timeout_sec = 30.0
+
+[mcp_servers.deepwiki]
+url = "https://mcp.deepwiki.com/mcp"
+startup_timeout_sec = 30.0
+
+# File/project oriented stdio MCP servers.
+# roots = "trusted" reuses the same trusted roots as local custom_* tools.
+
+[mcp_servers.filesystem]
+preset = "filesystem"
+roots = "trusted"
+startup_timeout_sec = 30.0
+
+[mcp_servers.eslint]
+preset = "eslint"
+startup_timeout_sec = 30.0
+
+# GitNexus latest currently fails startup in this environment, so this config pins
+# a tested release candidate that exposes its MCP catalog correctly.
+[mcp_servers.gitnexus]
+runner = "npx"
+args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+startup_timeout_sec = 30.0
+
+# Codegraph is enabled when the codegraph CLI is installed on the machine.
+# With fail_gateway_on_startup_error = false, an unavailable optional upstream
+# is reported in external MCP diagnostics but does not block the gateway.
+[mcp_servers.codegraph]
+command = "codegraph"
+args = ["serve", "--mcp"]
+cwd = "${repoRoot}"
+startup_timeout_sec = 30.0

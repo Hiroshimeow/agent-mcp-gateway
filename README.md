@@ -347,12 +347,13 @@ Config lookup order:
 3. `.mcp-gateway/mcp-servers.toml`
 4. no upstreams when none exists
 
+This repository commits `config/mcp-servers.toml` with public, no-secret upstreams so a fresh clone can start with useful external MCP tools immediately. The committed config currently includes Context7, Exa, DeepWiki, filesystem, ESLint, GitNexus, and Codegraph. Public URL/package entries are safe to version because they do not contain bearer tokens or API keys. Keep private endpoints, local-only path choices, or credentials in `.mcp-gateway/mcp-servers.toml` or a file selected with `MCP_UPSTREAM_CONFIG`.
+
 Quick start after cloning:
 
 ```bash
 npm install
 cp .env.example .env
-cp config/mcp-servers.example.toml config/mcp-servers.toml
 npm start
 ```
 
@@ -361,28 +362,38 @@ Windows PowerShell equivalent:
 ```powershell
 npm install
 Copy-Item .env.example .env
-Copy-Item config/mcp-servers.example.toml config/mcp-servers.toml
 npm start
 ```
 
-Use `config/mcp-servers.toml` for a repo-local config, or `.mcp-gateway/mcp-servers.toml` for a private local config. `.mcp-gateway/` is gitignored. Do not commit real local config containing machine-specific paths or credentials.
+`config/mcp-servers.toml` is the committed public baseline. Use `.mcp-gateway/mcp-servers.toml` for a private local config. `.mcp-gateway/` is gitignored. Do not commit configs containing machine-specific secrets or bearer tokens.
 
-Simple preset examples:
+The committed public upstream config is:
 
 ```toml
 [mcp_servers.context7]
 url = "https://mcp.context7.com/mcp"
 
+[mcp_servers.exa]
+url = "https://mcp.exa.ai/mcp"
+
+[mcp_servers.deepwiki]
+url = "https://mcp.deepwiki.com/mcp"
+
 [mcp_servers.filesystem]
 preset = "filesystem"
 roots = "trusted"
 
-[mcp_servers.rg]
-preset = "ripgrep"
-roots = "trusted"
-
 [mcp_servers.eslint]
 preset = "eslint"
+
+[mcp_servers.gitnexus]
+runner = "npx"
+args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+
+[mcp_servers.codegraph]
+command = "codegraph"
+args = ["serve", "--mcp"]
+cwd = "${repoRoot}"
 ```
 
 `url` without `transport` is treated as streamable HTTP. `command` without `transport` is treated as stdio. For file-oriented presets, `roots = "trusted"` expands to the same trusted roots used by local `custom_*` tools: `REPO_ROOT`, `MCP_TRUSTED_ROOTS`, `MCP_TRUSTED_ROOTS_FILE`, and `config/trusted-roots.txt`. You can also pass explicit roots such as `roots = ["${repoRoot}", "D:\\repo-a"]`.
@@ -393,6 +404,8 @@ Preset behavior:
 - `ripgrep`: launches `@atef_andrus/mcp-ripgrep` and adds one `--allow-dir` per trusted root.
 - `eslint`: launches `@eslint/mcp@latest` from `${repoRoot}` and does not inject all trusted roots.
 - `context7`: configures `https://mcp.context7.com/mcp` over HTTP and does not receive local roots.
+
+The committed GitNexus entry pins `gitnexus@1.6.6-rc.49` because `gitnexus@latest` failed startup during validation in this environment. Codegraph requires the `codegraph` CLI to be installed; if it is missing, diagnostics mark only that upstream unavailable because `fail_gateway_on_startup_error = false`.
 
 Explicit expert config remains supported:
 
