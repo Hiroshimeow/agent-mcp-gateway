@@ -367,7 +367,34 @@ npm start
 
 Use `config/mcp-servers.toml` for a repo-local config, or `.mcp-gateway/mcp-servers.toml` for a private local config. `.mcp-gateway/` is gitignored. Do not commit real local config containing machine-specific paths or credentials.
 
-Stdio upstream example:
+Simple preset examples:
+
+```toml
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.filesystem]
+preset = "filesystem"
+roots = "trusted"
+
+[mcp_servers.rg]
+preset = "ripgrep"
+roots = "trusted"
+
+[mcp_servers.eslint]
+preset = "eslint"
+```
+
+`url` without `transport` is treated as streamable HTTP. `command` without `transport` is treated as stdio. For file-oriented presets, `roots = "trusted"` expands to the same trusted roots used by local `custom_*` tools: `REPO_ROOT`, `MCP_TRUSTED_ROOTS`, `MCP_TRUSTED_ROOTS_FILE`, and `config/trusted-roots.txt`. You can also pass explicit roots such as `roots = ["${repoRoot}", "D:\\repo-a"]`.
+
+Preset behavior:
+
+- `filesystem`: launches `@modelcontextprotocol/server-filesystem` with platform-aware `npx` and appends trusted roots.
+- `ripgrep`: launches `@atef_andrus/mcp-ripgrep` and adds one `--allow-dir` per trusted root.
+- `eslint`: launches `@eslint/mcp@latest` from `${repoRoot}` and does not inject all trusted roots.
+- `context7`: configures `https://mcp.context7.com/mcp` over HTTP and does not receive local roots.
+
+Explicit expert config remains supported:
 
 ```toml
 [mcp_servers.codegraph]
@@ -377,30 +404,16 @@ command = "codegraph"
 args = ["serve", "--mcp"]
 cwd = "."
 tool_prefix = "codegraph"
-```
 
-Another stdio upstream example:
-
-```toml
-[mcp_servers.gitnexus]
-enabled = true
-transport = "stdio"
-command = "npx"
-args = ["-y", "gitnexus@latest", "mcp"]
-cwd = "."
-tool_prefix = "gitnexus"
-```
-
-HTTP / streamable HTTP upstream example:
-
-```toml
 [mcp_servers.remote_graph]
 enabled = true
-transport = "http"
 url = "http://127.0.0.1:8123/mcp"
 bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
 tool_prefix = "remote_graph"
+startup_timeout_sec = 30
 ```
+
+If you set `args` explicitly, the gateway does not silently append trusted roots. Set `inherit_trusted_roots = true` on file-oriented presets only when you want preset root expansion added to your explicit args. `runner = "npx"` is available as a shorthand and resolves to `npx.cmd` on Windows and `npx` elsewhere, but an explicit `command` is never rewritten. Millisecond timeout keys win over `_sec` aliases when both are present.
 
 Set `REMOTE_GRAPH_MCP_TOKEN` in the environment or `.env`; do not put literal credential values in TOML.
 

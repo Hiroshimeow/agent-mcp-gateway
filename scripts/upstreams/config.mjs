@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as toml from 'smol-toml';
 import { validateExternalToolPrefix, validateUpstreamId } from './names.mjs';
+import { expandMcpPreset, expandPlaceholders, normalizeRunnerCommand } from './presets.mjs';
+import { resolveTrustedRootPaths } from '../projects/trusted-roots-projects.mjs';
 
 const DEFAULT_EXTERNAL = {
   enabled: true,
@@ -26,6 +28,34 @@ function asMs(value, fallback, label) {
   const n = Number(value ?? fallback);
   if (!Number.isFinite(n) || n < 0) throw new Error(`Invalid ${label}: ${value}`);
   return n;
+}
+
+function asMsWithSec(raw, msKey, secKey, fallback, label) {
+  if (raw && Object.prototype.hasOwnProperty.call(raw, msKey)) return asMs(raw[msKey], fallback, label);
+  if (raw && Object.prototype.hasOwnProperty.call(raw, secKey)) {
+    const n = Number(raw[secKey]);
+    if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid ${secKey}: ${raw[secKey]}`);
+    return n * 1000;
+  }
+  return asMs(undefined, fallback, label);
+}
+
+function readTrustedRootsFile(filePath, baseDir) {
+  const value = String(filePath || '').trim();
+  if (!value) return '';
+  const normalized = value.replace(/^[']|[']$/g, '').replace(/^["]|["]$/g, '').replace(/^\\\?\\/, '');
+  const resolvedPath = path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(baseDir, normalized);
+  if (!fs.existsSync(resolvedPath)) return '';
+  return fs.readFileSync(resolvedPath, 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).join('\n');
+}
+
+function trustedRootsFromEnv(env, repoRoot) {
+  const raw = [
+    env.MCP_TRUSTED_ROOTS,
+    readTrustedRootsFile(env.MCP_TRUSTED_ROOTS_FILE, repoRoot),
+    readTrustedRootsFile(path.resolve(repoRoot, 'config/trusted-roots.txt'), repoRoot)
+  ].filter(Boolean).join('\n');
+  return resolveTrustedRootPaths(raw, repoRoot).existingRoots;
 }
 
 function resolveMaybeRelative(value, baseDir) {
@@ -63,8 +93,8 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
     enabled: envFlag(env.MCP_EXTERNAL_MCP_ENABLED, externalRaw.enabled ?? DEFAULT_EXTERNAL.enabled),
     catalog_cache: catalogCache,
     catalog_cache_ttl_ms: DEFAULT_EXTERNAL.catalog_cache_ttl_ms,
-    startup_timeout_ms: asMs(externalRaw.startup_timeout_ms, DEFAULT_EXTERNAL.startup_timeout_ms, 'startup_timeout_ms'),
-    shutdown_timeout_ms: asMs(externalRaw.shutdown_timeout_ms, DEFAULT_EXTERNAL.shutdown_timeout_ms, 'shutdown_timeout_ms')
+    startup_timeout_ms: asMsWithSec(externalRaw, 'startup_timeout_ms', 'startup_timeout_sec', DEFAULT_EXTERNAL.startup_timeout_ms, 'startup_timeout_ms'),
+    shutdown_timeout_ms: asMsWithSec(externalRaw, 'shutdown_timeout_ms', 'shutdown_timeout_sec', DEFAULT_EXTERNAL.shutdown_timeout_ms, 'shutdown_timeout_ms')
   };
   external.fail_gateway_on_startup_error = Boolean(externalRaw.fail_gateway_on_startup_error ?? DEFAULT_EXTERNAL.fail_gateway_on_startup_error);
   if (!['startup', 'ttl', 'none'].includes(external.catalog_cache)) throw new Error(`Invalid catalog_cache: ${external.catalog_cache}`);
@@ -78,11 +108,17 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
 
   const baseDir = configPath ? path.dirname(configPath) : repoRoot;
   const serversRaw = raw.mcp_servers || {};
+  const trustedRoots = trustedRootsFromEnv(env, repoRoot);
+  const placeholderContext = { repoRoot: path.resolve(repoRoot), cwd: baseDir, env, trustedRoots, platform: process.platform };
   const servers = [];
-  for (const [rawId, serverRaw] of Object.entries(serversRaw)) {
+  for (const [rawId, rawServerRaw] of Object.entries(serversRaw)) {
     const id = validateUpstreamId(rawId);
+    const serverRaw = expandMcpPreset(id, rawServerRaw, placeholderContext);
     const enabled = Boolean(serverRaw.enabled ?? external.default_enabled);
-    const transport = String(serverRaw.transport || external.default_transport).trim().toLowerCase();
+    let transport = serverRaw.transport;
+    if (!transport && serverRaw.url) transport = 'http';
+    if (!transport && (serverRaw.command || serverRaw.runner)) transport = 'stdio';
+    transport = String(transport || external.default_transport).trim().toLowerCase();
     if (!['stdio', 'http'].includes(transport)) throw new Error(`Invalid transport for ${id}: ${transport}`);
     const toolPrefix = validateExternalToolPrefix(serverRaw.tool_prefix || id, `tool_prefix for ${id}`);
     const server = {
@@ -90,17 +126,18 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
       enabled,
       transport,
       toolPrefix,
-      startupTimeoutMs: asMs(serverRaw.startup_timeout_ms, external.startup_timeout_ms, `startup_timeout_ms for ${id}`),
-      shutdownTimeoutMs: asMs(serverRaw.shutdown_timeout_ms, external.shutdown_timeout_ms, `shutdown_timeout_ms for ${id}`)
+      startupTimeoutMs: asMsWithSec(serverRaw, 'startup_timeout_ms', 'startup_timeout_sec', external.startup_timeout_ms, `startup_timeout_ms for ${id}`),
+      shutdownTimeoutMs: asMsWithSec(serverRaw, 'shutdown_timeout_ms', 'shutdown_timeout_sec', external.shutdown_timeout_ms, `shutdown_timeout_ms for ${id}`)
     };
     if (transport === 'stdio') {
-      if (!serverRaw.command || typeof serverRaw.command !== 'string') throw new Error(`stdio upstream ${id} requires command`);
-      server.command = serverRaw.command;
-      server.args = Array.isArray(serverRaw.args) ? serverRaw.args.map(String) : [];
-      server.cwd = resolveMaybeRelative(serverRaw.cwd || '.', baseDir);
+      const command = serverRaw.command || normalizeRunnerCommand(serverRaw.runner, process.platform);
+      if (!command || typeof command !== 'string') throw new Error(`stdio upstream ${id} requires command`);
+      server.command = command;
+      server.args = Array.isArray(serverRaw.args) ? serverRaw.args.map(item => expandPlaceholders(String(item), placeholderContext)) : [];
+      server.cwd = resolveMaybeRelative(expandPlaceholders(serverRaw.cwd || '.', placeholderContext), baseDir);
     } else {
       if (!serverRaw.url || typeof serverRaw.url !== 'string') throw new Error(`http upstream ${id} requires url`);
-      server.url = serverRaw.url;
+      server.url = expandPlaceholders(serverRaw.url, placeholderContext);
       if (serverRaw.bearer_token) throw new Error(`http upstream ${id} must use bearer_token_env, not literal bearer_token`);
       if (serverRaw.bearer_token_env) {
         server.bearerTokenEnv = String(serverRaw.bearer_token_env);

@@ -23,25 +23,50 @@ shutdown_timeout_ms = 5000
 default_transport = "stdio"
 default_enabled = true
 
-[mcp_servers.codegraph]
-enabled = true
-transport = "stdio"
-command = "codegraph"
-args = ["serve", "--mcp"]
-cwd = "."
-tool_prefix = "codegraph"
+# Simple onboarding presets.
+# File-oriented presets can reuse the same trusted roots as local custom tools.
+# Trusted roots come from REPO_ROOT, MCP_TRUSTED_ROOTS, MCP_TRUSTED_ROOTS_FILE,
+# and config/trusted-roots.txt.
 
-[mcp_servers.gitnexus]
-enabled = true
-transport = "stdio"
-command = "npx"
-args = ["-y", "gitnexus@latest", "mcp"]
-tool_prefix = "gitnexus"
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
 
-# HTTP / streamable HTTP example. Use bearer_token_env for secrets.
+[mcp_servers.filesystem]
+preset = "filesystem"
+roots = "trusted"
+
+[mcp_servers.rg]
+preset = "ripgrep"
+roots = "trusted"
+
+[mcp_servers.eslint]
+preset = "eslint"
+
+# Explicit expert stdio config remains supported. If args are set explicitly,
+# presets do not append trusted roots unless inherit_trusted_roots = true.
+# [mcp_servers.codegraph]
+# enabled = true
+# transport = "stdio"
+# command = "codegraph"
+# args = ["serve", "--mcp"]
+# cwd = "."
+# tool_prefix = "codegraph"
+
+# Runner shorthand is platform-aware: npx.cmd on Windows, npx elsewhere.
+# [mcp_servers.gitnexus]
+# enabled = true
+# runner = "npx"
+# args = ["-y", "gitnexus@latest", "mcp"]
+# tool_prefix = "gitnexus"
+
+# HTTP / streamable HTTP example. transport = "http" is inferred when url is set.
+# Use bearer_token_env for secrets; do not put literal credential values in TOML.
 # [mcp_servers.remote_graph]
 # enabled = true
-# transport = "http"
 # url = "http://127.0.0.1:8123/mcp"
 # bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
 # tool_prefix = "remote_graph"
+
+# Timeout aliases are accepted. Milliseconds win when both forms are present.
+# startup_timeout_sec = 30
+# shutdown_timeout_sec = 5
