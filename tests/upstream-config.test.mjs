@@ -173,6 +173,23 @@ roots = "trusted"
   assert.ok(args.includes('80000'));
 });
 
+test('ripgrep preset explicit args inherit trusted roots only when explicitly requested', async () => {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mcp-config-'));
+  const configPath = path.join(dir, 'ripgrep-inherit.toml');
+  await fs.promises.writeFile(configPath, `
+[trusted_roots]
+roots = ["${dir.replaceAll('\\', '\\\\')}"]
+
+[mcp_servers.rg]
+preset = "ripgrep"
+roots = "trusted"
+args = ["-y", "@atef_andrus/mcp-ripgrep"]
+inherit_trusted_roots = true
+`);
+  const cfg = await loadExternalMcpConfig({ repoRoot: dir, env: { MCP_UPSTREAM_CONFIG: configPath } });
+  assert.deepEqual(cfg.servers[0].args, ['-y', '@atef_andrus/mcp-ripgrep', '--allow-dir', path.resolve(dir)]);
+});
+
 test('eslint preset defaults cwd to repoRoot without trusted root injection', async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mcp-config-'));
   const configPath = path.join(dir, 'eslint.toml');

@@ -54,10 +54,11 @@ export function expandMcpPreset(id, serverRaw = {}, context = {}) {
   if (preset === 'filesystem') {
     const shouldAppendRoots = !explicitArgs || inheritTrustedRoots;
     const args = explicitArgs ? serverRaw.args : ['-y', '@modelcontextprotocol/server-filesystem'];
-    return withPresetDefaults(serverRaw, {
+    const expandedArgs = shouldAppendRoots ? [...args, ...roots] : args;
+    return withPresetDefaults({ ...serverRaw, args: expandedArgs }, {
       transport: 'stdio',
       command: serverRaw.command || runnerCommand,
-      args: shouldAppendRoots ? [...args, ...roots] : args,
+      args: expandedArgs,
       startup_timeout_ms: 30000,
       shutdown_timeout_ms: 5000,
       tool_prefix: id
@@ -66,10 +67,12 @@ export function expandMcpPreset(id, serverRaw = {}, context = {}) {
 
   if (preset === 'ripgrep') {
     const rootArgs = roots.flatMap(root => ['--allow-dir', root]);
-    const args = explicitArgs
+    const shouldAppendRoots = !explicitArgs || inheritTrustedRoots;
+    const baseArgs = explicitArgs
       ? serverRaw.args
-      : ['-y', '@atef_andrus/mcp-ripgrep', ...rootArgs, '--max-result-chars', '80000', '--max-output-bytes', '20000000'];
-    return withPresetDefaults(serverRaw, {
+      : ['-y', '@atef_andrus/mcp-ripgrep', '--max-result-chars', '80000', '--max-output-bytes', '20000000'];
+    const args = shouldAppendRoots ? [...baseArgs, ...rootArgs] : baseArgs;
+    return withPresetDefaults({ ...serverRaw, args }, {
       transport: 'stdio',
       command: serverRaw.command || runnerCommand,
       args,
