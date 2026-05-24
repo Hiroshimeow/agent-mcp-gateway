@@ -16,21 +16,39 @@ export async function createStdioUpstreamClient(serverConfig) {
     command: serverConfig.command,
     args: serverConfig.args || [],
     cwd: serverConfig.cwd,
-    stderr: 'pipe'
+    stderr: 'pipe',
+    windowsHide: true
   });
   let stderr = '';
+  let running = true;
   transport.stderr?.on?.('data', chunk => {
     stderr = `${stderr}${chunk.toString()}`.slice(-4000);
   });
+  transport.onclose = () => { running = false; };
   const client = new Client({ name: `agent-mcp-gateway-upstream-${serverConfig.id}`, version: '1.0.0' }, { capabilities: {} });
   await withTimeout(client.connect(transport), serverConfig.startupTimeoutMs || 15000, `upstream ${serverConfig.id} initialize`);
+  const capabilities = client.getServerCapabilities?.() || {};
   return {
     id: serverConfig.id,
     config: serverConfig,
     client,
     transport,
+    capabilities,
     get pid() { return transport.pid; },
     get stderr() { return stderr; },
+    isRunning() { return running && Boolean(transport.pid); },
+    kill(signal = 'SIGTERM') {
+      if (!running) return false;
+      const pid = transport.pid;
+      if (!pid) return false;
+      try {
+        process.kill(pid, signal);
+        return true;
+      } catch {
+        running = false;
+        return false;
+      }
+    },
     async listTools() { return await client.listTools(); },
     async callTool(params) { return await client.callTool(params); },
     async listResources() { return await client.listResources(); },
@@ -41,6 +59,7 @@ export async function createStdioUpstreamClient(serverConfig) {
     async close() {
       await client.close().catch(() => {});
       await transport.close().catch(() => {});
+      running = false;
     }
   };
 }

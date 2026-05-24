@@ -26,7 +26,7 @@ args = ["${fakeServer.replaceAll('\\', '\\\\')}"]
 `);
   const manager = await createExternalMcpManager({ repoRoot: root, env: { MCP_UPSTREAM_CONFIG: configPath } });
   try {
-    const toolNames = manager.listAllToolsUnfiltered().map(tool => tool.name);
+    const toolNames = (await manager.listAllToolsUnfiltered()).map(tool => tool.name);
     assert.ok(toolNames.includes('fake_read_context'));
     assert.ok(toolNames.includes('fake_write_context'));
     assert.ok(toolNames.includes('fake_push_context'));

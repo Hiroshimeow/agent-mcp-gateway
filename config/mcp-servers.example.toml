@@ -5,13 +5,19 @@
 # Windows PowerShell:
 #   Copy-Item config/mcp-servers.example.toml config/mcp-servers.toml
 #
-# Restart the gateway after changing this file. The upstream catalog is built at startup.
 # Do not commit real local upstream configs or secrets.
+# catalog_cache controls how imported upstream catalogs refresh:
+#   startup: build once at gateway startup.
+#   ttl: atomically refresh after catalog_cache_ttl_ms expires on list requests.
+#   none: atomically refresh on every catalog list request.
 
 [external_mcp]
 enabled = true
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
+# catalog_cache = "ttl"
+# catalog_cache_ttl_ms = 30000
+# catalog_cache = "none"
 startup_timeout_ms = 15000
 shutdown_timeout_ms = 5000
 default_transport = "stdio"

@@ -33,6 +33,7 @@ import {
   buildTrustedRootsMetadata,
   buildTrustedRootsNotice,
   normalizeToolForAutopilot,
+  toCustomToolName,
   toUpstreamToolName
 } from './tool-metadata.mjs';
 import {
@@ -205,7 +206,10 @@ async function listLocalToolNamesForCollisionCheck() {
   const names = new Set();
   if (filesystemClient) {
     const filesystemResult = await filesystemClient.listTools();
-    for (const tool of filesystemResult.tools || []) names.add(tool.name);
+    for (const tool of filesystemResult.tools || []) {
+      names.add(tool.name);
+      names.add(toCustomToolName(tool.name));
+    }
   }
   for (const tool of listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry })) names.add(tool.name);
   if (enableShell) {
@@ -261,7 +265,7 @@ async function listAllMergedToolsUnfiltered() {
     });
   }
 
-  tools.push(...externalMcpManager.listAllToolsUnfiltered());
+  tools.push(...await externalMcpManager.listAllToolsUnfiltered());
 
   return tools.map(tool => tool._meta?.upstream ? tool : applyToolRisk(tool));
 }
@@ -321,7 +325,7 @@ async function routeToolCall(request) {
     };
   }
 
-  if (externalMcpManager.hasTool(toolName)) {
+  if (externalMcpManager.isExternalToolName(toolName)) {
     return await externalMcpManager.callTool(toolName, request.params.arguments || {}, safetyProfile);
   }
 
@@ -381,16 +385,16 @@ function createProxyServer() {
     listTools: listAllMergedToolsUnfiltered
   };
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [...listRepoResources(resourceContext), ...externalMcpManager.listResources()] }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [...listRepoResourceTemplates(resourceContext), ...externalMcpManager.listResourceTemplates()] }));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [...listRepoResources(resourceContext), ...await externalMcpManager.listResources()] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [...listRepoResourceTemplates(resourceContext), ...await externalMcpManager.listResourceTemplates()] }));
   server.setRequestHandler(ReadResourceRequestSchema, async request => {
     if (isExternalResourceUri(request.params.uri)) return await externalMcpManager.readResource(request.params.uri);
     return await readRepoResource(request.params.uri, resourceContext);
   });
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ safetyProfile }), ...externalMcpManager.listPrompts()] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ safetyProfile }), ...await externalMcpManager.listPrompts()] }));
   server.setRequestHandler(GetPromptRequestSchema, async request => {
-    if (externalMcpManager.hasPrompt(request.params.name)) return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
+    if (externalMcpManager.isExternalPromptName(request.params.name)) return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
     return getRepoPrompt(request.params.name, request.params.arguments || {}, { safetyProfile, defaultProjectId: projectRegistry.defaultProjectId });
   });
 

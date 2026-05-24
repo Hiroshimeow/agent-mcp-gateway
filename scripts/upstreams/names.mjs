@@ -1,4 +1,5 @@
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const RESERVED_TOOL_PREFIXES = new Set(['custom']);
 
 export function validateUpstreamId(id, label = 'upstream id') {
   const value = String(id ?? '').trim();
@@ -7,6 +8,14 @@ export function validateUpstreamId(id, label = 'upstream id') {
   }
   if (value.includes('..') || /[\\/]/.test(value)) {
     throw new Error(`Invalid ${label}: ${id}. Path separators and dot-dot are not allowed.`);
+  }
+  return value;
+}
+
+export function validateExternalToolPrefix(prefix, label = 'tool prefix') {
+  const value = validateUpstreamId(prefix, label);
+  if (RESERVED_TOOL_PREFIXES.has(value)) {
+    throw new Error(`Invalid ${label}: ${value}. This prefix is reserved for local gateway tools.`);
   }
   return value;
 }

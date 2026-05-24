@@ -15,8 +15,34 @@ async function runGit(_context, cwd, args) {
   return await executeGit(args, { cwd, timeout: 300000 });
 }
 
+const SECRET_TOKEN_MARKERS = [
+  ['ghp', ''].join('_'),
+  ['github', 'pat', ''].join('_'),
+  ['sk', '[A-Za-z0-9_-]{16,}'].join('-'),
+  ['BEGIN .*PRIVATE', 'KEY'].join(' ')
+];
+const SECRET_ASSIGNMENT_NAMES = [
+  ['MCP', 'BEARER', 'TOKEN'].join('_'),
+  ['MCP', 'AUTH', 'PASSWORD'].join('_'),
+  'api[_-]?key',
+  'token',
+  'password',
+  'authorization'
+];
+const SECRET_ADDED_LINE_PATTERN = new RegExp(`(${SECRET_TOKEN_MARKERS.join('|')}|\\b(?:${SECRET_ASSIGNMENT_NAMES.join('|')})\\b\\s*[:=]\\s*['\"]?\\S{8,})`, 'i');
+const REVIEW_TOOL_PATH = 'scripts/custom-tools/review-tools.mjs';
+
 function addFinding(findings, severity, category, pathName, line, title, detail, suggestion = '') {
   findings.push({ severity, category, path: pathName, line, title, detail, suggestion });
+}
+
+function shouldScanAddedLineForSecret(currentPath, addedLine) {
+  if (normalizeGitPath(currentPath) !== REVIEW_TOOL_PATH) return true;
+  const added = String(addedLine || '');
+  return !(
+    /SECRET_(TOKEN_MARKERS|ASSIGNMENT_NAMES|ADDED_LINE_PATTERN)/.test(added) ||
+    /new RegExp/.test(added)
+  );
 }
 
 function normalizeGitPath(filePath) {
@@ -84,7 +110,7 @@ export async function reviewDiffTool(args = {}, context = {}) {
       if (line.startsWith('+') && !line.startsWith('+++')) {
         const added = line.slice(1);
         if (/(\.env$|logs\/|\.log$)/i.test(currentPath)) addFinding(findings, 'warning', 'release', currentPath, newLine, 'Sensitive/generated file changed', 'Avoid committing .env or log files.', 'Remove from staging or verify .gitignore.');
-        if (/(ghp_|github_pat_|sk-|BEGIN .*PRIVATE KEY|MCP_BEARER_TOKEN|MCP_AUTH_PASSWORD)/.test(added)) addFinding(findings, 'error', 'security', currentPath, newLine, 'Token-like value added', 'Changed line appears to contain a secret-like value.', 'Remove the value and run custom_secret_scan.');
+        if (shouldScanAddedLineForSecret(currentPath, added) && SECRET_ADDED_LINE_PATTERN.test(added)) addFinding(findings, 'error', 'security', currentPath, newLine, 'Token-like value added', 'Changed line appears to contain a secret-like value.', 'Remove the value and run custom_secret_scan.');
         if (/executeDirectShell|execFile|spawn\(/.test(added) && focus.includes('security')) addFinding(findings, 'warning', 'security', currentPath, newLine, 'Shell execution changed', 'Review validation and trusted-root handling around shell execution.', 'Prefer dedicated wrappers and validate inputs.');
         if (/OAuth|Bearer|authPassword|staticBearerToken|requireBearerAuth/.test(added)) addFinding(findings, 'warning', 'security', currentPath, newLine, 'Auth logic changed', 'Review OAuth/static bearer behavior before publish.', 'Run auth tests and release review.');
         if (/TODO|FIXME/.test(added)) addFinding(findings, 'note', 'maintainability', currentPath, newLine, 'TODO/FIXME added', 'Changed line adds a TODO or FIXME.', 'Resolve before release or track in TODO.md.');

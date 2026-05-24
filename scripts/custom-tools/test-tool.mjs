@@ -6,7 +6,9 @@ const ALLOWED_COMMANDS = new Set([
   'npm run test',
   'node --test tests/*.test.mjs',
   'npm run smoke:mcp:tools',
-  'node scripts/smoke-mcp-tools.mjs'
+  'node scripts/smoke-mcp-tools.mjs',
+  'npm run smoke:mcp:upstreams',
+  'node scripts/smoke-mcp-upstreams.mjs'
 ]);
 
 export async function runTestsTool(args = {}, context = {}) {

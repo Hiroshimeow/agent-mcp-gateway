@@ -338,7 +338,7 @@ The test suite covers:
 
 ## Dynamic external MCP upstreams
 
-The gateway remains the only MCP server registered with ChatGPT while importing tools, resources, and prompts from configured upstream MCP servers at startup. Restart the gateway after changing upstream config; the catalog is built when the process starts.
+The gateway remains the only MCP server registered with ChatGPT while importing tools, resources, and prompts from configured upstream MCP servers. By default `catalog_cache = "startup"` builds the imported catalog once when the gateway starts. `catalog_cache = "ttl"` refreshes the complete upstream catalog atomically after `catalog_cache_ttl_ms` expires on a catalog list request. `catalog_cache = "none"` refreshes atomically on every tools/resources/templates/prompts list request. Calls and reads always route through the latest committed catalog snapshot; if a refresh fails or detects a name/URI collision, the previous snapshot stays active.
 
 Config lookup order:
 
@@ -411,7 +411,7 @@ Imported capabilities are exposed as:
 - resources: `external-mcp://<server>/<base64url-upstream-uri>`
 - diagnostics: `external-mcp://_diagnostics/status` and `external-mcp://<server>/status`
 
-External upstream tools are yolo dynamic proxy capabilities. The gateway imports enabled upstream tools, preserves upstream annotations and metadata when provided, adds `_meta.upstream` for routing provenance, and routes calls back to the owning upstream. Risk-model notes are tracked in `.plan/risk.md`.
+External upstream tools are yolo dynamic proxy capabilities. The gateway imports enabled upstream tools, preserves upstream annotations and metadata when provided, adds `_meta.upstream` for routing provenance, and routes calls back to the owning upstream. The gateway does not add provider-specific allowlists, generic catch-all MCP call tools, or gateway-side risk filtering for external MCP. Risk-model notes are tracked in `.plan/risk.md`.
 
 ## Logs
 

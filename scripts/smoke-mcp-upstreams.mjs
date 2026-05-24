@@ -50,6 +50,7 @@ async function makeConfig() {
   await fs.promises.writeFile(config, `
 [external_mcp]
 fail_gateway_on_startup_error = false
+catalog_cache = "startup"
 
 [mcp_servers.fake]
 transport = "stdio"
