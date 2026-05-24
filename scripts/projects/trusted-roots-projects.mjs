@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import * as toml from 'smol-toml';
 
 import {
   assertValidProjectId,
@@ -15,13 +16,80 @@ function cleanRootPath(rootPath) {
     .replace(/^\\\\\?\\/, '');
 }
 
+function isWindowsDrivePath(rootPath) {
+  return /^[A-Za-z]:[\\/]/.test(String(rootPath || ''));
+}
+
 function normalizeRootPath(rootPath) {
-  return path.resolve(cleanRootPath(rootPath));
+  const cleaned = cleanRootPath(rootPath);
+  if (process.platform !== 'win32' && isWindowsDrivePath(cleaned)) {
+    return cleaned.replace(/\\/g, '/');
+  }
+  return path.resolve(cleaned);
 }
 
 function isInsideRoot(candidatePath, rootPath) {
   const relative = path.relative(rootPath, candidatePath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+
+export function trustedRootEntryToLine(entry, context = {}) {
+  if (typeof entry === 'string') return entry;
+  if (!entry || typeof entry !== 'object') return '';
+  const rawRoot = entry.path ?? entry.root;
+  if (!rawRoot) return '';
+  const root = expandTrustedRootPlaceholders(String(rawRoot), context);
+  const fields = [root];
+  if (entry.project_id ?? entry.projectId) fields.push(String(entry.project_id ?? entry.projectId));
+  if (entry.display_name ?? entry.displayName) {
+    if (fields.length === 1) fields.push('');
+    fields.push(String(entry.display_name ?? entry.displayName));
+  }
+  return fields.join(' | ');
+}
+
+export function trustedRootsTomlToRaw(trustedRootsRaw, context = {}) {
+  if (!trustedRootsRaw) return '';
+  const entries = Array.isArray(trustedRootsRaw.roots) ? trustedRootsRaw.roots : [];
+  return entries.map(entry => trustedRootEntryToLine(entry, context)).filter(Boolean).join('\n');
+}
+
+export function expandTrustedRootPlaceholders(value, { repoRoot = process.cwd(), home = process.env.HOME || process.env.USERPROFILE || '' } = {}) {
+  return String(value).replace(/\$\{([^}]+)\}/g, (match, name) => {
+    if (name === 'repoRoot') return repoRoot;
+    if (name === 'home') return home;
+    return match;
+  });
+}
+
+export function loadUnifiedMcpTomlConfig(configPath) {
+  if (!configPath || !fs.existsSync(configPath)) return {};
+  return toml.parse(fs.readFileSync(configPath, 'utf8'));
+}
+
+export function defaultUnifiedMcpConfigPath(repoRoot = process.cwd()) {
+  return path.resolve(repoRoot, 'config/mcp-servers.toml');
+}
+
+export function findUnifiedMcpConfigPath(env = process.env, repoRoot = process.cwd()) {
+  if (String(env.MCP_UPSTREAM_CONFIG || '').trim()) {
+    const value = String(env.MCP_UPSTREAM_CONFIG).trim().replace(/^['"]|['"]$/g, '');
+    return path.isAbsolute(value) ? path.resolve(value) : path.resolve(repoRoot, value);
+  }
+  const candidate = defaultUnifiedMcpConfigPath(repoRoot);
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+export function trustedRootsRawFromSources({ rawConfig = {}, env = process.env, repoRoot = process.cwd() } = {}) {
+  const rawFromToml = trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot });
+  return [rawFromToml, env.MCP_TRUSTED_ROOTS].filter(Boolean).join('\n');
+}
+
+export function loadTrustedRootsRawFromUnifiedConfig({ env = process.env, repoRoot = process.cwd() } = {}) {
+  const configPath = findUnifiedMcpConfigPath(env, repoRoot);
+  const rawConfig = loadUnifiedMcpTomlConfig(configPath);
+  return trustedRootsRawFromSources({ rawConfig, env, repoRoot });
 }
 
 export function splitTrustedRootConfig(rawValue) {
@@ -87,7 +155,7 @@ export function parseTrustedRootLine(line, options = {}) {
     throw error;
   }
 
-  if (!path.isAbsolute(root)) {
+  if (!path.isAbsolute(root) && !isWindowsDrivePath(root)) {
     const error = new Error(`Trusted root must be absolute: ${root}`);
     error.code = 'TRUSTED_ROOT_MUST_BE_ABSOLUTE';
     error.details = { root, lineNumber };

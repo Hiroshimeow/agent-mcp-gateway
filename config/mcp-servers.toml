@@ -1,10 +1,23 @@
-# Public external MCP upstreams loaded by default.
+# Unified MCP gateway config.
 #
-# This file is intentionally safe to commit: it contains only public upstream URLs
-# and npm package names, no API keys or bearer tokens.
+# This is the single committed config file for trusted roots and optional public
+# external MCP upstreams. It intentionally contains no API keys, bearer tokens,
+# or other secrets.
 #
-# Private/local overrides can still live in .mcp-gateway/mcp-servers.toml or in a
-# file pointed to by MCP_UPSTREAM_CONFIG. Config lookup order is documented in README.md.
+# TOML comments use '#'. The public external MCP examples below are commented out
+# by default to avoid importing too many tools in a fresh clone. Uncomment only
+# the upstreams you want to use.
+
+[trusted_roots]
+# Trusted roots are shared by local custom_* tools and file-oriented external MCP presets.
+# Each entry may be a string path or an object with path/project_id/display_name.
+# Supported path examples:
+#   "${repoRoot}"
+#   "C:\\temp"   # Windows path; backslashes must be escaped inside TOML strings.
+#   "C:/temp"    # Also accepted on Windows.
+roots = [
+  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
+]
 
 [external_mcp]
 enabled = true
@@ -16,42 +29,42 @@ default_enabled = true
 
 # Public HTTP MCP servers. transport = "http" is inferred from url.
 
-[mcp_servers.context7]
-url = "https://mcp.context7.com/mcp"
-startup_timeout_sec = 30.0
+# [mcp_servers.context7]
+# url = "https://mcp.context7.com/mcp"
+# startup_timeout_sec = 30.0
 
-[mcp_servers.exa]
-url = "https://mcp.exa.ai/mcp"
-startup_timeout_sec = 30.0
+# [mcp_servers.exa]
+# url = "https://mcp.exa.ai/mcp"
+# startup_timeout_sec = 30.0
 
-[mcp_servers.deepwiki]
-url = "https://mcp.deepwiki.com/mcp"
-startup_timeout_sec = 30.0
+# [mcp_servers.deepwiki]
+# url = "https://mcp.deepwiki.com/mcp"
+# startup_timeout_sec = 30.0
 
 # File/project oriented stdio MCP servers.
-# roots = "trusted" reuses the same trusted roots as local custom_* tools.
+# roots = "trusted" reuses [trusted_roots].roots above.
 
-[mcp_servers.filesystem]
-preset = "filesystem"
-roots = "trusted"
-startup_timeout_sec = 30.0
+# [mcp_servers.filesystem]
+# preset = "filesystem"
+# roots = "trusted"
+# startup_timeout_sec = 30.0
 
-[mcp_servers.eslint]
-preset = "eslint"
-startup_timeout_sec = 30.0
+# [mcp_servers.eslint]
+# preset = "eslint"
+# startup_timeout_sec = 30.0
 
 # GitNexus latest currently fails startup in this environment, so this config pins
 # a tested release candidate that exposes its MCP catalog correctly.
-[mcp_servers.gitnexus]
-runner = "npx"
-args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
-startup_timeout_sec = 30.0
+# [mcp_servers.gitnexus]
+# runner = "npx"
+# args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+# startup_timeout_sec = 30.0
 
 # Codegraph is enabled when the codegraph CLI is installed on the machine.
 # With fail_gateway_on_startup_error = false, an unavailable optional upstream
 # is reported in external MCP diagnostics but does not block the gateway.
-[mcp_servers.codegraph]
-command = "codegraph"
-args = ["serve", "--mcp"]
-cwd = "${repoRoot}"
-startup_timeout_sec = 30.0
+# [mcp_servers.codegraph]
+# command = "codegraph"
+# args = ["serve", "--mcp"]
+# cwd = "${repoRoot}"
+# startup_timeout_sec = 30.0

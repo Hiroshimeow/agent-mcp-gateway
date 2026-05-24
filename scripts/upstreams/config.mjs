@@ -1,9 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import * as toml from 'smol-toml';
 import { validateExternalToolPrefix, validateUpstreamId } from './names.mjs';
 import { expandMcpPreset, expandPlaceholders, normalizeRunnerCommand } from './presets.mjs';
-import { resolveTrustedRootPaths } from '../projects/trusted-roots-projects.mjs';
+import {
+  findUnifiedMcpConfigPath,
+  loadUnifiedMcpTomlConfig,
+  resolveTrustedRootPaths,
+  trustedRootsRawFromSources
+} from '../projects/trusted-roots-projects.mjs';
 
 const DEFAULT_EXTERNAL = {
   enabled: true,
@@ -40,22 +44,9 @@ function asMsWithSec(raw, msKey, secKey, fallback, label) {
   return asMs(undefined, fallback, label);
 }
 
-function readTrustedRootsFile(filePath, baseDir) {
-  const value = String(filePath || '').trim();
-  if (!value) return '';
-  const normalized = value.replace(/^[']|[']$/g, '').replace(/^["]|["]$/g, '').replace(/^\\\?\\/, '');
-  const resolvedPath = path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(baseDir, normalized);
-  if (!fs.existsSync(resolvedPath)) return '';
-  return fs.readFileSync(resolvedPath, 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).join('\n');
-}
-
-function trustedRootsFromEnv(env, repoRoot) {
-  const raw = [
-    env.MCP_TRUSTED_ROOTS,
-    readTrustedRootsFile(env.MCP_TRUSTED_ROOTS_FILE, repoRoot),
-    readTrustedRootsFile(path.resolve(repoRoot, 'config/trusted-roots.txt'), repoRoot)
-  ].filter(Boolean).join('\n');
-  return resolveTrustedRootPaths(raw, repoRoot).existingRoots;
+function trustedRootsFromConfig(raw, env, repoRoot) {
+  const trustedRootsRaw = trustedRootsRawFromSources({ rawConfig: raw, env, repoRoot });
+  return resolveTrustedRootPaths(trustedRootsRaw, repoRoot).existingRoots;
 }
 
 function resolveMaybeRelative(value, baseDir) {
@@ -65,13 +56,7 @@ function resolveMaybeRelative(value, baseDir) {
 }
 
 export function findExternalMcpConfigPath(env = process.env, repoRoot = process.cwd()) {
-  const candidates = [];
-  if (String(env.MCP_UPSTREAM_CONFIG || '').trim()) {
-    candidates.push(resolveMaybeRelative(env.MCP_UPSTREAM_CONFIG, repoRoot));
-  }
-  candidates.push(path.resolve(repoRoot, 'config/mcp-servers.toml'));
-  candidates.push(path.resolve(repoRoot, '.mcp-gateway/mcp-servers.toml'));
-  return candidates.find(candidate => fs.existsSync(candidate)) || null;
+  return findUnifiedMcpConfigPath(env, repoRoot);
 }
 
 export async function loadExternalMcpConfig({ env = process.env, repoRoot = process.cwd() } = {}) {
@@ -79,8 +64,7 @@ export async function loadExternalMcpConfig({ env = process.env, repoRoot = proc
   if (!configPath) {
     return normalizeExternalMcpConfig({}, { configPath: null, repoRoot, env, noConfig: true });
   }
-  const rawText = await fs.promises.readFile(configPath, 'utf8');
-  const raw = toml.parse(rawText);
+  const raw = loadUnifiedMcpTomlConfig(configPath);
   return normalizeExternalMcpConfig(raw, { configPath, repoRoot, env });
 }
 
@@ -108,7 +92,7 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
 
   const baseDir = configPath ? path.dirname(configPath) : repoRoot;
   const serversRaw = raw.mcp_servers || {};
-  const trustedRoots = trustedRootsFromEnv(env, repoRoot);
+  const trustedRoots = trustedRootsFromConfig(raw, env, repoRoot);
   const placeholderContext = { repoRoot: path.resolve(repoRoot), cwd: baseDir, env, trustedRoots, platform: process.platform };
   const servers = [];
   for (const [rawId, rawServerRaw] of Object.entries(serversRaw)) {

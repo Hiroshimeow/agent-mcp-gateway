@@ -1,15 +1,19 @@
-# Example dynamic upstream server config for agent-mcp-gateway.
+# Unified MCP gateway config example.
 #
-# Linux/macOS:
-#   cp config/mcp-servers.example.toml config/mcp-servers.toml
-# Windows PowerShell:
-#   Copy-Item config/mcp-servers.example.toml config/mcp-servers.toml
-#
-# Do not commit real local upstream configs or secrets.
-# catalog_cache controls how imported upstream catalogs refresh:
-#   startup: build once at gateway startup.
-#   ttl: atomically refresh after catalog_cache_ttl_ms expires on list requests.
-#   none: atomically refresh on every catalog list request.
+# Copy/edit this file only if you want to replace the committed public baseline
+# in config/mcp-servers.toml. Keep secrets out of TOML; use *_env fields for env
+# var names when an upstream requires credentials.
+
+[trusted_roots]
+# Shared by local custom_* tools and file-oriented external MCP presets.
+# Supported forms:
+#   roots = ["${repoRoot}", "D:\\repo-a", "C:/temp"]
+#   roots = [{ path = "${repoRoot}", project_id = "my-repo", display_name = "My Repo" }]
+# TOML strings require escaped backslashes for Windows paths, e.g. "C:\\temp".
+# Forward-slash drive paths such as "C:/temp" are also accepted on Windows.
+roots = [
+  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
+]
 
 [external_mcp]
 enabled = true
@@ -18,18 +22,18 @@ catalog_cache = "startup"
 # catalog_cache = "ttl"
 # catalog_cache_ttl_ms = 30000
 # catalog_cache = "none"
-startup_timeout_ms = 15000
-shutdown_timeout_ms = 5000
-default_transport = "stdio"
+startup_timeout_sec = 30.0
+shutdown_timeout_sec = 5.0
 default_enabled = true
-
-# Simple onboarding presets.
-# File-oriented presets can reuse the same trusted roots as local custom tools.
-# Trusted roots come from REPO_ROOT, MCP_TRUSTED_ROOTS, MCP_TRUSTED_ROOTS_FILE,
-# and config/trusted-roots.txt.
 
 [mcp_servers.context7]
 url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.exa]
+url = "https://mcp.exa.ai/mcp"
+
+[mcp_servers.deepwiki]
+url = "https://mcp.deepwiki.com/mcp"
 
 [mcp_servers.filesystem]
 preset = "filesystem"
@@ -42,31 +46,25 @@ roots = "trusted"
 [mcp_servers.eslint]
 preset = "eslint"
 
+[mcp_servers.gitnexus]
+runner = "npx"
+args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+
+[mcp_servers.codegraph]
+command = "codegraph"
+args = ["serve", "--mcp"]
+cwd = "${repoRoot}"
+
 # Explicit expert stdio config remains supported. If args are set explicitly,
 # presets do not append trusted roots unless inherit_trusted_roots = true.
-# [mcp_servers.codegraph]
-# enabled = true
-# transport = "stdio"
-# command = "codegraph"
+# [mcp_servers.custom_stdio]
+# command = "my-mcp-server"
 # args = ["serve", "--mcp"]
-# cwd = "."
-# tool_prefix = "codegraph"
+# cwd = "${repoRoot}"
+# tool_prefix = "my_tools"
 
-# Runner shorthand is platform-aware: npx.cmd on Windows, npx elsewhere.
-# [mcp_servers.gitnexus]
-# enabled = true
-# runner = "npx"
-# args = ["-y", "gitnexus@latest", "mcp"]
-# tool_prefix = "gitnexus"
-
-# HTTP / streamable HTTP example. transport = "http" is inferred when url is set.
-# Use bearer_token_env for secrets; do not put literal credential values in TOML.
+# HTTP example with secret loaded from env, not literal TOML.
 # [mcp_servers.remote_graph]
-# enabled = true
 # url = "http://127.0.0.1:8123/mcp"
 # bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
 # tool_prefix = "remote_graph"
-
-# Timeout aliases are accepted. Milliseconds win when both forms are present.
-# startup_timeout_sec = 30
-# shutdown_timeout_sec = 5

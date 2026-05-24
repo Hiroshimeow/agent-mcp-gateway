@@ -46,6 +46,7 @@ import {
 import { validateShellCommand } from './shell-policy.mjs';
 import {
   buildTrustedRootsProjectRegistryFromRaw,
+  loadTrustedRootsRawFromUnifiedConfig,
   resolveTrustedRootPaths
 } from './projects/trusted-roots-projects.mjs';
 
@@ -88,32 +89,10 @@ function normalizeDurationMs(value, defaultValue) {
   return parsed;
 }
 
-function readTrustedRootsFile(filePath, baseDir = packageRoot) {
-  const value = String(filePath || '').trim();
-  if (!value) {
-    return '';
-  }
-
-  const normalized = value.replace(/^['"]|['"]$/g, '').replace(/^\\\\\?\\/, '');
-  const resolvedPath = path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(baseDir, normalized);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`MCP_TRUSTED_ROOTS_FILE does not exist: ${resolvedPath}`);
-  }
-
-  return fs
-    .readFileSync(resolvedPath, 'utf8')
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('#'))
-    .join('\n');
-}
-
-const trustedRootsRaw = [
-  process.env.MCP_TRUSTED_ROOTS,
-  readTrustedRootsFile(process.env.MCP_TRUSTED_ROOTS_FILE)
-]
-  .filter(Boolean)
-  .join('\n');
+const trustedRootsRaw = loadTrustedRootsRawFromUnifiedConfig({
+  env: process.env,
+  repoRoot: packageRoot
+});
 
 const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = resolveTrustedRootPaths(
   trustedRootsRaw,

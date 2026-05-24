@@ -161,7 +161,6 @@ Stop the live launcher:
 ```dotenv
 REPO_ROOT=.
 MCP_TRUSTED_ROOTS=
-MCP_TRUSTED_ROOTS_FILE=
 MCP_DEFAULT_PROJECT_ID=
 MCP_REQUIRE_PROJECT_ID=false
 MCP_ENABLE_PROJECT_PATH_INFERENCE=true
@@ -184,8 +183,7 @@ MCP_BEARER_TOKEN=
 Important variables:
 
 - `REPO_ROOT`: fallback trusted root for direct `npm start` or `node scripts/authenticated-mcp-wrapper.mjs` runs. `uv run main.py` defaults to the current directory unless `--repo` is passed.
-- `MCP_TRUSTED_ROOTS`: optional newline- or semicolon-separated trusted roots using the same formats as `config/trusted-roots.txt`.
-- `MCP_TRUSTED_ROOTS_FILE`: optional file containing one trusted root per line. Keep the real file local and commit only `config/trusted-roots.example.txt`.
+- `MCP_TRUSTED_ROOTS`: optional newline- or semicolon-separated trusted roots. This is an environment addition; the primary committed trusted roots live in `config/mcp-servers.toml` under `[trusted_roots]`.
 - `MCP_DEFAULT_PROJECT_ID`: optional default project id for multi-project workflows.
 - `MCP_REQUIRE_PROJECT_ID`: set to `true` only when callers must pass explicit project ids to project-aware custom tools.
 - `MCP_ENABLE_PROJECT_PATH_INFERENCE`: defaults to `true`; allows absolute paths to infer project id by longest trusted-root prefix.
@@ -288,17 +286,19 @@ custom_git_push
 
 ## Trusted roots and project discovery
 
-`config/trusted-roots.txt` is the v1 source of truth for multi-project discovery. `config/projects.json` is not used.
+`config/mcp-servers.toml` is the single source of truth for committed gateway config, including `[trusted_roots]` and `[mcp_servers]`. `config/projects.json` and separate trusted-root text files are not used by default.
 
-Supported formats:
+Supported TOML forms:
 
-```text
-path
-path | projectId
-path | projectId | displayName
+```toml
+[trusted_roots]
+roots = [
+  "${repoRoot}",
+  { path = "D:\\repo-a", project_id = "repo-a", display_name = "Repo A" }
+]
 ```
 
-Repeat the same `projectId` on multiple lines to group multiple trusted roots under one project. Legacy path-only lines continue to work and receive generated project ids.
+Repeat the same `project_id` across multiple entries to group multiple trusted roots under one project. String path entries continue to work and receive generated project ids.
 
 Agents should call `custom_list_projects` to discover available `projectId` values. By default the tool returns project ids and display names, not full local paths. To expose paths explicitly, set `MCP_EXPOSE_PROJECT_PATHS=true` and call `custom_list_projects` with `showPaths: true`.
 
@@ -342,12 +342,11 @@ The gateway remains the only MCP server registered with ChatGPT while importing 
 
 Config lookup order:
 
-1. `MCP_UPSTREAM_CONFIG`
+1. `MCP_UPSTREAM_CONFIG`, only when explicitly set
 2. `config/mcp-servers.toml`
-3. `.mcp-gateway/mcp-servers.toml`
-4. no upstreams when none exists
+3. no external upstreams when neither exists
 
-This repository commits `config/mcp-servers.toml` with public, no-secret upstreams so a fresh clone can start with useful external MCP tools immediately. The committed config currently includes Context7, Exa, DeepWiki, filesystem, ESLint, GitNexus, and Codegraph. Public URL/package entries are safe to version because they do not contain bearer tokens or API keys. Keep private endpoints, local-only path choices, or credentials in `.mcp-gateway/mcp-servers.toml` or a file selected with `MCP_UPSTREAM_CONFIG`.
+This repository commits `config/mcp-servers.toml` as the unified public baseline. The same file contains `[trusted_roots]` for local custom tools and commented `[mcp_servers]` examples for optional external MCP upstreams. Public URL/package entries are safe to version because they do not contain bearer tokens or API keys, but they are commented by default to avoid importing too many tools on a fresh clone. Uncomment only the upstreams you want to use. Keep private endpoints or credentials in a separate file selected with `MCP_UPSTREAM_CONFIG`.
 
 Quick start after cloning:
 
@@ -365,38 +364,43 @@ Copy-Item .env.example .env
 npm start
 ```
 
-`config/mcp-servers.toml` is the committed public baseline. Use `.mcp-gateway/mcp-servers.toml` for a private local config. `.mcp-gateway/` is gitignored. Do not commit configs containing machine-specific secrets or bearer tokens.
+`config/mcp-servers.toml` is the committed public baseline and the default runtime config. Do not commit configs containing machine-specific secrets or bearer tokens; put those in an untracked file and point `MCP_UPSTREAM_CONFIG` at it.
 
-The committed public upstream config is:
+The committed unified config keeps upstream examples commented by default:
 
 ```toml
-[mcp_servers.context7]
-url = "https://mcp.context7.com/mcp"
+[trusted_roots]
+roots = [
+  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
+]
 
-[mcp_servers.exa]
-url = "https://mcp.exa.ai/mcp"
+# [mcp_servers.context7]
+# url = "https://mcp.context7.com/mcp"
 
-[mcp_servers.deepwiki]
-url = "https://mcp.deepwiki.com/mcp"
+# [mcp_servers.exa]
+# url = "https://mcp.exa.ai/mcp"
 
-[mcp_servers.filesystem]
-preset = "filesystem"
-roots = "trusted"
+# [mcp_servers.deepwiki]
+# url = "https://mcp.deepwiki.com/mcp"
 
-[mcp_servers.eslint]
-preset = "eslint"
+# [mcp_servers.filesystem]
+# preset = "filesystem"
+# roots = "trusted"
 
-[mcp_servers.gitnexus]
-runner = "npx"
-args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+# [mcp_servers.eslint]
+# preset = "eslint"
 
-[mcp_servers.codegraph]
-command = "codegraph"
-args = ["serve", "--mcp"]
-cwd = "${repoRoot}"
+# [mcp_servers.gitnexus]
+# runner = "npx"
+# args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
+
+# [mcp_servers.codegraph]
+# command = "codegraph"
+# args = ["serve", "--mcp"]
+# cwd = "${repoRoot}"
 ```
 
-`url` without `transport` is treated as streamable HTTP. `command` without `transport` is treated as stdio. For file-oriented presets, `roots = "trusted"` expands to the same trusted roots used by local `custom_*` tools: `REPO_ROOT`, `MCP_TRUSTED_ROOTS`, `MCP_TRUSTED_ROOTS_FILE`, and `config/trusted-roots.txt`. You can also pass explicit roots such as `roots = ["${repoRoot}", "D:\\repo-a"]`.
+`url` without `transport` is treated as streamable HTTP. `command` without `transport` is treated as stdio. For file-oriented presets, `roots = "trusted"` expands to the same trusted roots used by local `custom_*` tools: `[trusted_roots].roots` in `config/mcp-servers.toml`, plus optional `MCP_TRUSTED_ROOTS` environment additions. You can also pass explicit roots such as `roots = ["${repoRoot}", "D:\\repo-a", "C:/temp"]`. In TOML strings, Windows backslashes must be escaped as `C:\\temp`; forward-slash drive paths such as `C:/temp` are also accepted on Windows.
 
 Preset behavior:
 
@@ -405,7 +409,7 @@ Preset behavior:
 - `eslint`: launches `@eslint/mcp@latest` from `${repoRoot}` and does not inject all trusted roots.
 - `context7`: configures `https://mcp.context7.com/mcp` over HTTP and does not receive local roots.
 
-The committed GitNexus entry pins `gitnexus@1.6.6-rc.49` because `gitnexus@latest` failed startup during validation in this environment. Codegraph requires the `codegraph` CLI to be installed; if it is missing, diagnostics mark only that upstream unavailable because `fail_gateway_on_startup_error = false`.
+The commented GitNexus example pins `gitnexus@1.6.6-rc.49` because `gitnexus@latest` failed startup during validation in this environment. Codegraph requires the `codegraph` CLI to be installed; if it is missing, diagnostics mark only that upstream unavailable because `fail_gateway_on_startup_error = false`.
 
 Explicit expert config remains supported:
 
@@ -462,7 +466,6 @@ Important warnings:
 - Do not expose broad directories such as `C:\`, `E:\`, your home directory, Desktop, or Downloads.
 - Use a narrow project folder as `REPO_ROOT`.
 - Do not commit `.env`.
-- Do not commit `config/trusted-roots.txt` if it contains real local paths.
 - By default, unset `ENABLE_SHELL` behaves like `ENABLE_SHELL=true`; with default `MCP_SAFETY_PROFILE=yolo`, raw shell is exposed after authentication.
 - Treat `ENABLE_SHELL=true` plus `MCP_SAFETY_PROFILE=yolo` as full command execution access after authentication.
 - Yolo removes extra gateway-side approval prompts, shell blocklists, and executable allowlist restrictions for trusted private local development, but it does not bypass ChatGPT host safety, ChatGPT Developer Mode confirmation UI, user confirmations, or platform policy.
@@ -488,7 +491,6 @@ Make sure these files are not committed:
 logs/
 node_modules/
 packages/
-config/trusted-roots.txt
 *.zip
 ```
 
