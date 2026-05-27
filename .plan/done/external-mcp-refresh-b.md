@@ -2,7 +2,7 @@
 
 Branch: `feat/external-mcp-upstreams`
 
-Status: planned next implementation pass.
+Status: done. Implemented and validated in commit 0b2d5b1cf8ace7faa413600af25938019416d5bf.
 
 ## 0. Decision
 

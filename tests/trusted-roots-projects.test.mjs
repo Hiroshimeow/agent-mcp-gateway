@@ -62,6 +62,16 @@ test('parseTrustedRootLine rejects relative paths and invalid project ids', () =
   assert.throws(() => parseTrustedRootLine(`${abs('repo')} | Paperclip`), { code: 'INVALID_PROJECT_ID' });
 });
 
+test('parseTrustedRootLine accepts Windows drive paths with slash or backslash separators', () => {
+  const backslash = parseTrustedRootLine('C:\\temp | win-temp');
+  assert.equal(backslash.root, process.platform === 'win32' ? path.resolve('C:\\temp') : 'C:/temp');
+  assert.equal(backslash.projectId, 'win-temp');
+
+  const slash = parseTrustedRootLine('C:/temp | win-temp');
+  assert.equal(slash.root, process.platform === 'win32' ? path.resolve('C:/temp') : 'C:/temp');
+  assert.equal(slash.projectId, 'win-temp');
+});
+
 test('splitTrustedRootConfig supports newline and semicolon config entries', () => {
   assert.deepEqual(splitTrustedRootConfig(`\n# roots\n${abs('one')} | one; ${abs('two')} | two | Two\n`), [
     `${abs('one')} | one`,

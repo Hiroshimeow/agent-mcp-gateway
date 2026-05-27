@@ -201,7 +201,6 @@ if ($envValues.ContainsKey("SHELL_PROFILE") -and $envValues["SHELL_PROFILE"]) {
 $enableFilesystem = $enableFilesystemValue.ToLowerInvariant() -eq "true"
 $enableShell = $enableShellValue.ToLowerInvariant() -eq "true"
 $trustedRootsValue = $envValues["MCP_TRUSTED_ROOTS"]
-$trustedRootsFileValue = $envValues["MCP_TRUSTED_ROOTS_FILE"]
 $defaultProjectIdValue = $envValues["MCP_DEFAULT_PROJECT_ID"]
 $requireProjectIdValue = $envValues["MCP_REQUIRE_PROJECT_ID"]
 $enableProjectPathInferenceValue = $envValues["MCP_ENABLE_PROJECT_PATH_INFERENCE"]
@@ -277,7 +276,6 @@ $gatewayEnv = @(
     "set `"MCP_ADVERTISE_HOST=$advertisedHost`"",
     "set `"MCP_ADVERTISE_URL=$cleanAdvertiseUrl`"",
     "set `"MCP_TRUSTED_ROOTS=$trustedRootsValue`"",
-    "set `"MCP_TRUSTED_ROOTS_FILE=$trustedRootsFileValue`"",
     "set `"MCP_DEFAULT_PROJECT_ID=$defaultProjectIdValue`"",
     "set `"MCP_REQUIRE_PROJECT_ID=$requireProjectIdValue`"",
     "set `"MCP_ENABLE_PROJECT_PATH_INFERENCE=$enableProjectPathInferenceValue`"",

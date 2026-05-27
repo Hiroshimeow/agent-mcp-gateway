@@ -8,8 +8,6 @@ __pycache__/
 
 logs/
 packages/
-config/trusted-roots.txt
-.mcp-gateway/
 *.zip
 g8-sshr.bat
 

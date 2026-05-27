@@ -6,16 +6,18 @@ function read(relativePath) {
   return fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 }
 
-test('trusted roots local config and package artifacts are ignored', () => {
+test('unified config is committed and local package artifacts are ignored', () => {
   const gitignore = read('.gitignore');
-  assert.match(gitignore, /^config\/trusted-roots\.txt$/m);
+  assert.doesNotMatch(gitignore, /^config\/trusted-roots\.txt$/m);
+  assert.doesNotMatch(gitignore, /^\.mcp-gateway\/$/m);
   assert.match(gitignore, /^packages\/$/m);
 });
 
-test('.env.example does not enable a local trusted roots file by default', () => {
+test('.env.example keeps runtime env separate from unified config', () => {
   const envExample = read('.env.example');
-  assert.match(envExample, /^MCP_TRUSTED_ROOTS_FILE=$/m);
-  assert.match(envExample, /^# MCP_TRUSTED_ROOTS_FILE=config\\trusted-roots\.txt$/m);
+  assert.doesNotMatch(envExample, /^MCP_TRUSTED_ROOTS_FILE=/m);
+  assert.match(envExample, /^MCP_UPSTREAM_CONFIG=$/m);
+  assert.match(envExample, /^MCP_EXTERNAL_MCP_ENABLED=true$/m);
 });
 
 test('batch live launcher does not prompt for public advertise URL', () => {
@@ -25,9 +27,12 @@ test('batch live launcher does not prompt for public advertise URL', () => {
   assert.doesNotMatch(batch, /-AdvertiseUrl\s+\$env:MCP_ADVERTISE_URL_INPUT/);
 });
 
-test('trusted-roots.example.txt contains placeholders only', () => {
-  const example = read('config/trusted-roots.example.txt');
-  assert.match(example, /One trusted root per line/);
-  assert.match(example, /Do not commit config\\trusted-roots\.txt/);
-  assert.doesNotMatch(example, /^[A-Z]:\\(?!path\\to\\project|work\\another-project)/m);
+test('committed mcp config keeps public upstream examples commented by default', () => {
+  const config = read('config/mcp-servers.toml');
+  assert.match(config, /^\[trusted_roots\]$/m);
+  assert.match(config, /^# \[mcp_servers\.context7\]$/m);
+  assert.match(config, /^# \[mcp_servers\.filesystem\]$/m);
+  assert.match(config, /^# \[mcp_servers\.eslint\]$/m);
+  assert.doesNotMatch(config, /^\[mcp_servers\./m);
+  assert.doesNotMatch(config, /bearer_token\s*=/);
 });

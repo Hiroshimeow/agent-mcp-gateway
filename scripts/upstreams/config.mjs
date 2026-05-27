@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import * as toml from 'smol-toml';
 import { validateExternalToolPrefix, validateUpstreamId } from './names.mjs';
+import { expandMcpPreset, expandPlaceholders, normalizeRunnerCommand } from './presets.mjs';
+import {
+  findUnifiedMcpConfigPath,
+  loadUnifiedMcpTomlConfig,
+  resolveTrustedRootPaths,
+  trustedRootsRawFromSources
+} from '../projects/trusted-roots-projects.mjs';
 
 const DEFAULT_EXTERNAL = {
   enabled: true,
@@ -28,6 +34,21 @@ function asMs(value, fallback, label) {
   return n;
 }
 
+function asMsWithSec(raw, msKey, secKey, fallback, label) {
+  if (raw && Object.prototype.hasOwnProperty.call(raw, msKey)) return asMs(raw[msKey], fallback, label);
+  if (raw && Object.prototype.hasOwnProperty.call(raw, secKey)) {
+    const n = Number(raw[secKey]);
+    if (!Number.isFinite(n) || n <= 0) throw new Error(`Invalid ${secKey}: ${raw[secKey]}`);
+    return n * 1000;
+  }
+  return asMs(undefined, fallback, label);
+}
+
+function trustedRootsFromConfig(raw, env, repoRoot) {
+  const trustedRootsRaw = trustedRootsRawFromSources({ rawConfig: raw, env, repoRoot });
+  return resolveTrustedRootPaths(trustedRootsRaw, repoRoot).existingRoots;
+}
+
 function resolveMaybeRelative(value, baseDir) {
   if (!value) return undefined;
   const text = String(value).replace(/^['"]|['"]$/g, '');
@@ -35,13 +56,7 @@ function resolveMaybeRelative(value, baseDir) {
 }
 
 export function findExternalMcpConfigPath(env = process.env, repoRoot = process.cwd()) {
-  const candidates = [];
-  if (String(env.MCP_UPSTREAM_CONFIG || '').trim()) {
-    candidates.push(resolveMaybeRelative(env.MCP_UPSTREAM_CONFIG, repoRoot));
-  }
-  candidates.push(path.resolve(repoRoot, 'config/mcp-servers.toml'));
-  candidates.push(path.resolve(repoRoot, '.mcp-gateway/mcp-servers.toml'));
-  return candidates.find(candidate => fs.existsSync(candidate)) || null;
+  return findUnifiedMcpConfigPath(env, repoRoot);
 }
 
 export async function loadExternalMcpConfig({ env = process.env, repoRoot = process.cwd() } = {}) {
@@ -49,8 +64,7 @@ export async function loadExternalMcpConfig({ env = process.env, repoRoot = proc
   if (!configPath) {
     return normalizeExternalMcpConfig({}, { configPath: null, repoRoot, env, noConfig: true });
   }
-  const rawText = await fs.promises.readFile(configPath, 'utf8');
-  const raw = toml.parse(rawText);
+  const raw = loadUnifiedMcpTomlConfig(configPath);
   return normalizeExternalMcpConfig(raw, { configPath, repoRoot, env });
 }
 
@@ -63,8 +77,8 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
     enabled: envFlag(env.MCP_EXTERNAL_MCP_ENABLED, externalRaw.enabled ?? DEFAULT_EXTERNAL.enabled),
     catalog_cache: catalogCache,
     catalog_cache_ttl_ms: DEFAULT_EXTERNAL.catalog_cache_ttl_ms,
-    startup_timeout_ms: asMs(externalRaw.startup_timeout_ms, DEFAULT_EXTERNAL.startup_timeout_ms, 'startup_timeout_ms'),
-    shutdown_timeout_ms: asMs(externalRaw.shutdown_timeout_ms, DEFAULT_EXTERNAL.shutdown_timeout_ms, 'shutdown_timeout_ms')
+    startup_timeout_ms: asMsWithSec(externalRaw, 'startup_timeout_ms', 'startup_timeout_sec', DEFAULT_EXTERNAL.startup_timeout_ms, 'startup_timeout_ms'),
+    shutdown_timeout_ms: asMsWithSec(externalRaw, 'shutdown_timeout_ms', 'shutdown_timeout_sec', DEFAULT_EXTERNAL.shutdown_timeout_ms, 'shutdown_timeout_ms')
   };
   external.fail_gateway_on_startup_error = Boolean(externalRaw.fail_gateway_on_startup_error ?? DEFAULT_EXTERNAL.fail_gateway_on_startup_error);
   if (!['startup', 'ttl', 'none'].includes(external.catalog_cache)) throw new Error(`Invalid catalog_cache: ${external.catalog_cache}`);
@@ -78,11 +92,17 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
 
   const baseDir = configPath ? path.dirname(configPath) : repoRoot;
   const serversRaw = raw.mcp_servers || {};
+  const trustedRoots = trustedRootsFromConfig(raw, env, repoRoot);
+  const placeholderContext = { repoRoot: path.resolve(repoRoot), cwd: baseDir, env, trustedRoots, platform: process.platform };
   const servers = [];
-  for (const [rawId, serverRaw] of Object.entries(serversRaw)) {
+  for (const [rawId, rawServerRaw] of Object.entries(serversRaw)) {
     const id = validateUpstreamId(rawId);
+    const serverRaw = expandMcpPreset(id, rawServerRaw, placeholderContext);
     const enabled = Boolean(serverRaw.enabled ?? external.default_enabled);
-    const transport = String(serverRaw.transport || external.default_transport).trim().toLowerCase();
+    let transport = serverRaw.transport;
+    if (!transport && serverRaw.url) transport = 'http';
+    if (!transport && (serverRaw.command || serverRaw.runner)) transport = 'stdio';
+    transport = String(transport || external.default_transport).trim().toLowerCase();
     if (!['stdio', 'http'].includes(transport)) throw new Error(`Invalid transport for ${id}: ${transport}`);
     const toolPrefix = validateExternalToolPrefix(serverRaw.tool_prefix || id, `tool_prefix for ${id}`);
     const server = {
@@ -90,17 +110,18 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
       enabled,
       transport,
       toolPrefix,
-      startupTimeoutMs: asMs(serverRaw.startup_timeout_ms, external.startup_timeout_ms, `startup_timeout_ms for ${id}`),
-      shutdownTimeoutMs: asMs(serverRaw.shutdown_timeout_ms, external.shutdown_timeout_ms, `shutdown_timeout_ms for ${id}`)
+      startupTimeoutMs: asMsWithSec(serverRaw, 'startup_timeout_ms', 'startup_timeout_sec', external.startup_timeout_ms, `startup_timeout_ms for ${id}`),
+      shutdownTimeoutMs: asMsWithSec(serverRaw, 'shutdown_timeout_ms', 'shutdown_timeout_sec', external.shutdown_timeout_ms, `shutdown_timeout_ms for ${id}`)
     };
     if (transport === 'stdio') {
-      if (!serverRaw.command || typeof serverRaw.command !== 'string') throw new Error(`stdio upstream ${id} requires command`);
-      server.command = serverRaw.command;
-      server.args = Array.isArray(serverRaw.args) ? serverRaw.args.map(String) : [];
-      server.cwd = resolveMaybeRelative(serverRaw.cwd || '.', baseDir);
+      const command = serverRaw.command || normalizeRunnerCommand(serverRaw.runner, process.platform);
+      if (!command || typeof command !== 'string') throw new Error(`stdio upstream ${id} requires command`);
+      server.command = command;
+      server.args = Array.isArray(serverRaw.args) ? serverRaw.args.map(item => expandPlaceholders(String(item), placeholderContext)) : [];
+      server.cwd = resolveMaybeRelative(expandPlaceholders(serverRaw.cwd || '.', placeholderContext), baseDir);
     } else {
       if (!serverRaw.url || typeof serverRaw.url !== 'string') throw new Error(`http upstream ${id} requires url`);
-      server.url = serverRaw.url;
+      server.url = expandPlaceholders(serverRaw.url, placeholderContext);
       if (serverRaw.bearer_token) throw new Error(`http upstream ${id} must use bearer_token_env, not literal bearer_token`);
       if (serverRaw.bearer_token_env) {
         server.bearerTokenEnv = String(serverRaw.bearer_token_env);
