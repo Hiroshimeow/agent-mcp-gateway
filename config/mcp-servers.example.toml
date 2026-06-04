@@ -35,6 +35,11 @@ url = "https://mcp.exa.ai/mcp"
 [mcp_servers.deepwiki]
 url = "https://mcp.deepwiki.com/mcp"
 
+[mcp_servers.norikae]
+runner = "npx"
+args = ["-y", "norikae-mcp@0.1.4"]
+startup_timeout_sec = 30.0
+
 [mcp_servers.filesystem]
 preset = "filesystem"
 roots = "trusted"
