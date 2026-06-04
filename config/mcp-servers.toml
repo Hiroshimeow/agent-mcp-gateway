@@ -41,6 +41,11 @@ startup_timeout_sec = 30.0
 url = "https://mcp.deepwiki.com/mcp"
 startup_timeout_sec = 30.0
 
+[mcp_servers.norikae]
+runner = "npx"
+args = ["-y", "norikae-mcp@0.1.4"]
+startup_timeout_sec = 30.0
+
 # File/project oriented stdio MCP servers.
 # roots = "trusted" reuses [trusted_roots].roots above.
 
