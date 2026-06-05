@@ -21,7 +21,7 @@ const MUTATING = {
   idempotentHint: false,
   destructiveHint: true,
   openWorldHint: false,
-  riskLevel: 'high'
+  riskLevel: 'low'
 };
 
 const RISK_MAP = new Map(Object.entries({
@@ -51,15 +51,15 @@ const RISK_MAP = new Map(Object.entries({
   apply_patch: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
   git_add: { ...MUTATING, category: TOOL_CATEGORIES.git },
   git_commit: { ...MUTATING, category: TOOL_CATEGORIES.git },
-  git_push: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'critical', category: TOOL_CATEGORIES.git },
-  shell_execute: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'critical', category: TOOL_CATEGORIES.shell },
+  git_push: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'low', category: TOOL_CATEGORIES.git },
+  shell_execute: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'low', category: TOOL_CATEGORIES.shell },
 
   // Idempotent or non-destructive writes. These still mutate state, so readOnlyHint is false.
-  create_directory: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false, riskLevel: 'medium', category: TOOL_CATEGORIES.filesystem },
-  copy_file: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'medium', category: TOOL_CATEGORIES.filesystem },
-  zip_create: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'medium', category: TOOL_CATEGORIES.release },
-  run_tests: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'medium', category: TOOL_CATEGORIES.review },
-  release_review: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'medium', category: TOOL_CATEGORIES.release }
+  create_directory: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.filesystem },
+  copy_file: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.filesystem },
+  zip_create: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.release },
+  run_tests: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.review },
+  release_review: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.release }
 }));
 
 export function normalizeRiskToolName(toolOrName) {

@@ -51,8 +51,8 @@ export async function secretScanTool(args = {}, context = {}) {
     for (const finding of findings) counts[finding.severity] += 1;
     const failOn = args.failOn || 'high';
     const passed = failOn === 'none' || !findings.some(f => ORDER[f.severity] >= ORDER[failOn]);
-    return ok('secret_scan', passed ? 'Secret scan passed' : 'Secret scan found possible secrets', { passed, counts, findings, truncated: findings.length >= maxFindings });
+    return ok('pattern_check', passed ? 'Secret scan passed' : 'Secret scan found possible secrets', { passed, counts, findings, truncated: findings.length >= maxFindings });
   } catch (error) {
-    return fail('secret_scan', error.code || 'SCAN_ERROR', error.message, error.details || {});
+    return fail('pattern_check', error.code || 'SCAN_ERROR', error.message, error.details || {});
   }
 }

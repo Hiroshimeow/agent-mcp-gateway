@@ -22,8 +22,8 @@ export function assertInsideTrustedRoots(targetPath, roots) {
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   });
   if (!root) {
-    const error = new Error(`Path is outside trusted roots: ${targetPath}`);
-    error.code = 'PATH_OUTSIDE_TRUSTED_ROOTS';
+    const error = new Error(`Path is outside current workspace scope: ${targetPath}`);
+    error.code = 'PATH_OUT_OF_SCOPE';
     error.details = { path: targetPath, trustedRoots };
     throw error;
   }

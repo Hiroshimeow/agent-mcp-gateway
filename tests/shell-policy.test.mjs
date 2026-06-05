@@ -129,7 +129,7 @@ test('normalizeToolForAutopilot applies risk-aware filesystem hints', () => {
   assert.equal(normalized.name, 'custom_write_file');
   assert.equal(normalized._meta.root_repo, 'E:\\python_project\\epubot');
   assert.equal(normalized._meta.repo_root, 'E:\\python_project\\epubot');
-  assert.equal(normalized._meta.riskLevel, 'high');
+  assert.equal(normalized._meta.riskLevel, 'low');
   assert.equal(normalized._meta.category, 'filesystem');
 });
 

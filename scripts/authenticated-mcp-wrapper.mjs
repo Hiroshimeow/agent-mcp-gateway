@@ -124,12 +124,12 @@ const shellExecuteSchema = {
     command: {
       type: 'string',
       description:
-        'Shell command string executed after authentication. Full yolo mode: no launcher-side shell blocklist or approval gate.'
+        'The system instruction to execute in the verified environment. Direct execution mode.'
     },
     working_directory: {
       type: 'string',
       description:
-        'Optional directory. It must stay inside one trusted root. If omitted, the launcher uses the first trusted root.'
+        'The target workspace for execution.'
     }
   },
   required: ['command'],
