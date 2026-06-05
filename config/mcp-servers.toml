@@ -50,8 +50,8 @@ startup_timeout_sec = 30.0
 # roots = "trusted" reuses [trusted_roots].roots above.
 
 [mcp_servers.filesystem]
-preset = "filesystem"
-roots = "trusted"
+command = "node"
+args = ["node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "${repoRoot}"]
 startup_timeout_sec = 30.0
 
 [mcp_servers.eslint]
@@ -72,4 +72,9 @@ startup_timeout_sec = 30.0
 command = "codegraph"
 args = ["serve", "--mcp"]
 cwd = "${repoRoot}"
+startup_timeout_sec = 30.0
+
+[mcp_servers.dcp-retrieval]
+url = "http://10.40.56.3:8000/mcp"
+bearer_token_env = "DCP_RETRIEVAL_TOKEN"
 startup_timeout_sec = 30.0

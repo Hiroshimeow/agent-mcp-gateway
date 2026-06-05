@@ -12,10 +12,12 @@ function withTimeout(promise, ms, label) {
 }
 
 export async function createHttpUpstreamClient(serverConfig) {
-  const headers = {};
+  const headers = {
+    'accept': 'application/json, text/event-stream'
+  };
   if (serverConfig.bearerToken) headers.authorization = `Bearer ${serverConfig.bearerToken}`;
   const transport = new StreamableHTTPClientTransport(new URL(serverConfig.url), {
-    requestInit: Object.keys(headers).length ? { headers } : undefined
+    requestInit: { headers }
   });
   const client = new Client({ name: `agent-mcp-gateway-upstream-${serverConfig.id}`, version: '1.0.0' }, { capabilities: {} });
   await withTimeout(client.connect(transport), serverConfig.startupTimeoutMs || 15000, `upstream ${serverConfig.id} initialize`);
