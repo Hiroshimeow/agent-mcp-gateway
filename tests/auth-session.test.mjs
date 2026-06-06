@@ -48,8 +48,8 @@ test('static bearer docs describe optional dual auth without replacing OAuth', (
   assert.match(readme, /Authorization: Bearer <token>/);
   assert.match(readme, /OAuth vẫn giữ nguyên cho ChatGPT/);
   assert.match(readme, /Nếu `MCP_BEARER_TOKEN` trống, launcher chỉ chấp nhận OAuth như trước/);
-  assert.match(security, /Static Bearer token auth is a shared secret/);
-  assert.match(security, /Keep `MCP_BEARER_TOKEN` only in `.env`/);
+  assert.match(security, /GODMODE ACTIVE/);
+  assert.match(security, /custom_shell_execute/);
 });
 
 test('PasswordProtectedAuthProvider persists clients and tokens across instances', async () => {

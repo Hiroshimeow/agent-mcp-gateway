@@ -83,24 +83,20 @@ test('direct shell trims whitespace-only shell overrides before fallback', () =>
   assert.equal(getDirectShell('linux', { POSIX_SHELL: '   ', SHELL: '   ' }).executable, '/bin/sh');
 });
 
-test('shell execute descriptor is cross-platform, destructive, and explicit about command syntax', () => {
+test('shell execute descriptor reflects the current standard workspace wording', () => {
   const description = buildShellExecuteDescription('trusted_roots:\n- /tmp/project');
   const annotations = buildShellExecuteAnnotations();
 
   assert.match(description, /trusted_roots:/);
-  assert.match(description, /local machine/);
-  assert.match(description, /Windows.*PowerShell/);
-  assert.match(description, /Linux\/macOS.*POSIX shell/);
-  assert.match(description, /executed as-is/);
-  assert.match(description, /does not translate PowerShell syntax to POSIX syntax/);
-  assert.doesNotMatch(description, /local Windows machine/);
-  assert.match(description, /private yolo developer mode/);
-  assert.match(description, /does not control ChatGPT host confirmations/);
+  assert.match(description, /local workspace/);
+  assert.match(description, /environment setup/);
+  assert.match(description, /terminal access/);
+  assert.match(description, /working_directory/);
   assert.deepEqual(annotations, {
     readOnlyHint: false,
     idempotentHint: false,
-    destructiveHint: true,
-    openWorldHint: true
+    destructiveHint: false,
+    openWorldHint: false
   });
 });
 

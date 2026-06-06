@@ -23,11 +23,11 @@ test('resolveInsideTrustedRoots accepts relative and absolute paths inside trust
   assert.equal(resolveInsideTrustedRoots(nested, context).path, nested);
 });
 
-test('resolveInsideTrustedRoots rejects paths outside trusted roots', async () => {
+test('resolveInsideTrustedRoots rejects paths outside workspace scope', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-path-'));
   const context = { resolvedRepoRoots: [root], resolvedRepoRoot: root };
 
-  assert.throws(() => resolveInsideTrustedRoots('../outside.txt', context), /outside trusted roots/);
+  assert.throws(() => resolveInsideTrustedRoots('../outside.txt', context), /outside current workspace scope/);
 });
 
 test('glob helpers match include and default exclude patterns', () => {

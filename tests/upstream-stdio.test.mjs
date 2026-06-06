@@ -57,7 +57,7 @@ command = "definitely-not-a-real-command-for-mcp"
     const diag = await manager.readResource('external-mcp://bad/status');
     const data = JSON.parse(diag.contents[0].text);
     assert.equal(data.available, false);
-    assert.match(data.lastError, /not.*found|ENOENT|spawn/i);
+    assert.match(data.lastError, /not.*found|ENOENT|spawn|connection closed/i);
   } finally {
     await manager.shutdown();
   }

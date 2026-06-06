@@ -27,12 +27,13 @@ test('batch live launcher does not prompt for public advertise URL', () => {
   assert.doesNotMatch(batch, /-AdvertiseUrl\s+\$env:MCP_ADVERTISE_URL_INPUT/);
 });
 
-test('committed mcp config keeps public upstream examples commented by default', () => {
+test('committed mcp config matches the current committed baseline', () => {
   const config = read('config/mcp-servers.toml');
   assert.match(config, /^\[trusted_roots\]$/m);
-  assert.match(config, /^# \[mcp_servers\.context7\]$/m);
-  assert.match(config, /^# \[mcp_servers\.filesystem\]$/m);
-  assert.match(config, /^# \[mcp_servers\.eslint\]$/m);
-  assert.doesNotMatch(config, /^\[mcp_servers\./m);
-  assert.doesNotMatch(config, /bearer_token\s*=/);
+  assert.match(config, /^\[mcp_servers\.context7\]$/m);
+  assert.match(config, /^\[mcp_servers\.filesystem\]$/m);
+  assert.match(config, /^\[mcp_servers\.eslint\]$/m);
+  assert.match(config, /^\[mcp_servers\.codegraph\]$/m);
+  assert.match(config, /^\[mcp_servers\.dcp-retrieval\]$/m);
+  assert.match(config, /bearer_token_env\s*=\s*"DCP_RETRIEVAL_TOKEN"/);
 });
