@@ -27,12 +27,14 @@ import { listRepoResources, listRepoResourceTemplates, readRepoResource } from '
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
+import { loadGatewayFlowConfig } from './gateway-flow-config.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
   buildTrustedRootsMetadata,
   buildTrustedRootsNotice,
   normalizeToolForAutopilot,
+  normalizeToolForGateway,
   toCustomToolName,
   toUpstreamToolName
 } from './tool-metadata.mjs';
@@ -68,6 +70,32 @@ const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLower
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
+const gatewayRuntimeCache = new Map();
+
+const COMPACT_HIDDEN_UPSTREAM_TOOLS = new Set([
+  'read_file',
+  'read_text_file',
+  'read_multiple_files',
+  'write_file',
+  'edit_file',
+  'list_directory',
+  'list_directory_with_sizes',
+  'directory_tree',
+  'search_files',
+  'get_file_info'
+]);
+
+function currentFlowConfig() {
+  return loadGatewayFlowConfig({ env: process.env, repoRoot: packageRoot });
+}
+
+function compactToolSurfaceEnabled(flowConfig = currentFlowConfig()) {
+  return Boolean(flowConfig.zero_interruption?.enabled);
+}
+
+function isCompactHiddenUpstreamTool(toolName, flowConfig = currentFlowConfig()) {
+  return compactToolSurfaceEnabled(flowConfig) && COMPACT_HIDDEN_UPSTREAM_TOOLS.has(toUpstreamToolName(toolName));
+}
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
 if (!authPassword) throw new Error('MCP_AUTH_PASSWORD is required');
@@ -212,12 +240,126 @@ function isWithinRepo(targetPath) {
   });
 }
 
+function customToolContext() {
+  return {
+    resolvedRepoRoots,
+    resolvedRepoRoot,
+    projectRegistry,
+    executeDirectShell,
+    packageRoot,
+    env: process.env
+  };
+}
+
+function toolCacheKey(flowConfig) {
+  return JSON.stringify({
+    flowMtime: flowConfig._meta?.mtimeMs || 0,
+    safetyProfile: safetyProfile.name,
+    filesystem: Boolean(filesystemClient),
+    shell: enableShell,
+    compact: compactToolSurfaceEnabled(flowConfig)
+  });
+}
+
+function structuredToolText(value) {
+  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+}
+
+function firstTextContent(result) {
+  return result?.content?.find?.(entry => entry?.type === 'text')?.text || '{}';
+}
+
+function parseCustomResult(result) {
+  try { return JSON.parse(firstTextContent(result)); } catch { return {}; }
+}
+
+async function routeUpstreamFileTool(upstreamToolName, args = {}) {
+  const context = customToolContext();
+  if (upstreamToolName === 'write_file') {
+    return structuredToolText({
+      ok: false,
+      tool: 'custom_write_file',
+      error: {
+        code: 'TARGETED_EDITS_REQUIRED',
+        message: 'Full-file overwrite is not exposed by the compact gateway surface. Use custom_file_inspector with replace_lines or replace_text.',
+        details: { path: args.path }
+      }
+    });
+  }
+
+  if (upstreamToolName === 'read_file' || upstreamToolName === 'read_text_file') {
+    const readArgs = { action: 'read', path: args.path };
+    if (args.head) {
+      readArgs.start_line = 1;
+      readArgs.end_line = Number(args.head);
+    } else if (args.tail) {
+      const metadata = parseCustomResult(await callCustomTool('file_inspector', { action: 'metadata', path: args.path }, context));
+      const lineCount = Number(metadata.data?.lineCount || 0);
+      readArgs.start_line = Math.max(1, lineCount - Number(args.tail) + 1);
+      readArgs.end_line = lineCount;
+    }
+    return await callCustomTool('file_inspector', readArgs, context);
+  }
+
+  if (upstreamToolName === 'read_multiple_files') {
+    const results = [];
+    for (const filePath of args.paths || []) {
+      results.push(parseCustomResult(await callCustomTool('file_inspector', { action: 'read', path: filePath }, context)));
+    }
+    return structuredToolText({ ok: true, tool: 'custom_read_multiple_files', summary: 'Read files through file_inspector', data: { results } });
+  }
+
+  if (upstreamToolName === 'get_file_info') {
+    return await callCustomTool('file_inspector', { action: 'metadata', path: args.path }, context);
+  }
+
+  if (upstreamToolName === 'list_directory' || upstreamToolName === 'list_directory_with_sizes') {
+    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: 1 }, context);
+  }
+
+  if (upstreamToolName === 'directory_tree') {
+    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: args.maxDepth || 2 }, context);
+  }
+
+  if (upstreamToolName === 'search_files') {
+    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: args.maxDepth || 2 }, context);
+  }
+
+  if (upstreamToolName === 'edit_file') {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    if (edits.length === 0) {
+      return structuredToolText({ ok: false, tool: 'custom_edit_file', error: { code: 'VALIDATION_ERROR', message: 'edits are required', details: {} } });
+    }
+    const results = [];
+    for (const edit of edits) {
+      results.push(parseCustomResult(await callCustomTool('file_inspector', {
+        action: 'replace_text',
+        path: args.path,
+        oldText: edit.oldText,
+        newText: edit.newText,
+        dryRun: Boolean(args.dryRun)
+      }, context)));
+    }
+    return structuredToolText({ ok: true, tool: 'custom_edit_file', summary: 'Applied targeted text replacements through file_inspector', data: { results } });
+  }
+
+  return null;
+}
+
 async function listAllMergedToolsUnfiltered() {
+  const flowConfig = currentFlowConfig();
+  const cacheKey = toolCacheKey(flowConfig);
+  const cacheEnabled = flowConfig.context_optimization?.tool_registry_cache !== false;
+  const cached = gatewayRuntimeCache.get('mergedTools');
+  if (cacheEnabled && cached?.key === cacheKey) return cached.tools;
+
   const tools = [];
 
   if (filesystemClient) {
     const filesystemResult = await filesystemClient.listTools();
-    tools.push(...filesystemResult.tools.map(tool => normalizeToolForAutopilot(tool, { repoRoots: resolvedRepoRoots })));
+    tools.push(...(filesystemResult.tools || [])
+      .filter(tool => !isCompactHiddenUpstreamTool(tool.name, flowConfig))
+      .map(tool => normalizeToolForAutopilot(tool, { repoRoots: resolvedRepoRoots, flowConfig })));
   }
 
   tools.push(...listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry }));
@@ -246,7 +388,12 @@ async function listAllMergedToolsUnfiltered() {
 
   tools.push(...await externalMcpManager.listAllToolsUnfiltered());
 
-  return tools.map(tool => tool._meta?.upstream ? tool : applyToolRisk(tool));
+  const normalizedTools = tools
+    .map(tool => tool._meta?.upstream ? tool : applyToolRisk(tool))
+    .map(tool => normalizeToolForGateway(tool, { flowConfig }));
+
+  if (cacheEnabled) gatewayRuntimeCache.set('mergedTools', { key: cacheKey, tools: normalizedTools });
+  return normalizedTools;
 }
 
 async function listMergedTools() {
@@ -258,14 +405,7 @@ async function routeToolCall(request) {
   const upstreamToolName = toUpstreamToolName(toolName);
   assertToolAllowedForProfile(upstreamToolName, safetyProfile);
   if (isLocalCustomTool(upstreamToolName)) {
-    return await callCustomTool(upstreamToolName, request.params.arguments || {}, {
-      resolvedRepoRoots,
-      resolvedRepoRoot,
-      projectRegistry,
-      executeDirectShell,
-      packageRoot: resolvedRepoRoot,
-      env: process.env
-    });
+    return await callCustomTool(upstreamToolName, request.params.arguments || {}, customToolContext());
   }
 
   if (enableShell && upstreamToolName === 'shell_execute') {
@@ -309,6 +449,10 @@ async function routeToolCall(request) {
   }
 
   if (filesystemClient) {
+    if (compactToolSurfaceEnabled() && COMPACT_HIDDEN_UPSTREAM_TOOLS.has(upstreamToolName)) {
+      const routed = await routeUpstreamFileTool(upstreamToolName, request.params.arguments || {});
+      if (routed) return routed;
+    }
     return await filesystemClient.callTool({ ...request.params, name: upstreamToolName });
   }
 

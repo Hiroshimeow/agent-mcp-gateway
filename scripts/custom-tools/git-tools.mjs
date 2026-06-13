@@ -1,3 +1,4 @@
+import { loadGatewayFlowConfig } from '../gateway-flow-config.mjs';
 import { executeGit } from './command-utils.mjs';
 import { resolveInsideTrustedRoots, toRelativeFromRoot } from './path-utils.mjs';
 import { fail, ok, truncateText } from './response-utils.mjs';
@@ -33,28 +34,77 @@ export async function gitStatusTool(args = {}, context = {}) {
   }
 }
 
+function getFlowConfig(context = {}) {
+  return loadGatewayFlowConfig({ env: context.env || process.env, repoRoot: context.packageRoot || process.cwd() });
+}
+
+function normalizeDiffFiles(files, context, cwd) {
+  return (Array.isArray(files) ? files : []).map(file => {
+    const checked = resolveInsideTrustedRoots(file, context, { workingDirectory: cwd });
+    return toRelativeFromRoot(checked.path, cwd);
+  });
+}
+
+async function readDiffStat(context, cwd, baseArgs) {
+  const stat = await runGit(context, cwd, [...baseArgs, '--stat']);
+  const names = await runGit(context, cwd, [...baseArgs, '--name-status']);
+  return { stat: stat.stdout || '', changedFiles: names.stdout || '' };
+}
+
 export async function gitDiffTool(args = {}, context = {}) {
   try {
     const target = resolveInsideTrustedRoots(args.path, context, { mustExist: true });
-    const gitArgs = ['diff'];
-    if (args.staged) gitArgs.push('--cached');
-    if (args.statOnly) gitArgs.push('--stat');
-    const files = Array.isArray(args.files) ? args.files : [];
-    if (files.length) {
-      gitArgs.push('--');
-      for (const file of files) {
-        const checked = resolveInsideTrustedRoots(file, context, { workingDirectory: target.path });
-        gitArgs.push(toRelativeFromRoot(checked.path, target.path));
-      }
+    const flowConfig = getFlowConfig(context);
+    const configuredMaxBytes = Number(flowConfig.git?.diff_max_bytes || 60000);
+    const maxBytes = Number(args.maxBytes ?? configuredMaxBytes);
+    const baseArgs = ['diff'];
+    if (args.staged) baseArgs.push('--cached');
+    const files = normalizeDiffFiles(args.files, context, target.path);
+
+    if (args.statOnly) {
+      const statArgs = [...baseArgs, '--stat'];
+      if (files.length) statArgs.push('--', ...files);
+      const result = await runGit(context, target.path, statArgs);
+      return ok('git_diff', 'Read git diff stat', {
+        staged: Boolean(args.staged),
+        statOnly: true,
+        stat: result.stdout || '',
+        diff: '',
+        truncated: false,
+        summaryOnly: false
+      });
     }
-    const result = await runGit(context, target.path, gitArgs);
-    const truncated = truncateText(result.stdout || '', Number(args.maxBytes || 200000));
+
+    const diffArgs = [...baseArgs];
+    if (files.length) diffArgs.push('--', ...files);
+    const result = await runGit(context, target.path, diffArgs);
+    const diffText = result.stdout || '';
+    const diffBytes = Buffer.byteLength(diffText, 'utf8');
+
+    if (!files.length && flowConfig.git?.diff_stat_on_large_output !== false && diffBytes > maxBytes) {
+      const summary = await readDiffStat(context, target.path, baseArgs);
+      return ok('git_diff', 'Read git diff summary', {
+        staged: Boolean(args.staged),
+        statOnly: false,
+        stat: summary.stat,
+        changedFiles: summary.changedFiles,
+        diff: '',
+        truncated: true,
+        summaryOnly: true,
+        reason: 'diff output exceeded context limit',
+        requestSpecificFilesWith: ['custom_git_diff', 'files']
+      });
+    }
+
+    const truncated = truncateText(diffText, maxBytes);
     return ok('git_diff', 'Read git diff', {
       staged: Boolean(args.staged),
-      statOnly: Boolean(args.statOnly),
-      stat: args.statOnly ? truncated.text : '',
-      diff: args.statOnly ? '' : truncated.text,
-      truncated: truncated.truncated
+      statOnly: false,
+      files,
+      stat: '',
+      diff: truncated.text,
+      truncated: truncated.truncated,
+      summaryOnly: false
     });
   } catch (error) {
     return fail('git_diff', error.code || 'GIT_ERROR', error.message, error.details || {});

@@ -123,10 +123,11 @@ await withServer('yolo', async ({ baseUrl }) => {
   assert.ok(tools.has('custom_git_push'), 'yolo exposes custom_git_push');
   assert.ok(tools.has('custom_get_safety_profile'), 'yolo exposes custom_get_safety_profile');
   const shell = tools.get('custom_shell_execute');
-  assert.equal(shell.annotations.destructiveHint, true);
-  assert.equal(shell.annotations.openWorldHint, true);
+  assert.equal(shell.annotations.destructiveHint, false);
+  assert.equal(shell.annotations.openWorldHint, false);
+  assert.equal(shell.annotations.readOnlyHint, true);
   assert.doesNotMatch(shell.description, /local Windows machine/i);
-  assert.match(shell.description, /private yolo developer mode/i);
+  assert.match(shell.description, /Runs project maintenance commands/i);
 });
 
 await withServer('safe', async ({ baseUrl }) => {
@@ -134,16 +135,19 @@ await withServer('safe', async ({ baseUrl }) => {
   const tools = toolMap(await listTools(baseUrl));
   assert.equal(tools.has('custom_shell_execute'), false, 'safe hides shell');
   assert.equal(tools.has('custom_git_push'), false, 'safe hides git_push');
-  assert.ok(tools.has('custom_read_text_file'), 'safe keeps read-only file tools');
+  assert.equal(tools.has('custom_read_text_file'), false, 'safe hides upstream read text file in compact profile');
+  assert.ok(tools.has('custom_file_inspector'), 'safe keeps compact file inspector');
   assert.ok(tools.has('custom_get_safety_profile'), 'safe keeps safety profile tool');
   const manifestResponse = await mcpRequest(baseUrl, 6, 'resources/read', { uri: 'repo://project/agent-mcp-gateway/tool-manifest' });
   const manifest = JSON.parse(manifestResponse.result.contents[0].text);
   const shellManifest = manifest.tools.find(tool => tool.name === 'custom_shell_execute');
   const pushManifest = manifest.tools.find(tool => tool.name === 'custom_git_push');
   const readManifest = manifest.tools.find(tool => tool.name === 'custom_read_text_file');
+  const inspectorManifest = manifest.tools.find(tool => tool.name === 'custom_file_inspector');
   assert.equal(shellManifest?.visible, false, 'safe manifest includes shell as hidden');
   assert.equal(pushManifest?.visible, false, 'safe manifest includes git_push as hidden');
-  assert.equal(readManifest?.visible, true, 'safe manifest includes read tool as visible');
+  assert.equal(readManifest, undefined, 'safe manifest omits hidden upstream read tool in compact profile');
+  assert.equal(inspectorManifest?.visible, true, 'safe manifest includes file inspector as visible');
   const blocked = await callTool(baseUrl, 3, 'custom_shell_execute', { command: 'echo should-not-run' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
   const profile = await callTool(baseUrl, 4, 'custom_get_safety_profile', {});

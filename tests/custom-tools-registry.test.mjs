@@ -8,12 +8,13 @@ import { parseToolResult } from '../scripts/custom-tools/response-utils.mjs';
 import { buildTrustedRootsProjectRegistry } from '../scripts/projects/trusted-roots-projects.mjs';
 
 const EXISTING_TOOL_COUNT = 16;
-const TARGET_VISIBLE_TOOL_COUNT = 32;
+const TARGET_VISIBLE_TOOL_COUNT = 33;
 
 const EXPECTED = [
   'custom_list_projects',
   'custom_get_safety_profile',
   'custom_grep',
+  'custom_file_inspector',
   'custom_apply_patch',
   'custom_delete_file',
   'custom_copy_file',
@@ -31,7 +32,7 @@ const EXPECTED = [
 
 test('registry exposes custom project discovery plus the planned local custom tools', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  assert.equal(tools.length, 16);
+  assert.equal(tools.length, 17);
   assert.equal(EXISTING_TOOL_COUNT + tools.length, TARGET_VISIBLE_TOOL_COUNT);
   assert.deepEqual(tools.map(tool => tool.name), EXPECTED);
   assert.deepEqual(LOCAL_TOOL_NAMES.map(name => `custom_${name}`), EXPECTED);

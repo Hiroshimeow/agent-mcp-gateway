@@ -37,6 +37,7 @@ const RISK_MAP = new Map(Object.entries({
   search_files: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   get_file_info: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   grep: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
+  file_inspector: { ...MUTATING, destructiveHint: false, category: TOOL_CATEGORIES.filesystem },
   git_status: { ...READ_ONLY, category: TOOL_CATEGORIES.git },
   git_diff: { ...READ_ONLY, category: TOOL_CATEGORIES.git },
   secret_scan: { ...READ_ONLY, category: TOOL_CATEGORIES.review },
