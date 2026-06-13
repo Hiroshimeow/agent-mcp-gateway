@@ -322,7 +322,15 @@ async function routeUpstreamFileTool(upstreamToolName, args = {}) {
   }
 
   if (upstreamToolName === 'search_files') {
-    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: args.maxDepth || 2 }, context);
+    return structuredToolText({
+      ok: false,
+      tool: 'custom_search_files',
+      error: {
+        code: 'UNSUPPORTED_IN_COMPACT_MODE',
+        message: 'search_files is not exposed in compact mode. Use custom_grep for text search or custom_file_inspector with action=list for shallow directory inspection.',
+        details: { path: args.path, pattern: args.pattern }
+      }
+    });
   }
 
   if (upstreamToolName === 'edit_file') {

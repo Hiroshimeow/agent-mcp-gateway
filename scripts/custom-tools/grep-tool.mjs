@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { loadGatewayFlowConfig } from '../gateway-flow-config.mjs';
 import { defaultExcludePatterns, resolveInsideTrustedRoots, toRelativeFromRoot, walkFiles } from './path-utils.mjs';
@@ -29,10 +30,11 @@ function normalizeSearchOptions(args = {}, config = {}) {
   const limit = Math.min(maxLimit, Math.max(1, Number(rawLimit || defaultLimit)));
   const offset = Math.max(0, Number(args.offset || 0));
   const previewChars = Math.max(1, Number(searchConfig.preview_chars || 150));
+  const contextLines = Math.max(0, Number(args.contextLines || 0));
   const mandatoryExcludes = [...new Set([...(searchConfig.mandatory_excludes || []), ...REQUIRED_EXCLUDES])];
   const exclude = [...new Set([...mandatoryExcludes, ...(args.exclude || [])])];
   const include = args.include?.length ? args.include : ['**/*'];
-  return { limit, offset, previewChars, include, exclude };
+  return { limit, offset, previewChars, contextLines, include, exclude };
 }
 
 function truncatePreview(line, previewChars) {
@@ -45,15 +47,21 @@ function rgArgs(args, targetPath, options) {
   const commandArgs = ['--json', '--line-number', '--column', '--hidden'];
   for (const pattern of options.exclude) commandArgs.push('--glob', `!${pattern}`);
   for (const pattern of options.include) commandArgs.push('--glob', pattern);
+  if (options.contextLines > 0) commandArgs.push('-C', String(options.contextLines));
   if (!args.regex) commandArgs.push('-F');
   if (!args.caseSensitive) commandArgs.push('-i');
   commandArgs.push(String(args.query), targetPath);
   return commandArgs;
 }
 
+function ripgrepTargetPath(target) {
+  const relative = toRelativeFromRoot(target.path, target.root);
+  return relative && relative !== '.' ? relative : '.';
+}
+
 async function runRipgrep(args, target, options) {
   return await new Promise((resolve, reject) => {
-    const child = spawn('rg', rgArgs(args, target.path, options), { cwd: target.root, windowsHide: true });
+    const child = spawn('rg', rgArgs(args, ripgrepTargetPath(target), options), { cwd: target.root, windowsHide: true });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -74,17 +82,34 @@ async function runRipgrep(args, target, options) {
   });
 }
 
+function resolveRipgrepPath(pathText, root) {
+  return path.isAbsolute(pathText) ? pathText : path.join(root, pathText || '.');
+}
+
+function contextForRipgrepMatch(events, pathText, line, contextLines) {
+  if (contextLines <= 0) return null;
+  const context = events
+    .filter(event => ['context', 'match'].includes(event.type))
+    .filter(event => event.data?.path?.text === pathText)
+    .filter(event => Math.abs(Number(event.data?.line_number || 0) - line) <= contextLines)
+    .map(event => String(event.data?.lines?.text || '').replace(/[\r\n]+$/, ''));
+  return context.length ? context : null;
+}
+
 function parseRipgrepJson(stdout, root, options) {
   const matches = [];
   const searchedFiles = new Set();
+  const events = [];
   let seenMatches = 0;
   let hasMore = false;
   let truncatedPreview = false;
 
   for (const rawLine of String(stdout || '').split(/\r?\n/)) {
     if (!rawLine.trim()) continue;
-    let event;
-    try { event = JSON.parse(rawLine); } catch { continue; }
+    try { events.push(JSON.parse(rawLine)); } catch {}
+  }
+
+  for (const event of events) {
     if (event.type === 'begin' && event.data?.path?.text) searchedFiles.add(event.data.path.text);
     if (event.type !== 'match') continue;
     const pathText = event.data?.path?.text || '';
@@ -94,12 +119,15 @@ function parseRipgrepJson(stdout, root, options) {
     const preview = truncatePreview(event.data?.lines?.text || '', options.previewChars);
     truncatedPreview = truncatedPreview || preview.truncated;
     if (seenMatches >= options.offset && matches.length < options.limit) {
-      matches.push({
-        path: toRelativeFromRoot(pathText, root),
+      const entry = {
+        path: toRelativeFromRoot(resolveRipgrepPath(pathText, root), root),
         line,
         column,
         preview: preview.preview
-      });
+      };
+      const context = contextForRipgrepMatch(events, pathText, line, options.contextLines);
+      if (context) entry.context = context;
+      matches.push(entry);
     }
     seenMatches += 1;
     if (seenMatches > options.offset + options.limit) {
@@ -114,7 +142,7 @@ function parseRipgrepJson(stdout, root, options) {
     limit: options.limit,
     nextOffset: hasMore ? options.offset + options.limit : null,
     hasMore,
-    truncated: matches.length >= options.limit,
+    truncated: hasMore,
     truncatedPreview,
     engine: 'ripgrep',
     searchedFiles: searchedFiles.size
@@ -123,7 +151,7 @@ function parseRipgrepJson(stdout, root, options) {
 
 async function fallbackSearch(args, target, options) {
   const stat = await fs.promises.stat(target.path);
-  const contextLines = Math.max(0, Number(args.contextLines || 0));
+  const contextLines = options.contextLines;
   const matcher = buildMatcher(args);
   const files = stat.isDirectory() ? await walkFiles(target.path, target.root, { include: options.include, exclude: defaultExcludePatterns(options.exclude) }) : [target.path];
   const matches = [];
@@ -172,7 +200,7 @@ async function fallbackSearch(args, target, options) {
     limit: options.limit,
     nextOffset: hasMore ? options.offset + options.limit : null,
     hasMore,
-    truncated: matches.length >= options.limit,
+    truncated: hasMore,
     truncatedPreview,
     engine: 'node-fallback',
     searchedFiles
