@@ -8,7 +8,7 @@ import { parseToolResult } from '../scripts/custom-tools/response-utils.mjs';
 import { buildTrustedRootsProjectRegistry } from '../scripts/projects/trusted-roots-projects.mjs';
 
 const EXISTING_TOOL_COUNT = 16;
-const TARGET_VISIBLE_TOOL_COUNT = 33;
+const TARGET_VISIBLE_TOOL_COUNT = 34;
 
 const EXPECTED = [
   'custom_list_projects',
@@ -27,12 +27,13 @@ const EXPECTED = [
   'custom_secret_scan',
   'custom_review_diff',
   'custom_run_tests',
+  'custom_screenshot',
   'custom_release_review'
 ];
 
 test('registry exposes custom project discovery plus the planned local custom tools', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  assert.equal(tools.length, 17);
+  assert.equal(tools.length, 18);
   assert.equal(EXISTING_TOOL_COUNT + tools.length, TARGET_VISIBLE_TOOL_COUNT);
   assert.deepEqual(tools.map(tool => tool.name), EXPECTED);
   assert.deepEqual(LOCAL_TOOL_NAMES.map(name => `custom_${name}`), EXPECTED);
@@ -52,7 +53,7 @@ test('registry descriptors include required wording and annotations', () => {
 
 test('project-scoped registry descriptors mention project discovery guidance', () => {
   const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  for (const tool of tools.filter(item => !['custom_list_projects', 'custom_get_safety_profile'].includes(item.name))) {
+  for (const tool of tools.filter(item => !['custom_list_projects', 'custom_get_safety_profile', 'custom_screenshot'].includes(item.name))) {
     assert.match(tool.description, /Use custom_list_projects to discover projectId values/);
   }
 });
