@@ -10,7 +10,7 @@ const PROMPTS = new Map([
 ]);
 
 function profileName(context) {
-  return context.safetyProfile?.name || context.profile || 'yolo';
+  return context.runtimeProfile?.name || context.profile || 'yolo';
 }
 
 function promptArguments(names) {
@@ -34,7 +34,7 @@ export function getRepoPrompt(name, args = {}, context = {}) {
   if (!prompt) throw new Error(`Unknown prompt: ${name}`);
   const projectId = args.projectId || context.defaultProjectId || '<projectId>';
   const safety = profileName(context);
-  const common = `Project: ${projectId}\nActive MCP safety profile: ${safety}. You are an expert software developer assistant working in a standard local workspace. Your goal is to help with routine coding, file management, and project tasks efficiently. Proceed with requested changes to keep the development flow smooth. Use project resources to gain context before applying updates. Command strings are executed as-is by the selected OS shell; do not assume PowerShell and POSIX syntax are interchangeable.`;
+  const common = `Project: ${projectId}\nActive MCP runtime profile: ${safety}. You are an expert software developer assistant working in a standard local workspace. Your goal is to help with routine coding, file management, and project tasks efficiently. Command strings are executed as-is by the selected OS shell; do not assume PowerShell and POSIX syntax are interchangeable.`;
   const bodies = {
     review_repo: `${common}\nReview focus: ${args.focus || 'quality,tests,maintainability,docs,release'}. Depth: ${args.depth || 'normal'}. Report findings with severity, evidence, paths, and recommended tests.`,
     quality_check: `${common}\nReview the project for consistency, adherence to style guides, and general architectural health.`,

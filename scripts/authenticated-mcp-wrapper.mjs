@@ -21,7 +21,7 @@ import {
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
-import { getSafetyProfile } from './safety-profile.mjs';
+import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
@@ -61,7 +61,7 @@ const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
 const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
-const safetyProfile = getSafetyProfile(process.env);
+const runtimeProfile = getRuntimeProfile(process.env);
 const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
 const shellLogPath = process.env.SHELL_LOG_PATH;
 const authStatePath = process.env.AUTH_STATE_PATH;
@@ -82,8 +82,10 @@ const COMPACT_HIDDEN_UPSTREAM_TOOLS = new Set([
   'list_directory_with_sizes',
   'directory_tree',
   'search_files',
-  'get_file_info'
+  'get_file_info',
+  'read_media_file'
 ]);
+
 
 function currentFlowConfig() {
   return loadGatewayFlowConfig({ env: process.env, repoRoot: packageRoot });
@@ -230,7 +232,7 @@ const externalMcpManager = await createExternalMcpManager({
   env: process.env,
   repoRoot: packageRoot,
   localToolNames: await listLocalToolNamesForCollisionCheck(),
-  localPromptNames: listRepoPrompts({ safetyProfile }).map(prompt => prompt.name)
+  localPromptNames: listRepoPrompts({ runtimeProfile }).map(prompt => prompt.name)
 });
 
 function isWithinRepo(targetPath) {
@@ -254,7 +256,7 @@ function customToolContext() {
 function toolCacheKey(flowConfig) {
   return JSON.stringify({
     flowMtime: flowConfig._meta?.mtimeMs || 0,
-    safetyProfile: safetyProfile.name,
+    runtimeProfile: runtimeProfile.name,
     filesystem: Boolean(filesystemClient),
     shell: enableShell,
     compact: compactToolSurfaceEnabled(flowConfig)
@@ -405,13 +407,13 @@ async function listAllMergedToolsUnfiltered() {
 }
 
 async function listMergedTools() {
-  return (await listAllMergedToolsUnfiltered()).filter(tool => shouldExposeToolForProfile(tool, safetyProfile));
+  return (await listAllMergedToolsUnfiltered()).filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
 }
 
 async function routeToolCall(request) {
   const toolName = request.params.name;
   const upstreamToolName = toUpstreamToolName(toolName);
-  assertToolAllowedForProfile(upstreamToolName, safetyProfile);
+  assertToolAllowedForProfile(upstreamToolName, runtimeProfile);
   if (isLocalCustomTool(upstreamToolName)) {
     return await callCustomTool(upstreamToolName, request.params.arguments || {}, customToolContext());
   }
@@ -453,7 +455,7 @@ async function routeToolCall(request) {
   }
 
   if (externalMcpManager.isExternalToolName(toolName)) {
-    return await externalMcpManager.callTool(toolName, request.params.arguments || {}, safetyProfile);
+    return await externalMcpManager.callTool(toolName, request.params.arguments || {}, runtimeProfile);
   }
 
   if (filesystemClient) {
@@ -523,10 +525,10 @@ function createProxyServer() {
     return await readRepoResource(request.params.uri, resourceContext);
   });
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ safetyProfile }), ...await externalMcpManager.listPrompts()] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ runtimeProfile }), ...await externalMcpManager.listPrompts()] }));
   server.setRequestHandler(GetPromptRequestSchema, async request => {
     if (externalMcpManager.isExternalPromptName(request.params.name)) return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
-    return getRepoPrompt(request.params.name, request.params.arguments || {}, { safetyProfile, defaultProjectId: projectRegistry.defaultProjectId });
+    return getRepoPrompt(request.params.name, request.params.arguments || {}, { runtimeProfile, defaultProjectId: projectRegistry.defaultProjectId });
   });
 
   return server;
@@ -849,7 +851,7 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   }
   console.log(`Filesystem enabled: ${enableFilesystem}`);
   console.log(`Shell enabled: ${enableShell}`);
-  console.log(`Safety profile: ${safetyProfile.name}`);
+  console.log(`Runtime profile: ${runtimeProfile.name}`);
   console.log(`Static bearer enabled: ${staticBearerToken ? 'true' : 'false'}`);
   console.log(`MCP transport mode: ${useStatefulMcpSessions ? 'stateful' : 'stateless'}`);
 });

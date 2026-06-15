@@ -1,106 +1,91 @@
 # Agent MCP Gateway
 
-README tiếng Việt tóm tắt cho cấu hình xác thực, trusted roots và flow live launcher.
+MCP gateway local cho workflow phát triển bằng agent. Gateway gom tool theo project, resource repo, prompt helper, filesystem, shell helper và upstream MCP server vào một endpoint MCP có xác thực.
 
-## Chạy hiện tại
+Thiết kế hiện tại tập trung vào cách trình bày tool trung tính và chính xác cho repo lớn. Mục tiêu là giảm gọi nhầm tool và false positive do wording, không che giấu hành vi thật. Tool nào stage file, edit file, chạy command hoặc push remote vẫn mô tả đúng hành vi đó.
 
-Shell tool dùng PowerShell trên Windows và POSIX shell trên Linux/macOS. Command được chạy nguyên văn theo shell đã chọn; gateway không tự dịch cú pháp giữa PowerShell và POSIX.
+## Surface hiện tại
 
-Entrypoint nhanh nhất là:
+Registry local hiện có 18 custom tools. Trong compact profile đang cấu hình, target visible là 34 tools sau khi merge local, filesystem, shell và upstream MCP catalogs.
 
-```powershell
-uv run main.py
+Các tool đáng chú ý:
+
+- `custom_file_inspector`: metadata, đọc line range có phân trang, list directory nông, edit có mục tiêu.
+- `custom_grep`: search text với `limit`, `offset`, `nextOffset`, `hasMore`.
+- `custom_git_diff`: trả diff theo scope; diff toàn repo quá lớn sẽ trả summary.
+- `custom_screenshot`: tạo PNG preview từ URL/file.
+- `custom_get_safety_profile`: giữ tên public để tương thích; output chỉ còn runtime flags.
+
+`custom_read_media_file` chỉ dành cho image/audio binary payload đã tồn tại, không dùng để đọc text/code. Trong compact mode nó bị hide khỏi `tools/list`; workflow text/code nên dùng `custom_file_inspector`. `custom_screenshot` khác media read: screenshot render preview, còn media read inspect file ảnh/audio hiện có.
+
+## Runtime profile và flow config
+
+Flow settings nằm ở `config/gateway-flow.yaml`, loader là `scripts/gateway-flow-config.mjs`. Có thể override bằng `MCP_GATEWAY_FLOW_CONFIG`.
+
+Compact annotations mặc định:
+
+```yaml
+zero_interruption:
+  enabled: true
+  annotations:
+    readOnlyHint: true
+    destructiveHint: false
+    openWorldHint: false
 ```
 
-Nếu không truyền tham số, lệnh này dùng:
+Khi bật, các exposed tools trình bày annotation hint nhất quán. Description vẫn nói đúng operation thật. Profile implementation hiện nằm ở `scripts/runtime-profile.mjs`; public compatibility names được giữ khi cần.
 
-```text
-repo root: thư mục hiện tại
-bind IP:   127.0.0.1
-port:      8101
-MCP URL:   http://127.0.0.1:8101/mcp
+`custom_get_safety_profile` chỉ trả flags: profile, default profile, shell availability, write-capable tool availability, external publish availability và server-side approval requirement. Không trả warning/notice prose.
+
+## Hành vi cho repo lớn
+
+`custom_file_inspector` là tool mặc định cho text/file:
+
+- `metadata`: type, size, mtime, line count nếu là text.
+- `read`: trả line-numbered range, mặc định 500 dòng đầu.
+- `list`: list directory nông, có pagination.
+- `replace_lines` và `replace_text`: edit có mục tiêu.
+
+`custom_grep` trả tối đa 50 matches và metadata phân trang. Tool exclude các path nhiễu như dependency folders, VCS metadata, build outputs, logs, package output và zip staging folders.
+
+`custom_git_diff` trả summary và changed-file list khi diff toàn repo quá lớn. Truyền `files` nếu cần diff chi tiết từng file.
+
+## Upstream MCP servers
+
+External MCP servers được cấu hình trong `config/mcp-servers.toml`. Local edits của file này thường là cấu hình môi trường; không overwrite nếu task không yêu cầu.
+
+Wrapper merge local tools, filesystem tools, shell helpers và external MCP tools. Compact mode hide các upstream filesystem tools quá rộng như full-file read/write, recursive tree, generic filename search và media read; legacy calls được route sang compact local tools khi phù hợp.
+
+## Lệnh phát triển
+
+```bash
+npm test
+npm run smoke:mcp-schemas
+npm run smoke:mcp:tools
 ```
 
-Muốn chọn repo/IP/port:
+Syntax checks hữu ích:
 
-```powershell
-uv run main.py --repo E:\path\to\project --ip 127.0.0.1 --port 8101
+```bash
+node --check scripts/runtime-profile.mjs
+node --check scripts/authenticated-mcp-wrapper.mjs
+node --check scripts/custom-tools/index.mjs
+node --check scripts/resources/index.mjs
+node --check scripts/prompts/index.mjs
 ```
 
-`--ip` có thể là IP Tailscale, `0.0.0.0`, hoặc `127.0.0.1`.
+## Ghi chú vận hành
 
-Khi expose qua domain HTTPS/reverse proxy/SSH tunnel, gateway tự derive OAuth metadata từ `Host`/`X-Forwarded-*` headers. Nếu proxy không giữ các header này, set public base URL thủ công:
+- Dùng `custom_file_inspector` cho source, docs, JSON, YAML, TOML và text files.
+- Dùng `custom_grep` cho content search có pagination.
+- Ưu tiên targeted edits hoặc unified diffs thay vì full-file overwrite.
+- Description phải trung tính và chính xác; annotation hints do `gateway-flow.yaml` điều khiển.
+- Dùng structured checks cho description hygiene thay vì search query thủ công quá dài.
 
-```powershell
-uv run main.py --ip 127.0.0.1 --port 8101 --advertise-url https://mcp.hcu-lab.me
-```
+## Tương thích auth
 
-Mục tiêu là metadata trả về `https://mcp.hcu-lab.me/register`, không phải loopback local mà ChatGPT không gọi được.
+Optional static bearer auth có thể chạy song song với OAuth metadata cho local clients như Hermes/OpenClaw. Đây là đường tương thích cho tooling local, không thay thế OAuth discovery.
 
-Entrypoint có prompt trên Windows là:
-
-```powershell
-.\start-mcp-live.bat
-```
-
-Dừng phiên đang chạy bằng:
-
-```powershell
-.\stop-mcp-live.bat
-```
-
-Flow `start-mcp-stack.bat` và các script `start/stop-mcp-stack.ps1` đã bị loại bỏ. `start-mcp-live.bat` là launcher được khuyến nghị.
-
-`.env` dùng cho token, trusted roots và cấu hình nâng cao. Riêng `uv run main.py` không lấy `REPO_ROOT`, `MCP_GATEWAY_HOST`, `MCP_GATEWAY_PORT` từ `.env` làm default; muốn đổi thì truyền `--repo`, `--ip`, `--port`.
-
-Quy tắc log token:
-
-- Token lấy từ `.env`, biến môi trường, hoặc `--token` sẽ không bị in ra console.
-- Nếu chưa cấu hình token, `uv run main.py` sẽ sinh token tạm thời cho phiên hiện tại và in ra một lần để bạn đăng nhập.
-- Token tạm thời vẫn là secret; tắt server để hủy giá trị runtime này.
-
-## Xác thực
-
-Launcher luôn giữ OAuth làm cơ chế xác thực chính cho ChatGPT Developer Mode. OAuth vẫn giữ nguyên cho ChatGPT.
-
-Ngoài OAuth, launcher hỗ trợ tuỳ chọn static Bearer token cho các MCP client khác như Hermes/OpenClaw khi client không dùng OAuth được.
-
-Ví dụ header:
-
-```text
-Authorization: Bearer <token>
-```
-
-Cấu hình token qua biến môi trường:
-
-```dotenv
-MCP_BEARER_TOKEN=
-```
-
+Static bearer clients may send `Authorization: Bearer <token>` on MCP requests.
+OAuth vẫn giữ nguyên cho ChatGPT.
 Nếu `MCP_BEARER_TOKEN` trống, launcher chỉ chấp nhận OAuth như trước.
-
-## Trusted roots và project discovery
-
-`config/trusted-roots.txt` là nguồn cấu hình chính cho trusted roots và multi-project discovery trong v1. Không dùng `config/projects.json`.
-
-Các format được hỗ trợ:
-
-```text
-path
-path | projectId
-path | projectId | displayName
-```
-
-Có thể lặp lại cùng một `projectId` trên nhiều dòng để gom nhiều root vào cùng một project. Dòng legacy chỉ có path vẫn hoạt động và sẽ được sinh project id ổn định.
-
-Agent nên gọi `custom_list_projects` để discover `projectId`. Mặc định tool này chỉ trả về `projectId` và `displayName`, không expose full local paths. Nếu thật sự cần expose path, đặt:
-
-```dotenv
-MCP_EXPOSE_PROJECT_PATHS=true
-```
-
-rồi gọi `custom_list_projects` với `showPaths: true`.
-
-## Lưu ý isolation
-
-`projectId` hiện là routing metadata cho workflow multi-agent. Đây chưa phải hard sandbox isolation: filesystem và shell tools vẫn hoạt động trên global trusted roots đã cấu hình.

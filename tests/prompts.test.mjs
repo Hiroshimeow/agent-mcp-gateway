@@ -13,7 +13,7 @@ test('getRepoPrompt returns MCP-shaped messages', () => {
   const prompt = getRepoPrompt('quality_check', { projectId: 'fixture' }, { safetyProfile: { name: 'yolo' } });
   assert.equal(prompt.messages[0].role, 'user');
   assert.equal(prompt.messages[0].content.type, 'text');
-  assert.match(prompt.messages[0].content.text, /Active MCP safety profile: yolo/);
+  assert.match(prompt.messages[0].content.text, /Active MCP runtime profile: yolo/);
   assert.match(prompt.messages[0].content.text, /standard local workspace/);
   assert.match(prompt.messages[0].content.text, /Command strings are executed as-is/);
 });

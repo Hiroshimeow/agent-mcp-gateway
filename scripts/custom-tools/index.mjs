@@ -10,7 +10,7 @@ import { runTestsTool } from './test-tool.mjs';
 import { screenshotTool } from './screenshots-tool.mjs';
 import { fail, ok } from './response-utils.mjs';
 import { listProjectSummaries } from '../projects/trusted-roots-projects.mjs';
-import { buildSafetyProfileStatus } from '../safety-profile.mjs';
+import { buildRuntimeProfileStatus } from '../runtime-profile.mjs';
 import { applyToolRisk } from '../tool-risk.mjs';
 
 function schema(properties = {}, required = []) {
@@ -37,13 +37,13 @@ function listProjectsTool(args = {}, context = {}) {
   });
 }
 
-function getSafetyProfileTool(_args = {}, context = {}) {
-  return ok('get_safety_profile', 'Reported current MCP safety profile', buildSafetyProfileStatus(context.env || process.env));
+function getRuntimeProfileTool(_args = {}, context = {}) {
+  return ok('get_safety_profile', 'Reported current MCP runtime profile', buildRuntimeProfileStatus(context.env || process.env));
 }
 
 const TOOL_DEFINITIONS = [
   ['list_projects', 'Use this tool to discover configured projectId values.', schema({ showPaths: { type: 'boolean', default: false } }), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, listProjectsTool, false],
-  ['get_safety_profile', 'Use this read-only tool to inspect the active tool profile and understand which classes of tools are available in the local gateway.', schema(), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, getSafetyProfileTool, false],
+  ['get_safety_profile', 'Use this read-only tool to inspect the active tool profile and understand which classes of tools are available in the local gateway.', schema(), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, getRuntimeProfileTool, false],
   ['grep', projectToolDescription('Use this tool to search text inside files under the configured workspace folders. Use it for code/content search; do not use it to search filenames only. It reads files and paths outside configured workspace folders return an error.'), schema({ path: { type: 'string' }, query: { type: 'string' }, regex: { type: 'boolean', default: false }, caseSensitive: { type: 'boolean', default: false }, include: STRING_ARRAY, exclude: STRING_ARRAY, limit: { type: 'number', default: 50 }, offset: { type: 'number', default: 0 }, maxResults: { type: 'number', default: 50 }, contextLines: { type: 'number', default: 0 } }, ['query']), { readOnlyHint: true, idempotentHint: true, destructiveHint: false }, grepTool, true],
   ['file_inspector', projectToolDescription('Use this tool to inspect metadata, read paginated line ranges, list shallow directories, or apply targeted file edits.'), schema({ action: { type: 'string', enum: ['metadata', 'read', 'list', 'replace_lines', 'replace_text'] }, path: { type: 'string' }, start_line: { type: 'number' }, end_line: { type: 'number' }, maxDepth: { type: 'number', default: 1 }, limit: { type: 'number', default: 200 }, offset: { type: 'number', default: 0 }, oldText: { type: 'string' }, newText: { type: 'string' }, replaceAll: { type: 'boolean', default: false }, replacements: { type: 'array', items: { type: 'object', properties: { start_line: { type: 'number' }, end_line: { type: 'number' }, text: { type: 'string' } }, required: ['start_line', 'end_line', 'text'], additionalProperties: false } }, dryRun: { type: 'boolean', default: false } }, ['action', 'path']), { readOnlyHint: false, idempotentHint: false, destructiveHint: false }, fileInspectorTool, true],
   ['apply_patch', projectToolDescription('Use this tool to apply unified diff patches under the configured workspace folders. Use it for multi-file edits; do not use it for a single exact replacement. It modifies files unless dryRun=true and paths outside configured workspace folders return an error. It validates patches with git apply --check before applying.'), schema({ patch: { type: 'string' }, workingDirectory: { type: 'string' }, dryRun: { type: 'boolean', default: true } }, ['patch']), { readOnlyHint: false, idempotentHint: false, destructiveHint: false }, applyPatchTool, true],

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { buildSafetyProfileStatus, getSafetyProfile } from '../safety-profile.mjs';
+import { buildRuntimeProfileStatus, getRuntimeProfile } from '../runtime-profile.mjs';
 import { applyToolRisk, buildToolRiskManifest } from '../tool-risk.mjs';
 
 const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'logs', 'packages', '_zip_temp']);
@@ -48,7 +48,7 @@ function projectSummary(project, context) {
     default: context.projectRegistry?.defaultProjectId === project.projectId,
     hasPackageJson: hasPackageJson(project),
     hasReadme: hasReadme(project),
-    safetyProfile: getSafetyProfile(context.env || process.env).name
+    runtimeProfile: getRuntimeProfile(context.env || process.env).name
   };
   if (exposePaths(context)) data.repoRoot = project.repoRoot;
   return data;
@@ -61,7 +61,7 @@ export function listRepoResources(context = {}) {
     const base = `repo://project/${encodeURIComponent(p.projectId)}`;
     resources.push(
       { uri: `${base}/summary`, name: `${p.displayName} summary`, mimeType: 'application/json' },
-      { uri: `${base}/safety-profile`, name: `${p.displayName} safety profile`, mimeType: 'application/json' },
+      { uri: `${base}/runtime-profile`, name: `${p.displayName} runtime profile`, mimeType: 'application/json' },
       { uri: `${base}/tool-manifest`, name: `${p.displayName} tool manifest`, mimeType: 'application/json' },
       { uri: `${base}/tree`, name: `${p.displayName} directory tree`, mimeType: 'application/json' },
       { uri: `${base}/git/status`, name: `${p.displayName} git status`, mimeType: 'application/json' }
@@ -143,11 +143,11 @@ export async function readRepoResource(uri, context = {}) {
   const rest = match[2].replace(/[?#].*$/, '');
 
   if (rest === 'summary') return jsonContent(uri, projectSummary(project, context));
-  if (rest === 'safety-profile') return jsonContent(uri, buildSafetyProfileStatus(context.env || process.env));
+  if (rest === 'runtime-profile' || rest === 'safety-profile') return jsonContent(uri, buildRuntimeProfileStatus(context.env || process.env));
   if (rest === 'tool-manifest') {
-    const safetyProfile = getSafetyProfile(context.env || process.env);
+    const runtimeProfile = getRuntimeProfile(context.env || process.env);
     const tools = (context.listTools ? await context.listTools() : []).map(applyToolRisk);
-    return jsonContent(uri, { profile: safetyProfile.name, tools: buildToolRiskManifest(tools, safetyProfile) });
+    return jsonContent(uri, { profile: runtimeProfile.name, tools: buildToolRiskManifest(tools, runtimeProfile) });
   }
   if (rest === 'readme') {
     const readme = ['README.md', 'README.vi.md'].map(name => path.join(project.repoRoot, name)).find(file => fs.existsSync(file));
