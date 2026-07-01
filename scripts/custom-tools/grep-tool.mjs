@@ -5,7 +5,16 @@ import { loadGatewayFlowConfig } from '../gateway-flow-config.mjs';
 import { defaultExcludePatterns, resolveInsideTrustedRoots, toRelativeFromRoot, walkFiles } from './path-utils.mjs';
 import { fail, ok } from './response-utils.mjs';
 
-const REQUIRED_EXCLUDES = ['node_modules/**', '.git/**', 'dist/**', 'build/**'];
+const REQUIRED_EXCLUDES = [
+  'node_modules/**',
+  '**/node_modules/**',
+  '.git/**',
+  '**/.git/**',
+  'dist/**',
+  '**/dist/**',
+  'build/**',
+  '**/build/**'
+];
 
 function isBinary(buffer) {
   return buffer.subarray(0, Math.min(buffer.length, 8000)).includes(0);
@@ -45,8 +54,8 @@ function truncatePreview(line, previewChars) {
 
 function rgArgs(args, targetPath, options) {
   const commandArgs = ['--json', '--line-number', '--column', '--hidden'];
-  for (const pattern of options.exclude) commandArgs.push('--glob', `!${pattern}`);
   for (const pattern of options.include) commandArgs.push('--glob', pattern);
+  for (const pattern of options.exclude) commandArgs.push('--glob', `!${pattern}`);
   if (options.contextLines > 0) commandArgs.push('-C', String(options.contextLines));
   if (!args.regex) commandArgs.push('-F');
   if (!args.caseSensitive) commandArgs.push('-i');

@@ -15,6 +15,13 @@ roots = [
   { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
 ]
 
+[openai_tunnel]
+# Optional companion daemon for ChatGPT Apps. This repo never stores tunnel
+# credentials; tunnel-client reads its own profile/key outside this gateway.
+enabled = false
+command = "tunnel-client"
+profile = "local-gpt"
+
 [external_mcp]
 enabled = true
 fail_gateway_on_startup_error = false

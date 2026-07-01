@@ -44,6 +44,7 @@ const RISK_MAP = new Map(Object.entries({
   review_diff: { ...READ_ONLY, category: TOOL_CATEGORIES.review },
   get_platform_info: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   get_safety_profile: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  get_skill: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
 
   write_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
   edit_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },

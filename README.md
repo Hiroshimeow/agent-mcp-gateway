@@ -85,3 +85,24 @@ node --check scripts/prompts/index.mjs
 ## Auth compatibility
 
 Optional static bearer auth may coexist with OAuth metadata for local clients such as Hermes/OpenClaw. It is a compatibility path for local tooling, not a replacement for OAuth discovery.
+
+## OpenAI Secure MCP Tunnel
+
+`uv run main.py --repo <repo>` always starts the local MCP gateway at `http://127.0.0.1:8101/mcp`.
+
+Enable the ChatGPT tunnel in config:
+
+```toml
+[openai_tunnel]
+enabled = true
+command = "tunnel-client"
+profile = "local-gpt"
+```
+
+Or force it for one run:
+
+```bash
+uv run main.py --repo E:\FPT\ddc\266 --tunnel
+```
+
+The gateway starts `tunnel-client run --profile <profile>` as a companion process. Tunnel credentials and runtime keys are not stored in this repo; they stay in the `tunnel-client` profile/environment. If the tunnel command is unavailable or not authenticated, the gateway prints a warning and keeps local `8101` running.

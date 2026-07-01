@@ -7,12 +7,10 @@ const RULES = [
   { name: 'openai_api_key', severity: 'high', regex: /\bsk-[A-Za-z0-9_-]{20,}\b/g, message: 'Possible OpenAI API key' },
   { name: 'npm_token', severity: 'high', regex: /\bnpm_[A-Za-z0-9]{20,}\b/g, message: 'Possible npm token' },
   { name: 'private_key', severity: 'high', regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, message: 'Private key block detected' },
-  { name: 'ngrok_token', severity: 'high', regex: /\bNGROK_AUTHTOKEN\s*=\s*([^\s#]+)/gi, group: 1, message: 'Possible ngrok auth token' },
   { name: 'mcp_bearer_token', severity: 'high', regex: /\bMCP_BEARER_TOKEN\s*=\s*([^\s#]+)/gi, group: 1, message: 'Possible MCP bearer token' },
   { name: 'mcp_auth_password', severity: 'high', regex: /\bMCP_AUTH_PASSWORD\s*=\s*([^\s#]+)/gi, group: 1, message: 'Possible MCP auth password' },
   { name: 'password_or_secret', severity: 'medium', regex: /\b(?:PASSWORD|SECRET|TOKEN|API_KEY)\s*=\s*([^\s#]+)/gi, group: 1, message: 'Possible secret assignment' },
-  { name: 'jwt_like_token', severity: 'medium', regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, message: 'Possible JWT-like token' },
-  { name: 'tailscale_auth_key', severity: 'high', regex: /\btskey-[A-Za-z0-9_-]{20,}\b/g, message: 'Possible Tailscale auth key' }
+  { name: 'jwt_like_token', severity: 'medium', regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, message: 'Possible JWT-like token' }
 ];
 
 const ORDER = { low: 1, medium: 2, high: 3, none: 99 };

@@ -16,8 +16,29 @@
 #   "C:\\temp"   # Windows path; backslashes must be escaped inside TOML strings.
 #   "C:/temp"    # Also accepted on Windows.
 roots = [
-  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
+  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" },
+
+  { path = "E:/python_project/multi-run-apps", project_id = "multi-run-apps", display_name = "multi-run-apps" },
+  { path = "E:/python_project/Screens-Trans-Chatbot", project_id = "screens-trans-chatbot", display_name = "Screens-Trans-Chatbot" },
+  { path = "E:/python_project/free-tunnel", project_id = "hport", display_name = "hport" },
+  { path = "E:/python_project/local-live-caption-engine", project_id = "local-live-caption-engine", display_name = "local-live-caption-engine" },
+  { path = "E:/git-project/OpenClaw-bot-review", project_id = "openclaw-bot-review", display_name = "OpenClaw Bot Review" },
+  { path = "E:/git-project/paperclip", project_id = "paperclip", display_name = "Paperclip" },
+  { path = "E:/git-project", project_id = "git-project-workspace", display_name = "Git Project Workspace Can access all repo" },
+  { path = "E:/FPT", project_id = "fpt", display_name = "FPT" },
+  { path = "E:/python_project/tampermonkey_auto", project_id = "tampermonkey_auto", display_name = "tampermonkey_auto" },
+  { path = "C:/Users/admin/personal-mcp-launcher", project_id = "personal-mcp-launcher", display_name = "Personal MCP Launcher" }
 ]
+
+
+
+
+[openai_tunnel]
+# Optional companion daemon for ChatGPT Apps. This repo never stores tunnel credentials.
+# tunnel-client reads its own profile/key outside this gateway.
+enabled = false
+command = "C:/Users/admin/personal-mcp-launcher/tools/tunnel-client-dist/tunnel-client.exe"
+profile = "local-gpt"
 
 [external_mcp]
 enabled = true
@@ -41,17 +62,18 @@ startup_timeout_sec = 30.0
 url = "https://mcp.deepwiki.com/mcp"
 startup_timeout_sec = 30.0
 
-[mcp_servers.norikae]
-runner = "npx"
-args = ["-y", "norikae-mcp@0.1.4"]
-startup_timeout_sec = 30.0
+# [mcp_servers.norikae]
+# runner = "npx"
+# args = ["-y", "norikae-mcp@0.1.4"]
+# startup_timeout_sec = 30.0
 
 # File/project oriented stdio MCP servers.
+
 # roots = "trusted" reuses [trusted_roots].roots above.
 
 [mcp_servers.filesystem]
-command = "node"
-args = ["node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "${repoRoot}"]
+preset = "filesystem"
+roots = "trusted"
 startup_timeout_sec = 30.0
 
 [mcp_servers.eslint]
@@ -74,7 +96,4 @@ args = ["serve", "--mcp"]
 cwd = "${repoRoot}"
 startup_timeout_sec = 30.0
 
-[mcp_servers.dcp-retrieval]
-url = "http://10.40.56.3:8000/mcp"
-bearer_token_env = "DCP_RETRIEVAL_TOKEN"
-startup_timeout_sec = 30.0
+

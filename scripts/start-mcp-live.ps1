@@ -231,7 +231,7 @@ if ($authPassword -eq "change-me-now") {
 }
 
 Write-Section "Prerequisites"
-$prereqs = & (Join-Path $projectRoot "scripts\check-prereqs.ps1") -Tunnel none
+$prereqs = & (Join-Path $projectRoot "scripts\check-prereqs.ps1")
 $prereqs | Format-List | Out-String | Write-Host
 
 New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
@@ -262,7 +262,8 @@ if (-not (Test-Path $wrapperScript)) {
 $records = New-Object System.Collections.Generic.List[object]
 $advertisedHost = if ($bindHost -eq "0.0.0.0") { "127.0.0.1" } else { $bindHost }
 $cleanAdvertiseUrl = $AdvertiseUrl.Trim().TrimEnd("/")
-$localBaseUrl = if ($cleanAdvertiseUrl) { $cleanAdvertiseUrl } else { "http://$advertisedHost`:$P" }
+$localGatewayBaseUrl = "http://$advertisedHost`:$P"
+$localBaseUrl = if ($cleanAdvertiseUrl) { $cleanAdvertiseUrl } else { $localGatewayBaseUrl }
 
 Write-Section "Starting MCP Server"
 if (-not $enableShell) {
@@ -311,7 +312,7 @@ Write-Host "Gateway port: $P"
 if ($cleanAdvertiseUrl) {
     Write-Host "Advertise URL: $cleanAdvertiseUrl"
 }
-Write-Host "Local base URL: $localBaseUrl"
+Write-Host "Local gateway URL: $localGatewayBaseUrl"
 Write-Host "MCP URL: $localBaseUrl/mcp"
 Write-Host ""
 Write-Host "Local MCP client"
