@@ -89,3 +89,24 @@ Optional static bearer auth có thể chạy song song với OAuth metadata cho 
 Static bearer clients may send `Authorization: Bearer <token>` on MCP requests.
 OAuth vẫn giữ nguyên cho ChatGPT.
 Nếu `MCP_BEARER_TOKEN` trống, launcher chỉ chấp nhận OAuth như trước.
+
+## OpenAI Secure MCP Tunnel
+
+`uv run main.py --repo <repo>` luon start local MCP gateway tai `http://127.0.0.1:8101/mcp`.
+
+Bat ChatGPT tunnel trong config:
+
+```toml
+[openai_tunnel]
+enabled = true
+command = "tunnel-client"
+profile = "local-gpt"
+```
+
+Hoac ep bat cho mot lan chay:
+
+```bash
+uv run main.py --repo E:\FPT\ddc\266 --tunnel
+```
+
+Gateway start `tunnel-client run --profile <profile>` nhu companion process. Tunnel credentials va runtime keys khong luu trong repo nay; chung nam trong profile/environment cua `tunnel-client`. Neu tunnel command chua san sang hoac chua auth, gateway chi warning va van giu local `8101` chay.

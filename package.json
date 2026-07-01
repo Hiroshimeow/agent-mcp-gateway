@@ -5,8 +5,8 @@
   "license": "MIT",
   "scripts": {
     "start": "node scripts/authenticated-mcp-wrapper.mjs",
-    "start:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-live.ps1",
-    "stop:live": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-live.ps1",
+    "start:live": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\start-mcp-live.ps1",
+    "stop:live": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\stop-mcp-live.ps1",
     "test": "node --test tests/*.test.mjs",
     "smoke:mcp": "node scripts/smoke-mcp-endpoint.mjs",
     "smoke:mcp-schemas": "node scripts/smoke-mcp-schemas.mjs",

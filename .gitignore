@@ -10,5 +10,9 @@ logs/
 packages/
 *.zip
 g8-sshr.bat
-
+config/mcp-servers.toml
 .codegraph/
+start-mcp-live.bat
+stop-mcp-live.bat
+temps/
+tools/

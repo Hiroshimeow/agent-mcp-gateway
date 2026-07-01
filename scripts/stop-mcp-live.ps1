@@ -31,16 +31,6 @@ if (-not (Test-Path $pidFile)) {
 
 $entries = @(Get-Content -Raw -Path $pidFile | ConvertFrom-Json)
 foreach ($entry in $entries) {
-    if ($entry.name -eq "tailscale-funnel") {
-        try {
-            tailscale funnel reset | Out-Null
-            Write-Host "Stopped tailscale-funnel (reset funnel config)"
-        } catch {
-            Write-Host ("Skipped tailscale-funnel reset: {0}" -f $_.Exception.Message)
-        }
-        continue
-    }
-
     if (-not $entry.pid) {
         continue
     }

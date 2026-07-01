@@ -20,11 +20,13 @@ test('.env.example keeps runtime env separate from unified config', () => {
   assert.match(envExample, /^MCP_EXTERNAL_MCP_ENABLED=true$/m);
 });
 
-test('batch live launcher does not prompt for public advertise URL', () => {
-  const batch = read('start-mcp-live.bat');
-  assert.doesNotMatch(batch, /Advertise URL/i);
-  assert.doesNotMatch(batch, /MCP_ADVERTISE_URL_INPUT/);
-  assert.doesNotMatch(batch, /-AdvertiseUrl\s+\$env:MCP_ADVERTISE_URL_INPUT/);
+test('direct main entrypoint supports local gateway plus optional tunnel', () => {
+  const main = read('main.py');
+  const config = read('config/mcp-servers.toml');
+  assert.match(main, /authenticated-mcp-wrapper\.mjs/);
+  assert.match(main, /--tunnel/);
+  assert.match(main, /load_openai_tunnel_config/);
+  assert.match(config, /^\[openai_tunnel\]$/m);
 });
 
 test('committed mcp config matches the current committed baseline', () => {
@@ -34,6 +36,7 @@ test('committed mcp config matches the current committed baseline', () => {
   assert.match(config, /^\[mcp_servers\.filesystem\]$/m);
   assert.match(config, /^\[mcp_servers\.eslint\]$/m);
   assert.match(config, /^\[mcp_servers\.codegraph\]$/m);
-  assert.match(config, /^\[mcp_servers\.dcp-retrieval\]$/m);
-  assert.match(config, /bearer_token_env\s*=\s*"DCP_RETRIEVAL_TOKEN"/);
+  assert.doesNotMatch(config, /^\[mcp_servers\.dcp-retrieval\]$/m);
+  assert.match(config, /^\[openai_tunnel\]$/m);
+  assert.match(config, /enabled\s*=\s*false/);
 });

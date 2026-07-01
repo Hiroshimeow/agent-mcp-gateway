@@ -38,17 +38,17 @@ async function exists(filePath) {
 async function findBrowser() {
   if (browserPathPromise) return await browserPathPromise;
   browserPathPromise = (async () => {
-  for (const name of BROWSERS) {
-    const found = await new Promise(resolve => {
-      const child = spawn('sh', ['-lc', `command -v ${name}`], { stdio: ['ignore', 'pipe', 'ignore'] });
-      let out = '';
-      child.stdout.on('data', chunk => { out += chunk; });
-      child.on('close', code => resolve(code === 0 ? out.trim() : ''));
-      child.on('error', () => resolve(''));
-    });
-    if (found) return found;
-  }
-  return '';
+    for (const name of BROWSERS) {
+      const found = await new Promise(resolve => {
+        const child = spawn('sh', ['-lc', `command -v ${name}`], { stdio: ['ignore', 'pipe', 'ignore'] });
+        let out = '';
+        child.stdout.on('data', chunk => { out += chunk; });
+        child.on('close', code => resolve(code === 0 ? out.trim() : ''));
+        child.on('error', () => resolve(''));
+      });
+      if (found) return found;
+    }
+    return '';
   })();
   return await browserPathPromise;
 }
@@ -98,9 +98,15 @@ async function makeOutputPath(context, args) {
 
 async function imageContent(filePath, includeImage) {
   const stat = await fs.promises.stat(filePath);
+  if (!stat.isFile()) {
+    const error = new Error(`Path is not a file: ${filePath}`);
+    error.code = 'NOT_FILE';
+    error.details = { path: filePath };
+    throw error;
+  }
   const ext = path.extname(filePath).toLowerCase();
   const mimeType = IMAGE_EXT.get(ext) || 'image/png';
-  const meta = { path: filePath, bytes: stat.size, mimeType };
+  const meta = { path: filePath, bytes: stat.size, mimeType, ext };
   if (!includeImage) return { meta, image: null };
   const data = await fs.promises.readFile(filePath, 'base64');
   return { meta, image: { type: 'image', data, mimeType } };
@@ -136,25 +142,6 @@ async function captureUrl(args, context) {
   };
 }
 
-async function readImageFile(args, context) {
-  const input = args.path || args.file;
-  if (!input || typeof input !== 'string') {
-    return fail(TOOL, 'PATH_REQUIRED', 'path is required.');
-  }
-  const checked = resolveInsideTrustedRoots(input, context, { mustExist: true });
-  const ext = path.extname(checked.path).toLowerCase();
-  if (!IMAGE_EXT.has(ext)) {
-    return fail(TOOL, 'UNSUPPORTED_FILE', 'Supported files: png, jpg, jpeg, webp.', { path: checked.path });
-  }
-  const { meta, image } = await imageContent(checked.path, bool(args.embed ?? args.includeImage, false));
-  return {
-    content: [
-      { type: 'text', text: JSON.stringify({ ok: true, tool: 'custom_screenshot', summary: 'Loaded PNG file.', data: { ...meta, source: 'file' } }, null, 2) },
-      ...(image ? [image] : [])
-    ]
-  };
-}
-
 async function cleanup(args, context) {
   const base = path.resolve(context.resolvedRepoRoot || context.packageRoot || process.cwd(), 'logs', 'screenshots');
   if (!(await exists(base))) {
@@ -175,10 +162,9 @@ async function cleanup(args, context) {
 }
 
 export async function screenshotTool(args = {}, context = {}) {
-  const mode = String(args.mode || (args.url ? 'url' : args.path || args.file ? 'file' : 'url')).toLowerCase();
+  const mode = String(args.mode || (args.url ? 'url' : 'url')).toLowerCase();
   try {
     if (mode === 'url') return await captureUrl(args, context);
-    if (mode === 'file') return await readImageFile(args, context);
     if (mode === 'cleanup') return await cleanup(args, context);
     return fail(TOOL, 'UNKNOWN_MODE', `Unknown mode: ${mode}`);
   } catch (error) {
