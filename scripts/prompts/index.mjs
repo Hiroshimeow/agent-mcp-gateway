@@ -1,3 +1,5 @@
+import { buildSkillPrompt, getSkillDefinition, listSkillPromptDefinitions } from '../skills/index.mjs';
+
 const PROMPTS = new Map([
   ['explore_project', { description: 'Explore the project structure and understand the codebase layout.', args: ['projectId', 'focus', 'depth'] }],
   ['quality_check', { description: 'Review project structure, documentation, and general code quality standards.', args: ['projectId', 'depth'] }],
@@ -10,7 +12,7 @@ const PROMPTS = new Map([
 ]);
 
 function profileName(context) {
-  return context.runtimeProfile?.name || context.profile || 'yolo';
+  return context.runtimeProfile?.name || context.profile || context.safetyProfile?.name || 'yolo';
 }
 
 function promptArguments(names) {
@@ -18,11 +20,17 @@ function promptArguments(names) {
 }
 
 export function listRepoPrompts(_context = {}) {
-  return [...PROMPTS.entries()].map(([name, prompt]) => ({
+  const repoPrompts = [...PROMPTS.entries()].map(([name, prompt]) => ({
     name,
     description: prompt.description,
     arguments: promptArguments(prompt.args)
   }));
+  const skillPrompts = listSkillPromptDefinitions().map(prompt => ({
+    name: prompt.name,
+    description: prompt.description,
+    arguments: promptArguments(prompt.args)
+  }));
+  return [...repoPrompts, ...skillPrompts];
 }
 
 function textMessage(text) {
@@ -30,13 +38,16 @@ function textMessage(text) {
 }
 
 export function getRepoPrompt(name, args = {}, context = {}) {
+  const skill = getSkillDefinition(name);
+  if (skill) return { description: skill.description, messages: [textMessage(buildSkillPrompt(name, args))] };
+
   const prompt = PROMPTS.get(name);
   if (!prompt) throw new Error(`Unknown prompt: ${name}`);
   const projectId = args.projectId || context.defaultProjectId || '<projectId>';
   const safety = profileName(context);
   const common = `Project: ${projectId}\nActive MCP runtime profile: ${safety}. You are an expert software developer assistant working in a standard local workspace. Your goal is to help with routine coding, file management, and project tasks efficiently. Command strings are executed as-is by the selected OS shell; do not assume PowerShell and POSIX syntax are interchangeable.`;
   const bodies = {
-    review_repo: `${common}\nReview focus: ${args.focus || 'quality,tests,maintainability,docs,release'}. Depth: ${args.depth || 'normal'}. Report findings with severity, evidence, paths, and recommended tests.`,
+    explore_project: `${common}\nExplore focus: ${args.focus || 'structure,entrypoints,config,tests,docs'}. Depth: ${args.depth || 'normal'}. Map the project layout, main files, runnable commands, and risk areas before suggesting changes.`,
     quality_check: `${common}\nReview the project for consistency, adherence to style guides, and general architectural health.`,
     cross_platform_review: `${common}\nReview Windows/Linux/macOS behavior: path handling, env vars, direct shell args, child_process usage, quoting, test coverage, and CI matrix gaps. Preserve POSIX non-login -c behavior and Windows PowerShell flags.`,
     release_readiness: `${common}\nCheck clean git state, tests, secret scan, runtime schema smoke, untracked imported files, package/docs consistency, and release blockers. Do not publish or push without explicit user intent.`,
@@ -47,4 +58,3 @@ export function getRepoPrompt(name, args = {}, context = {}) {
   };
   return { description: prompt.description, messages: [textMessage(bodies[name])] };
 }
-

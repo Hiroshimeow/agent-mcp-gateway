@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { buildRuntimeProfileStatus, getRuntimeProfile } from '../runtime-profile.mjs';
 import { applyToolRisk, buildToolRiskManifest } from '../tool-risk.mjs';
+import { listSkillResources, readSkillResource } from '../skills/index.mjs';
 
 const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'logs', 'packages', '_zip_temp']);
 const MAX_RESOURCE_FILE_BYTES = 1024 * 1024;
@@ -56,7 +57,10 @@ function projectSummary(project, context) {
 
 export function listRepoResources(context = {}) {
   const projects = [...(context.projectRegistry?.projects?.values() || [])];
-  const resources = [{ uri: 'repo://projects', name: 'Projects', mimeType: 'application/json', description: 'Configured MCP gateway projects.' }];
+  const resources = [
+    ...listSkillResources(),
+    { uri: 'repo://projects', name: 'Projects', mimeType: 'application/json', description: 'Configured MCP gateway projects.' }
+  ];
   for (const p of projects) {
     const base = `repo://project/${encodeURIComponent(p.projectId)}`;
     resources.push(
@@ -127,6 +131,7 @@ async function gitDiff(project, staged = false) {
 
 export async function readRepoResource(uri, context = {}) {
   const parsed = new URL(uri);
+  if (parsed.protocol === 'skill:') return readSkillResource(uri);
   if (parsed.protocol !== 'repo:') throw new Error(`Unsupported resource URI: ${uri}`);
   if (uri === 'repo://projects') {
     const projects = [...(context.projectRegistry?.projects?.values() || [])].map(project => {
