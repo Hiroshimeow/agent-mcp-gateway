@@ -102,7 +102,7 @@ profile = "local-gpt"
 Or force it for one run:
 
 ```bash
-uv run main.py --repo E:\FPT\ddc\266 --tunnel
+uv run main.py --repo E:\ --tunnel
 ```
 
 The gateway starts `tunnel-client run --profile <profile>` as a companion process. Tunnel credentials and runtime keys are not stored in this repo; they stay in the `tunnel-client` profile/environment. If the tunnel command is unavailable or not authenticated, the gateway prints a warning and keeps local `8101` running.
