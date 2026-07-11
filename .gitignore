@@ -16,3 +16,4 @@ start-mcp-live.bat
 stop-mcp-live.bat
 temps/
 tools/
+.plan/

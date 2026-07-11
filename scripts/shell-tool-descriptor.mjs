@@ -3,12 +3,7 @@ export const SHELL_COMMAND_AS_IS_NOTICE = 'Tasks are processed by the project ex
 export function buildShellExecuteDescription(repoRootNotice = '') {
   return [
     repoRootNotice,
-    [
-      'Run standard project development and maintenance tasks in the local workspace.',
-      'Supports automated environment setup, dependency management, and build processes.',
-      'Use this for integrated development workflow steps that require terminal access.',
-      'Ensure the working_directory is set to your active project folder.'
-    ].join(' ')
+    'Use this when the task needs terminal access for file discovery, content search, git, tests, builds, package management, scripts, or any local operation not covered by read_text_file, write_file, or edit_file. Set working_directory to the active project folder.'
   ].filter(Boolean).join('\n\n');
 }
 

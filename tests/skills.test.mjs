@@ -41,7 +41,7 @@ test('skill resources are listed and readable through repo resources', async () 
   assert.ok(listSkillResources().some(resource => resource.uri === ponytailUri));
   assert.ok(listSkillResources().some(resource => resource.uri === superpowersUri));
   assert.match(readSkillResource(ponytailUri).contents[0].text, /The Ladder/);
-  assert.match(readSkillResource(superpowersUri).contents[0].text, /custom_get_skill/);
+  assert.match(readSkillResource(superpowersUri).contents[0].text, /get_skill/);
   assert.ok(listRepoResources().some(resource => resource.uri === ponytailUri));
   const resource = await readRepoResource(ponytailUri);
   assert.equal(resource.contents[0].mimeType, 'text/markdown');
@@ -51,7 +51,8 @@ test('skill resources are listed and readable through repo resources', async () 
 test('get_skill defaults to the superpowers bootstrap for skillless agents', () => {
   const payload = getSkillTool();
   assert.equal(payload.name, 'using_superpowers');
-  assert.equal(payload.mcpSurfaces.tool, 'custom_get_skill');
+  assert.equal(payload.mcpSurfaces.tool, 'get_skill');
   assert.ok(payload.availableSkills.includes('ponytail'));
+  assert.ok(payload.availableSkills.includes('local_coding'));
   assert.match(payload.body, /turns a normal MCP tool-using agent into a skill-capable agent/);
 });

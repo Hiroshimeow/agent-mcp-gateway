@@ -1,9 +1,8 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { fail } from './response-utils.mjs';
-import { getTrustedRoots, normalizeWindowsPath } from './path-utils.mjs';
+import { isPathInsideWorkspace, normalizeWorkspacePath } from '../workspace-registry.mjs';
 
 const TOOL = 'image_preview';
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
@@ -27,29 +26,10 @@ function numberInRange(value, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-function imagePreviewRoots(context = {}) {
-  const roots = [...getTrustedRoots(context)];
-  const home = os.homedir();
-  if (home) {
-    roots.push(path.join(home, 'Downloads'));
-    roots.push(path.join(home, 'Pictures'));
-    roots.push(path.join(home, 'Desktop'));
-  }
-  const extra = String(process.env.MCP_IMAGE_PREVIEW_ROOTS || '')
-    .split(/[;\n]/)
-    .map(item => item.trim())
-    .filter(Boolean);
-  roots.push(...extra);
-  return [...new Set(roots.map(root => path.resolve(normalizeWindowsPath(root))))];
-}
-
 function resolveInsideImagePreviewRoots(inputPath, context = {}) {
-  const resolved = path.resolve(normalizeWindowsPath(inputPath));
-  const roots = imagePreviewRoots(context);
-  const root = roots.find(candidate => {
-    const relative = path.relative(candidate, resolved);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-  });
+  const resolved = normalizeWorkspacePath(inputPath);
+  const roots = (context.resolvedRepoRoots || []).map(root => normalizeWorkspacePath(root));
+  const root = roots.find(candidate => isPathInsideWorkspace(candidate, resolved));
   if (!root) {
     const error = new Error(`Path is outside image preview scope: ${inputPath}`);
     error.code = 'PATH_OUT_OF_SCOPE';
@@ -106,7 +86,7 @@ export async function imagePreviewTool(args = {}, context = {}) {
           type: 'text',
           text: JSON.stringify({
             ok: true,
-            tool: 'custom_image_preview',
+            tool: 'image_preview',
             summary: image ? 'Loaded image preview content.' : 'Loaded image preview metadata.',
             data: {
               ...meta,

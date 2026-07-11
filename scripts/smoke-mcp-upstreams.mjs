@@ -48,16 +48,21 @@ async function makeConfig() {
   const node = process.execPath.replaceAll('\\', '\\\\');
   const config = path.join(dir, 'mcp-servers.toml');
   await fs.promises.writeFile(config, `
+[trusted_roots]
+roots = ["${root.replaceAll('\\', '/')}"]
+
 [external_mcp]
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
 
 [mcp_servers.fake]
+enabled = true
 transport = "stdio"
 command = "${node}"
 args = ["${fakeServer}"]
 
 [mcp_servers.failed_optional]
+enabled = true
 transport = "stdio"
 command = "definitely-not-a-real-command-for-mcp"
 `);
@@ -70,7 +75,6 @@ async function withServer(profile, fn) {
   const env = {
     ...process.env,
     REPO_ROOT: root,
-    MCP_TRUSTED_ROOTS: root,
     MCP_GATEWAY_HOST: '127.0.0.1',
     MCP_ADVERTISE_HOST: '127.0.0.1',
     MCP_GATEWAY_PORT: String(port),

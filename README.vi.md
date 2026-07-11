@@ -1,112 +1,69 @@
-# Agent MCP Gateway
+# Local Coding MCP Gateway
 
-MCP gateway local cho workflow phát triển bằng agent. Gateway gom tool theo project, resource repo, prompt helper, filesystem, shell helper và upstream MCP server vào một endpoint MCP có xác thực.
+MCP gateway có xác thực, dùng chung cho workspace coding local. Tên deployment và connector thuộc cấu hình host; source của repo không phụ thuộc máy cụ thể.
 
-Thiết kế hiện tại tập trung vào cách trình bày tool trung tính và chính xác cho repo lớn. Mục tiêu là giảm gọi nhầm tool và false positive do wording, không che giấu hành vi thật. Tool nào stage file, edit file, chạy command hoặc push remote vẫn mô tả đúng hành vi đó.
+## Catalog core
 
-## Surface hiện tại
+Catalog local chỉ có đúng sáu tool:
 
-Registry local hiện có 18 custom tools. Trong compact profile đang cấu hình, target visible là 34 tools sau khi merge local, filesystem, shell và upstream MCP catalogs.
+- `read_text_file`
+- `write_file`
+- `edit_file`
+- `shell_execute`
+- `image_preview`
+- `get_skill`
 
-Các tool đáng chú ý:
+Dùng official filesystem cho nội dung file. Dùng `shell_execute` cho `rg`, Git, test, build, lint, package manager, archive và process. Các wrapper MCP chuyên biệt cho Git/search/review/release đã bị xóa thật, không chỉ ẩn bằng surface mode khác.
 
-- `custom_file_inspector`: metadata, đọc line range có phân trang, list directory nông, edit có mục tiêu.
-- `custom_grep`: search text với `limit`, `offset`, `nextOffset`, `hasMore`.
-- `custom_git_diff`: trả diff theo scope; diff toàn repo quá lớn sẽ trả summary.
-- `custom_screenshot`: tạo PNG preview từ URL/file.
-- `custom_get_safety_profile`: giữ tên public để tương thích; output chỉ còn runtime flags.
+## Workspace roots live
 
-`custom_read_media_file` chỉ dành cho image/audio binary payload đã tồn tại, không dùng để đọc text/code. Trong compact mode nó bị hide khỏi `tools/list`; workflow text/code nên dùng `custom_file_inspector`. `custom_screenshot` khác media read: screenshot render preview, còn media read inspect file ảnh/audio hiện có.
+`config/mcp-servers.toml` là file cấu hình duy nhất cho metadata server, trusted roots, optional upstream và tunnel.
 
-## Runtime profile và flow config
+Khi structured tool call chứa absolute path để thực hiện yêu cầu của user, gateway sẽ:
 
-Flow settings nằm ở `config/gateway-flow.yaml`, loader là `scripts/gateway-flow-config.mjs`. Có thể override bằng `MCP_GATEWAY_FLOW_CONFIG`.
+1. normalize path và lấy directory root nhỏ nhất phù hợp;
+2. thêm root vào `[trusted_roots].roots` bằng lock và atomic replace;
+3. reload một workspace registry dùng chung;
+4. gửi `notifications/roots/list_changed` cho official filesystem;
+5. chờ đến khi chính xác tập roots mới active;
+6. tiếp tục tool call ban đầu, không restart và không hỏi lại quyền path.
 
-Compact annotations mặc định:
+Sửa TOML hợp lệ bằng tay sẽ hot-reload. TOML lỗi giữ nguyên runtime state hợp lệ gần nhất. Root được giữ đến khi bị xóa rõ ràng.
 
-```yaml
-zero_interruption:
-  enabled: true
-  annotations:
-    readOnlyHint: true
-    destructiveHint: false
-    openWorldHint: false
-```
+`[trusted_roots].roots` là nguồn cấp quyền duy nhất. `MCP_TRUSTED_ROOTS`, `MCP_IMAGE_PREVIEW_ROOTS` và các thư mục home mặc định không tự cấp quyền. Root cũ trong environment phải được chuyển vào array TOML. `image_preview`, filesystem, working directory của shell, resources và project discovery đều dùng cùng live root set và cùng chính sách canonical path. Lock có metadata owner; owner đã chết hoặc lock vượt ngưỡng stale bảo thủ 10 phút có thể được thu hồi.
 
-Khi bật, các exposed tools trình bày annotation hint nhất quán. Description vẫn nói đúng operation thật. Profile implementation hiện nằm ở `scripts/runtime-profile.mjs`; public compatibility names được giữ khi cần.
+## Optional upstreams
 
-`custom_get_safety_profile` chỉ trả flags: profile, default profile, shell availability, write-capable tool availability, external publish availability và server-side approval requirement. Không trả warning/notice prose.
+Context7, DeepWiki, Exa và ESLint mặc định `enabled = false`. Khi bật, gateway stage client và catalog ứng viên, rồi mới atomic commit và phát list-changed notification. Disable hoặc thay cấu hình server cũng là transaction: nếu startup hoặc catalog discovery của ứng viên lỗi, client, route, status và generation cũ vẫn hoạt động.
 
-## Hành vi cho repo lớn
+Codegraph và ripgrep là CLI workflow, không phải MCP upstream. Skill `local_coding` chỉ dùng Codegraph khi có executable và index `.codegraph` sẵn; nếu không sẽ fallback sang `rg` và `read_text_file`.
 
-`custom_file_inspector` là tool mặc định cho text/file:
+## Kết quả shell
 
-- `metadata`: type, size, mtime, line count nếu là text.
-- `read`: trả line-numbered range, mặc định 500 dòng đầu.
-- `list`: list directory nông, có pagination.
-- `replace_lines` và `replace_text`: edit có mục tiêu.
+`shell_execute` trả JSON có cấu trúc: command, working directory yêu cầu/thực tế, exit code, stdout, stderr, phân loại stderr, duration, timeout, truncation metadata, original byte counts, returned byte counts và encoding UTF-8. Với `rg`, exit code `1` nghĩa là không có match, không phải gateway failure.
 
-`custom_grep` trả tối đa 50 matches và metadata phân trang. Tool exclude các path nhiễu như dependency folders, VCS metadata, build outputs, logs, package output và zip staging folders.
+Runtime profile vẫn là `safe`, `assisted`, `yolo`. `safe` ẩn file mutation và shell; `assisted` cho phép file write nhưng ẩn shell; `yolo` expose đủ sáu core tool.
 
-`custom_git_diff` trả summary và changed-file list khi diff toàn repo quá lớn. Truyền `files` nếu cần diff chi tiết từng file.
-
-## Upstream MCP servers
-
-External MCP servers được cấu hình trong `config/mcp-servers.toml`. Local edits của file này thường là cấu hình môi trường; không overwrite nếu task không yêu cầu.
-
-Wrapper merge local tools, filesystem tools, shell helpers và external MCP tools. Compact mode hide các upstream filesystem tools quá rộng như full-file read/write, recursive tree, generic filename search và media read; legacy calls được route sang compact local tools khi phù hợp.
-
-## Lệnh phát triển
+## Phát triển
 
 ```bash
 npm test
 npm run smoke:mcp-schemas
 npm run smoke:mcp:tools
+npm run smoke:mcp:upstreams
 ```
 
-Syntax checks hữu ích:
+Check chính:
 
 ```bash
-node --check scripts/runtime-profile.mjs
 node --check scripts/authenticated-mcp-wrapper.mjs
-node --check scripts/custom-tools/index.mjs
-node --check scripts/resources/index.mjs
-node --check scripts/prompts/index.mjs
+node --check scripts/workspace-registry.mjs
+node --check scripts/upstreams/manager.mjs
+git diff --check
 ```
 
-## Ghi chú vận hành
+## Auth và tunnel
 
-- Dùng `custom_file_inspector` cho source, docs, JSON, YAML, TOML và text files.
-- Dùng `custom_grep` cho content search có pagination.
-- Ưu tiên targeted edits hoặc unified diffs thay vì full-file overwrite.
-- Description phải trung tính và chính xác; annotation hints do `gateway-flow.yaml` điều khiển.
-- Dùng structured checks cho description hygiene thay vì search query thủ công quá dài.
+OAuth vẫn là đường chính cho ChatGPT. Static bearer auth có thể bật thêm cho local client nhưng không thay OAuth discovery.
 
-## Tương thích auth
-
-Optional static bearer auth có thể chạy song song với OAuth metadata cho local clients như Hermes/OpenClaw. Đây là đường tương thích cho tooling local, không thay thế OAuth discovery.
-
-Static bearer clients may send `Authorization: Bearer <token>` on MCP requests.
-OAuth vẫn giữ nguyên cho ChatGPT.
-Nếu `MCP_BEARER_TOKEN` trống, launcher chỉ chấp nhận OAuth như trước.
-
-## OpenAI Secure MCP Tunnel
-
-`uv run main.py --repo <repo>` luon start local MCP gateway tai `http://127.0.0.1:8101/mcp`.
-
-Bat ChatGPT tunnel trong config:
-
-```toml
-[openai_tunnel]
-enabled = true
-command = "tunnel-client"
-profile = "local-gpt"
-```
-
-Hoac ep bat cho mot lan chay:
-
-```bash
-uv run main.py --repo E:\FPT\ddc\266 --tunnel
-```
-
-Gateway start `tunnel-client run --profile <profile>` nhu companion process. Tunnel credentials va runtime keys khong luu trong repo nay; chung nam trong profile/environment cua `tunnel-client`. Neu tunnel command chua san sang hoac chua auth, gateway chi warning va van giu local `8101` chay.
+`uv run main.py --repo <repo>` mở endpoint local tại `http://127.0.0.1:8101/mcp`. Tunnel được cấu hình trong `[openai_tunnel]`; credential nằm trong tunnel profile/environment, không lưu trong repo.

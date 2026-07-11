@@ -81,9 +81,8 @@ export function findUnifiedMcpConfigPath(env = process.env, repoRoot = process.c
   return fs.existsSync(candidate) ? candidate : null;
 }
 
-export function trustedRootsRawFromSources({ rawConfig = {}, env = process.env, repoRoot = process.cwd() } = {}) {
-  const rawFromToml = trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot });
-  return [rawFromToml, env.MCP_TRUSTED_ROOTS].filter(Boolean).join('\n');
+export function trustedRootsRawFromSources({ rawConfig = {}, repoRoot = process.cwd() } = {}) {
+  return trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot });
 }
 
 export function loadTrustedRootsRawFromUnifiedConfig({ env = process.env, repoRoot = process.cwd() } = {}) {

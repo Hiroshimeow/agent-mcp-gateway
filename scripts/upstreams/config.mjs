@@ -6,7 +6,7 @@ import {
   findUnifiedMcpConfigPath,
   loadUnifiedMcpTomlConfig,
   resolveTrustedRootPaths,
-  trustedRootsRawFromSources
+  trustedRootsTomlToRaw
 } from '../projects/trusted-roots-projects.mjs';
 
 const DEFAULT_EXTERNAL = {
@@ -17,7 +17,7 @@ const DEFAULT_EXTERNAL = {
   startup_timeout_ms: 15000,
   shutdown_timeout_ms: 5000,
   default_transport: 'stdio',
-  default_enabled: true
+  default_enabled: false
 };
 
 function envFlag(value, defaultValue = true) {
@@ -44,9 +44,10 @@ function asMsWithSec(raw, msKey, secKey, fallback, label) {
   return asMs(undefined, fallback, label);
 }
 
-function trustedRootsFromConfig(raw, env, repoRoot) {
-  const trustedRootsRaw = trustedRootsRawFromSources({ rawConfig: raw, env, repoRoot });
-  return resolveTrustedRootPaths(trustedRootsRaw, repoRoot).existingRoots;
+function trustedRootsFromConfig(raw, repoRoot) {
+  const trustedRootsRaw = trustedRootsTomlToRaw(raw.trusted_roots, { repoRoot });
+  if (!trustedRootsRaw.trim()) return [];
+  return resolveTrustedRootPaths(trustedRootsRaw).existingRoots;
 }
 
 function resolveMaybeRelative(value, baseDir) {
@@ -92,7 +93,7 @@ export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRo
 
   const baseDir = configPath ? path.dirname(configPath) : repoRoot;
   const serversRaw = raw.mcp_servers || {};
-  const trustedRoots = trustedRootsFromConfig(raw, env, repoRoot);
+  const trustedRoots = trustedRootsFromConfig(raw, repoRoot);
   const placeholderContext = { repoRoot: path.resolve(repoRoot), cwd: baseDir, env, trustedRoots, platform: process.platform };
   const servers = [];
   for (const [rawId, rawServerRaw] of Object.entries(serversRaw)) {

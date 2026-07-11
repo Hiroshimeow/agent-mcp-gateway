@@ -1,23 +1,23 @@
 # Unified MCP gateway config example.
-#
-# Copy/edit this file only if you want to replace the committed public baseline
-# in config/mcp-servers.toml. Keep secrets out of TOML; use *_env fields for env
-# var names when an upstream requires credentials.
+# Keep secrets out of TOML; use *_env fields for environment-variable names.
+
+[server]
+name = "personal-mcp-launcher"
+title = "Local Coding Gateway"
+description = "Local coding workspace for filesystem, shell, image inspection, and optional skills."
+instructions = "Use filesystem tools for content, shell_execute for terminal workflows, image_preview for images, and get_skill for reusable guidance."
 
 [trusted_roots]
-# Shared by local custom_* tools and file-oriented external MCP presets.
-# Supported forms:
-#   roots = ["${repoRoot}", "D:\\repo-a", "C:/temp"]
-#   roots = [{ path = "${repoRoot}", project_id = "my-repo", display_name = "My Repo" }]
-# TOML strings require escaped backslashes for Windows paths, e.g. "C:\\temp".
-# Forward-slash drive paths such as "C:/temp" are also accepted on Windows.
+# This array is the sole path-authorization source for filesystem, shell, images,
+# resources, and project discovery. Legacy MCP_TRUSTED_ROOTS and
+# MCP_IMAGE_PREVIEW_ROOTS values must be migrated here.
+# Absolute paths used explicitly by tool calls are appended here automatically.
+# Forward-slash Windows paths avoid TOML escaping.
 roots = [
-  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" }
+  { path = "${repoRoot}", project_id = "personal-mcp-launcher", display_name = "Personal MCP Launcher" }
 ]
 
 [openai_tunnel]
-# Optional companion daemon for ChatGPT Apps. This repo never stores tunnel
-# credentials; tunnel-client reads its own profile/key outside this gateway.
 enabled = false
 command = "tunnel-client"
 profile = "local-gpt"
@@ -26,57 +26,27 @@ profile = "local-gpt"
 enabled = true
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
-# catalog_cache = "ttl"
-# catalog_cache_ttl_ms = 30000
-# catalog_cache = "none"
 startup_timeout_sec = 30.0
 shutdown_timeout_sec = 5.0
-default_enabled = true
+default_enabled = false
 
 [mcp_servers.context7]
+enabled = false
 url = "https://mcp.context7.com/mcp"
 
 [mcp_servers.exa]
+enabled = false
 url = "https://mcp.exa.ai/mcp"
 
 [mcp_servers.deepwiki]
+enabled = false
 url = "https://mcp.deepwiki.com/mcp"
 
-[mcp_servers.norikae]
-runner = "npx"
-args = ["-y", "norikae-mcp@0.1.4"]
-startup_timeout_sec = 30.0
-
-[mcp_servers.filesystem]
-preset = "filesystem"
-roots = "trusted"
-
-[mcp_servers.rg]
-preset = "ripgrep"
-roots = "trusted"
-
 [mcp_servers.eslint]
+enabled = false
 preset = "eslint"
 
-[mcp_servers.gitnexus]
-runner = "npx"
-args = ["-y", "gitnexus@1.6.6-rc.49", "mcp"]
-
-[mcp_servers.codegraph]
-command = "codegraph"
-args = ["serve", "--mcp"]
-cwd = "${repoRoot}"
-
-# Explicit expert stdio config remains supported. If args are set explicitly,
-# presets do not append trusted roots unless inherit_trusted_roots = true.
-# [mcp_servers.custom_stdio]
-# command = "my-mcp-server"
-# args = ["serve", "--mcp"]
-# cwd = "${repoRoot}"
-# tool_prefix = "my_tools"
-
-# HTTP example with secret loaded from env, not literal TOML.
-# [mcp_servers.remote_graph]
-# url = "http://127.0.0.1:8123/mcp"
-# bearer_token_env = "REMOTE_GRAPH_MCP_TOKEN"
-# tool_prefix = "remote_graph"
+# Add other optional servers with enabled = false, then switch to true at runtime.
+# Runtime changes are staged and committed transactionally; a failed candidate
+# leaves the previous client/catalog/routes active.
+# Codegraph and ripgrep are intentionally used as CLI tools through shell_execute.

@@ -14,7 +14,7 @@ async function fixture() {
   await fs.writeFile(path.join(root, 'binary.bin'), Buffer.from([0, 1, 2, 3]));
   await fs.writeFile(path.join(root, 'large.txt'), 'x'.repeat(1024 * 1024 + 1));
   const registry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture`], { defaultProjectId: 'fixture' });
-  return { root, context: { projectRegistry: registry, env: { MCP_SAFETY_PROFILE: 'safe' }, listTools: async () => [{ name: 'custom_read_text_file' }, { name: 'custom_shell_execute' }] } };
+  return { root, context: { projectRegistry: registry, env: { MCP_SAFETY_PROFILE: 'safe' }, listTools: async () => [{ name: 'read_text_file' }, { name: 'shell_execute' }] } };
 }
 
 function firstJson(result) {
@@ -38,8 +38,8 @@ test('reads summary safety profile readme package tree and tool manifest', async
   assert.equal(Array.isArray(firstJson(await readRepoResource('repo://project/fixture/tree', context)).entries), true);
   assert.equal(firstJson(await readRepoResource('repo://project/fixture/tree?depth=bad', context)).maxDepth, 3);
   const manifest = firstJson(await readRepoResource('repo://project/fixture/tool-manifest', context));
-  assert.equal(manifest.tools.find(t => t.name === 'custom_shell_execute').visible, false);
-  assert.equal(manifest.tools.find(t => t.name === 'custom_read_text_file').visible, true);
+  assert.equal(manifest.tools.find(t => t.name === 'shell_execute').visible, false);
+  assert.equal(manifest.tools.find(t => t.name === 'read_text_file').visible, true);
 });
 
 test('reads safe project-relative file and rejects traversal', async () => {

@@ -1,7 +1,7 @@
 {
   "name": "agent-mcp-gateway",
   "version": "1.0.0",
-  "description": "Windows-first local MCP gateway for AI agents.",
+  "description": "Cross-platform local MCP gateway for coding agents.",
   "license": "MIT",
   "scripts": {
     "start": "node scripts/authenticated-mcp-wrapper.mjs",
