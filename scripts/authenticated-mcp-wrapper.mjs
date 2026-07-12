@@ -25,6 +25,7 @@ import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
+import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
 import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
@@ -182,6 +183,10 @@ async function broadcastCatalogChanges(changes = {}) {
   }
   await Promise.all(tasks);
 }
+
+const stopSkillCatalogWatcher = watchSkillCatalog(async () => {
+  await broadcastCatalogChanges({ resourcesChanged: true, promptsChanged: true });
+});
 
 function localToolNamesForCollisionCheck() {
   return [...CORE_TOOL_NAMES];
@@ -379,7 +384,7 @@ function createProxyServer() {
       description: metadata.description
     },
     {
-      instructions: metadata.instructions,
+      instructions: [metadata.instructions, SKILL_AGENT_INSTRUCTIONS].filter(Boolean).join(' '),
       capabilities: {
         tools: { listChanged: true },
         resources: { subscribe: false, listChanged: true },
@@ -738,6 +743,7 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
 
 async function shutdown() {
   serverInstance.close();
+  stopSkillCatalogWatcher();
   workspaceRegistry.close();
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});

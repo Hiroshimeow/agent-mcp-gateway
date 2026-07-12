@@ -15,6 +15,16 @@ Catalog local chỉ có đúng sáu tool:
 
 Dùng official filesystem cho nội dung file. Dùng `shell_execute` cho `rg`, Git, test, build, lint, package manager, archive và process. Các wrapper MCP chuyên biệt cho Git/search/review/release đã bị xóa thật, không chỉ ẩn bằng surface mode khác.
 
+## Skills live
+
+Copy một folder chuẩn `<name>/SKILL.md` vào `scripts/skills/`. Gateway tự nhận add/edit/remove mà không restart, phát prompt/resource list-changed notification, và trả catalog hiện tại gồm name, alias, description trong `get_skill()` qua field `skillCatalog`. Server instructions và tool description yêu cầu coding agent gọi `get_skill()` không có argument trước, rồi load skill khớp nhỏ nhất theo tên.
+
+`SKILL.md` cần YAML frontmatter có `name` và `description` đủ rõ để agent chọn. `user-invocable: false` sẽ ẩn skill khỏi MCP prompts; `disable-model-invocation: true` vẫn cho load rõ ràng nhưng loại khỏi auto-selection. Thay đổi lỗi sẽ giữ catalog hợp lệ gần nhất.
+
+Ponytail, Superpowers và các Anthropic skill được phép phân phối được quản lý qua `scripts/skills/sources.json`; commit chính xác nằm trong `sources.lock.json`. Dùng `npm run skills:check` để phát hiện upstream đã đổi và `npm run skills:sync` để tải, validate rồi áp dụng manifest hiện tại. Sync giữ nguyên skill local không được quản lý và kiểm tra license, symlink, dung lượng file và font file. Các Anthropic document skill proprietary được loại trừ có chủ đích.
+
+Loader và updater chỉ dùng Node filesystem/path APIs cùng path tương đối theo repo nên cùng layout chạy trên Linux và Windows. Chỉ cần restart gateway khi code loader thay đổi; add/edit/remove hoặc sync skill sau đó không cần restart. Xem `scripts/skills/README.md` để biết workflow update và chính sách license.
+
 ## Workspace roots live
 
 `config/mcp-servers.toml` là file cấu hình duy nhất cho metadata server, trusted roots, optional upstream và tunnel.
@@ -48,6 +58,7 @@ Runtime profile vẫn là `safe`, `assisted`, `yolo`. `safe` ẩn file mutation 
 
 ```bash
 npm test
+npm run skills:check
 npm run smoke:mcp-schemas
 npm run smoke:mcp:tools
 npm run smoke:mcp:upstreams

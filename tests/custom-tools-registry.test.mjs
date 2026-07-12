@@ -31,13 +31,15 @@ test('get_skill returns a registered skill definition', async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.data.name, 'ponytail_review');
   assert.equal(payload.data.mcpSurfaces.tool, 'get_skill');
-  assert.match(payload.data.body, /Ponytail Review/);
+  assert.match(payload.data.body, /unnecessary complexity|net: -<N> lines/i);
+  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'ponytail_review'));
 });
 
 test('get_skill defaults to using_superpowers bootstrap', async () => {
   const payload = parseToolResult(await callCustomTool('get_skill', {}, {}));
   assert.equal(payload.ok, true);
   assert.equal(payload.data.name, 'using_superpowers');
-  assert.match(payload.data.body, /skill-capable agent/);
+  assert.match(payload.data.body, /invoke relevant or requested skills|skill priority/i);
   assert.ok(payload.data.availableSkills.includes('local_coding'));
+  assert.ok(payload.data.availableSkills.includes('systematic_debugging'));
 });

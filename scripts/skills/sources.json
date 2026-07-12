@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "ponytail",
+      "repository": "https://github.com/DietrichGebert/ponytail.git",
+      "ref": "main",
+      "skillRoot": "skills",
+      "license": "MIT",
+      "requireRootLicense": {
+        "path": "LICENSE",
+        "contains": "MIT License"
+      },
+      "include": [
+        "ponytail",
+        "ponytail-audit",
+        "ponytail-debt",
+        "ponytail-gain",
+        "ponytail-help",
+        "ponytail-review"
+      ],
+      "overrides": {
+        "ponytail": {
+          "aliases": ["lazy", "lazy_mode", "yagni"],
+          "uri": "skill://ponytail/ponytail/SKILL.md"
+        },
+        "ponytail-audit": {
+          "aliases": ["audit_over_engineering"],
+          "uri": "skill://ponytail/ponytail-audit/SKILL.md"
+        },
+        "ponytail-debt": {
+          "aliases": ["debt_ledger"],
+          "uri": "skill://ponytail/ponytail-debt/SKILL.md"
+        },
+        "ponytail-help": {
+          "aliases": ["ponytail_commands"],
+          "uri": "skill://ponytail/ponytail-help/SKILL.md"
+        },
+        "ponytail-review": {
+          "aliases": ["review_for_over_engineering"],
+          "uri": "skill://ponytail/ponytail-review/SKILL.md"
+        }
+      },
+      "rootFiles": [
+        {
+          "path": "LICENSE",
+          "target": "ponytail-LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "id": "superpowers",
+      "repository": "https://github.com/obra/superpowers.git",
+      "ref": "main",
+      "skillRoot": "skills",
+      "license": "MIT",
+      "requireRootLicense": {
+        "path": "LICENSE",
+        "contains": "MIT License"
+      },
+      "include": [
+        "brainstorming",
+        "dispatching-parallel-agents",
+        "executing-plans",
+        "finishing-a-development-branch",
+        "receiving-code-review",
+        "requesting-code-review",
+        "subagent-driven-development",
+        "systematic-debugging",
+        "test-driven-development",
+        "using-git-worktrees",
+        "using-superpowers",
+        "verification-before-completion",
+        "writing-plans",
+        "writing-skills"
+      ],
+      "overrides": {
+        "using-superpowers": {
+          "aliases": [
+            "superpower",
+            "superpowers",
+            "use_superpowers",
+            "skill_bootstrap",
+            "mcp_skill_bootstrap"
+          ],
+          "uri": "skill://superpowers/using-superpowers/SKILL.md"
+        }
+      },
+      "rootFiles": [
+        {
+          "path": "LICENSE",
+          "target": "superpowers-LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "repository": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "skillRoot": "skills",
+      "license": "Apache-2.0 per included skill",
+      "include": [
+        "algorithmic-art",
+        "brand-guidelines",
+        "claude-api",
+        "frontend-design",
+        "internal-comms",
+        "mcp-builder",
+        "skill-creator",
+        "slack-gif-creator",
+        "theme-factory",
+        "web-artifacts-builder",
+        "webapp-testing"
+      ],
+      "requireSkillLicense": {
+        "path": "LICENSE.txt",
+        "contains": "Apache License"
+      },
+      "rootFiles": [
+        {
+          "path": "THIRD_PARTY_NOTICES.md",
+          "target": "anthropic-THIRD_PARTY_NOTICES.md"
+        }
+      ],
+      "excluded": {
+        "canvas-design": "Not vendored because its directory contains bundled font files.",
+        "doc-coauthoring": "No redistributable license is declared in the skill directory.",
+        "docx": "Anthropic source-available proprietary license prohibits redistribution.",
+        "pdf": "Anthropic source-available proprietary license prohibits redistribution.",
+        "pptx": "Anthropic source-available proprietary license prohibits redistribution.",
+        "xlsx": "Anthropic source-available proprietary license prohibits redistribution."
+      }
+    }
+  ]
+}

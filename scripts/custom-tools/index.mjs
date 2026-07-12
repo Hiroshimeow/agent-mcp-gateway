@@ -10,11 +10,11 @@ function schema(properties = {}, required = []) {
 const TOOL_DEFINITIONS = [
   {
     name: 'get_skill',
-    description: 'Load one reusable coding workflow skill by name; omit name to load the using_superpowers bootstrap.',
+    description: 'Call without arguments at the start of substantial coding, debugging, review, refactor, automation, or project work to discover the live skill catalog; then call again with the smallest relevant skill name or alias.',
     inputSchema: schema({
       name: {
         type: 'string',
-        description: 'Registered skill name or alias.',
+        description: 'Registered skill name or alias. Omit to load using_superpowers plus the current skill catalog.',
         default: 'using_superpowers'
       }
     }),

@@ -15,6 +15,16 @@ The local catalog contains exactly six tools:
 
 Use the official filesystem tools for file content. Use `shell_execute` for `rg`, Git, tests, builds, linters, package managers, archives, and process operations. Specialized Git/search/review/release MCP wrappers were removed rather than hidden behind another surface mode.
 
+## Live skills
+
+Copy a standard `<name>/SKILL.md` folder into `scripts/skills/`. The gateway discovers additions, edits, and removals without restart, emits prompt/resource list-changed notifications, and returns the current names, aliases, and descriptions through `get_skill()` as `skillCatalog`. Server instructions and the tool description tell coding agents to call `get_skill()` without arguments first, then load the smallest matching skill by name.
+
+`SKILL.md` requires YAML frontmatter with `name` and a selection-quality `description`. Optional `user-invocable: false` hides it from MCP prompts; `disable-model-invocation: true` keeps explicit loading but removes it from automatic agent selection. Invalid changes keep the last valid catalog.
+
+Upstream Ponytail, Superpowers, and redistributable Anthropic skills are tracked through `scripts/skills/sources.json`; exact commits are recorded in `sources.lock.json`. Use `npm run skills:check` to detect upstream movement and `npm run skills:sync` to fetch, validate, and stage the current manifest. The sync process preserves unmanaged local skills and enforces license, symlink, file-size, and font-file checks. Anthropic's proprietary document skills are intentionally excluded.
+
+The loader and updater use Node filesystem/path APIs and repository-relative paths, so the same layout works on Linux and Windows. Deploying loader code requires one gateway restart; subsequent skill additions, edits, removals, and managed skill syncs do not. See `scripts/skills/README.md` for the update workflow and license policy.
+
 ## Live workspace roots
 
 `config/mcp-servers.toml` is the single configuration file for server metadata, trusted roots, optional upstreams, and tunnel settings.
@@ -48,6 +58,7 @@ Runtime profiles remain `safe`, `assisted`, and `yolo`. `safe` hides mutating fi
 
 ```bash
 npm test
+npm run skills:check
 npm run smoke:mcp-schemas
 npm run smoke:mcp:tools
 npm run smoke:mcp:upstreams
