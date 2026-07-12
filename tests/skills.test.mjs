@@ -63,7 +63,8 @@ test('get_skill defaults to the superpowers bootstrap for skillless agents', () 
   assert.ok(payload.availableSkills.includes('systematic_debugging'));
   assert.ok(ponytail?.description);
   assert.match(payload.body, /invoke relevant or requested skills|skill priority/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments first/);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /before the first project-changing tool call/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments/i);
 });
 
 function writeSkill(directory, folder, { description = 'Use for dynamic debugging work.', body = '# Dynamic Debugging\n\nInspect before changing.', extra = '' } = {}) {

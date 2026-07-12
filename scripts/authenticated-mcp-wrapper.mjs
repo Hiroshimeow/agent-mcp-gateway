@@ -39,6 +39,7 @@ import {
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
+import { buildSkillCallerKey, createSkillBootstrapGate } from './skill-bootstrap-gate.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -66,6 +67,9 @@ const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLower
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
+const skillBootstrapGate = createSkillBootstrapGate({
+  ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
+});
 const filesystemEntrypointPath = fileURLToPath(
   new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
 );
@@ -293,9 +297,27 @@ function structuredToolText(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
-async function routeToolCall(request) {
+function structuredToolError(toolName, error) {
+  return {
+    ...structuredToolText({ ok: false, tool: toolName, error }),
+    isError: true
+  };
+}
+
+function appendSkillAdvisory(result, advisory) {
+  if (!advisory || result?.isError) return result;
+  return {
+    ...result,
+    content: [...(result?.content || []), { type: 'text', text: advisory }]
+  };
+}
+
+async function routeToolCall(request, { callerKey } = {}) {
   const toolName = request.params.name;
   assertToolAllowedForProfile(toolName, runtimeProfile);
+
+  const bootstrapError = skillBootstrapGate.checkTool(callerKey, toolName);
+  if (bootstrapError) return structuredToolError(toolName, bootstrapError);
 
   if (toolName === 'shell_execute' && enableShell) {
     const args = request.params.arguments || {};
@@ -331,12 +353,15 @@ async function routeToolCall(request) {
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
     await ensureFileTarget(request.params.arguments || {});
-    return await filesystemClient.callTool(request.params);
+    const result = await filesystemClient.callTool(request.params);
+    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
   if (toolName === 'image_preview') await ensureImageTarget(request.params.arguments || {});
   if (isLocalCustomTool(toolName)) {
-    return await callCustomTool(toolName, request.params.arguments || {}, customToolContext());
+    const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext());
+    if (toolName === 'get_skill') skillBootstrapGate.markBootstrapped(callerKey);
+    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
   if (externalMcpManager.isExternalToolName(toolName)) {
@@ -346,12 +371,12 @@ async function routeToolCall(request) {
   throw new Error(`Unknown or disabled tool: ${toolName}`);
 }
 
-async function routeObservedToolCall(request) {
+async function routeObservedToolCall(request, context) {
   const toolName = request.params?.name || 'unknown';
   const startedAt = Date.now();
   console.log(`[tool-call:start] ${toolName}`);
   try {
-    const result = await routeToolCall(request);
+    const result = await routeToolCall(request, context);
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
     if (durationMs > slowToolThresholdMs) console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
@@ -374,7 +399,7 @@ function currentResourceContext() {
   };
 }
 
-function createProxyServer() {
+function createProxyServer(callerKey) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -394,7 +419,7 @@ function createProxyServer() {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, routeObservedToolCall);
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const context = currentResourceContext();
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
@@ -451,6 +476,15 @@ function setIncomingHeader(req, name, value) {
 function fingerprint(value) {
   const text = String(value || '');
   return `${text.length}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`;
+}
+
+function skillCallerKeyFromRequest(req) {
+  return buildSkillCallerKey({
+    authorization: req.headers.authorization || '',
+    userAgent: req.headers['user-agent'] || '',
+    remoteAddress: req.ip || req.socket?.remoteAddress || '',
+    sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
+  });
 }
 
 function getProvidedAuthorizationToken(authorizationHeader) {
@@ -621,9 +655,9 @@ function mcpAuthMiddleware(req, res, next) {
 
 const transports = {};
 
-async function createTransport() {
+async function createTransport(req) {
   let transport;
-  const server = createProxyServer();
+  const server = createProxyServer(skillCallerKeyFromRequest(req));
 
   if (!useStatefulMcpSessions) {
     transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -663,7 +697,7 @@ const mcpPostHandler = async (req, res) => {
       shouldCreateTransportForRequest(sessionId, req.body, transports) ||
       (!sessionId && isInitializeRequest(req.body))
     ) {
-      transport = await createTransport();
+      transport = await createTransport(req);
       await transport.handleRequest(req, res, req.body);
       return;
     } else {

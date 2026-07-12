@@ -42,6 +42,12 @@ Optional metadata:
 
 If a new or edited file is invalid, the gateway logs the error and keeps the last valid catalog. The loader and updater use Node filesystem/path APIs, so the same layout works on Linux and Windows.
 
+## Agent bootstrap gate
+
+Read-only context stays available before skill selection. The first `read_text_file` or `image_preview` result for an authenticated caller includes one short advisory. The first attempted `write_file`, `edit_file`, or `shell_execute` without a successful skill load returns `SKILL_BOOTSTRAP_REQUIRED`; repeated attempts return only `Call get_skill().` to avoid token waste.
+
+Any successful `get_skill(...)` call unlocks the caller for the TTL. The default is four hours and can be changed with `MCP_SKILL_BOOTSTRAP_TTL_MS`. Stateless mode keys the state from a hash of authentication, user-agent, and remote identity; raw credentials are never stored. Changing or stale `mcp-session-id` headers do not reset the stateless gate.
+
 ## Managed upstream skills
 
 `sources.json` is the reviewable source manifest. It contains explicit repositories, branches, included skill folders, compatibility metadata, license requirements, and documented exclusions. `sources.lock.json` records the exact upstream commits currently vendored.

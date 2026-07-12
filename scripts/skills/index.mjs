@@ -527,7 +527,7 @@ export function createSkillRegistry({ directory = DEFAULT_SKILLS_DIRECTORY, buil
 
 const registry = createSkillRegistry();
 
-export const SKILL_AGENT_INSTRUCTIONS = 'For substantial coding, debugging, review, refactor, automation, or project work, call get_skill without arguments first to discover the live skill catalog, then load the smallest relevant skill by name before acting.';
+export const SKILL_AGENT_INSTRUCTIONS = 'Read relevant context first when needed. Before the first project-changing tool call, call get_skill without arguments to discover the live catalog, then load the smallest relevant workflow; the gateway reminds once and blocks write_file, edit_file, and shell_execute until a skill loads successfully.';
 
 export function listSkills() {
   return registry.listSkills();

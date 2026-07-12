@@ -104,13 +104,14 @@ default_enabled = false
   }
 }
 
-async function mcpRequest(baseUrl, id, method, params = {}) {
+async function mcpRequest(baseUrl, id, method, params = {}, extraHeaders = {}) {
   const response = await fetch(`${baseUrl}/mcp`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${smokeCredential}`,
       accept: 'application/json, text/event-stream',
-      'content-type': 'application/json'
+      'content-type': 'application/json',
+      ...extraHeaders
     },
     body: JSON.stringify({ jsonrpc: '2.0', id, method, params })
   });
@@ -134,8 +135,8 @@ async function listTools(baseUrl) {
   return (await mcpRequest(baseUrl, 2, 'tools/list', {})).result.tools || [];
 }
 
-async function callTool(baseUrl, id, name, args = {}) {
-  return await mcpRequest(baseUrl, id, 'tools/call', { name, arguments: args });
+async function callTool(baseUrl, id, name, args = {}, extraHeaders = {}) {
+  return await mcpRequest(baseUrl, id, 'tools/call', { name, arguments: args }, extraHeaders);
 }
 
 function names(tools) {
@@ -159,14 +160,45 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   ]);
 
   const target = path.join(workspace, 'smoke.txt');
-  await callTool(baseUrl, 3, 'write_file', { path: target, content: 'first' });
-  await callTool(baseUrl, 4, 'edit_file', {
+  fs.writeFileSync(target, 'context', 'utf8');
+
+  const firstRead = await callTool(baseUrl, 3, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-a' });
+  assert.equal(firstRead.result.content[0].text, 'context');
+  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /before changing the project.*get_skill/i.test(item.text)));
+
+  const secondRead = await callTool(baseUrl, 4, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-b' });
+  assert.equal(secondRead.result.content.length, 1);
+
+  const firstBlocked = await callTool(baseUrl, 5, 'write_file', { path: target, content: 'first' });
+  assert.equal(firstBlocked.result.isError, true);
+  const firstBlockedPayload = JSON.parse(firstBlocked.result.content[0].text);
+  assert.equal(firstBlockedPayload.error.code, 'SKILL_BOOTSTRAP_REQUIRED');
+  assert.match(firstBlockedPayload.error.message, /before the first project-changing operation/i);
+
+  const invalidSkill = await callTool(baseUrl, 6, 'get_skill', { name: 'missing-smoke-skill' });
+  assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
+
+  const repeatedBlocked = await callTool(baseUrl, 7, 'edit_file', {
+    path: target,
+    edits: [{ oldText: 'context', newText: 'blocked' }],
+    dryRun: false
+  });
+  assert.equal(repeatedBlocked.result.isError, true);
+  assert.equal(JSON.parse(repeatedBlocked.result.content[0].text).error.message, 'Call get_skill().');
+
+  const bootstrap = await callTool(baseUrl, 8, 'get_skill', {});
+  assert.notEqual(bootstrap.result.isError, true);
+  assert.equal(JSON.parse(bootstrap.result.content[0].text).data.name, 'using_superpowers');
+
+  await callTool(baseUrl, 9, 'write_file', { path: target, content: 'first' });
+  await callTool(baseUrl, 10, 'edit_file', {
     path: target,
     edits: [{ oldText: 'first', newText: 'second' }],
     dryRun: false
   });
-  const read = await callTool(baseUrl, 5, 'read_text_file', { path: target });
+  const read = await callTool(baseUrl, 11, 'read_text_file', { path: target });
   assert.equal(read.result.content[0].text, 'second');
+  assert.equal(read.result.content.length, 1);
 
   const concurrentRoots = [
     fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-a-')),
@@ -174,9 +206,9 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   ];
   await Promise.all(concurrentRoots.map(async (dynamicRoot, index) => {
     const dynamicTarget = path.join(dynamicRoot, `auto-trusted-${index}.txt`);
-    const write = await callTool(baseUrl, 6 + index * 2, 'write_file', { path: dynamicTarget, content: `auto-trusted-${index}` });
+    const write = await callTool(baseUrl, 20 + index * 2, 'write_file', { path: dynamicTarget, content: `auto-trusted-${index}` });
     assert.notEqual(write.result?.isError, true);
-    const dynamicRead = await callTool(baseUrl, 7 + index * 2, 'read_text_file', { path: dynamicTarget });
+    const dynamicRead = await callTool(baseUrl, 21 + index * 2, 'read_text_file', { path: dynamicTarget });
     assert.equal(dynamicRead.result.content[0].text, `auto-trusted-${index}`);
   }));
   const persistedConfig = fs.readFileSync(configPath, 'utf8');
@@ -184,7 +216,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
 
   const shellDynamicRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-shell-root-'));
   const shellPathCommand = process.platform === 'win32' ? '(Get-Location).Path' : 'pwd';
-  const shellPath = await callTool(baseUrl, 10, 'shell_execute', {
+  const shellPath = await callTool(baseUrl, 30, 'shell_execute', {
     command: shellPathCommand,
     working_directory: shellDynamicRoot
   });
@@ -196,7 +228,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   const command = process.platform === 'win32'
     ? "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); Write-Output 'Tiếng Việt 日本語'; [Console]::Error.WriteLine('warning')"
     : "printf 'Tiếng Việt 日本語\\n'; printf 'warning\\n' >&2";
-  const shell = await callTool(baseUrl, 11, 'shell_execute', { command, working_directory: workspace });
+  const shell = await callTool(baseUrl, 31, 'shell_execute', { command, working_directory: workspace });
   const shellData = JSON.parse(shell.result.content[0].text);
   assert.equal(shellData.exitCode, 0);
   assert.match(shellData.stdout, /Tiếng Việt 日本語/);
@@ -228,6 +260,6 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, profile filtering, two concurrent automatic path grants, immediate filesystem calls, and structured UTF-8 shell output',
+  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, and structured UTF-8 shell output',
   observedProfiles
 }, null, 2));
