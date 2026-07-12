@@ -480,9 +480,8 @@ function fingerprint(value) {
 
 function skillCallerKeyFromRequest(req) {
   return buildSkillCallerKey({
-    authorization: req.headers.authorization || '',
-    userAgent: req.headers['user-agent'] || '',
-    remoteAddress: req.ip || req.socket?.remoteAddress || '',
+    oauthClientId: req.auth?.clientId || '',
+    staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
     sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
   });
 }

@@ -68,17 +68,20 @@ test('bootstrap state expires and starts a fresh advisory/block cycle', () => {
   assert.match(gate.checkTool('caller-a', 'write_file')?.message || '', /before the first project-changing operation/i);
 });
 
-test('caller key is stable without storing raw credentials', () => {
-  const input = {
-    authorization: 'Bearer secret-token',
-    userAgent: 'test-client/1.0',
-    remoteAddress: '127.0.0.1',
-    sessionId: ''
-  };
-  const key = buildSkillCallerKey(input);
+test('caller key follows verified client identity instead of rotating access tokens', () => {
+  const first = buildSkillCallerKey({ oauthClientId: 'chatgpt-client' });
+  const refreshed = buildSkillCallerKey({ oauthClientId: 'chatgpt-client' });
 
-  assert.equal(key, buildSkillCallerKey(input));
-  assert.notEqual(key, buildSkillCallerKey({ ...input, authorization: 'Bearer another-token' }));
-  assert.doesNotMatch(key, /secret-token/);
-  assert.match(key, /^caller:[0-9a-f]{24}$/);
+  assert.equal(first, refreshed);
+  assert.notEqual(first, buildSkillCallerKey({ oauthClientId: 'other-client' }));
+  assert.doesNotMatch(first, /chatgpt-client/);
+  assert.match(first, /^caller:[0-9a-f]{24}$/);
+});
+
+test('static bearer requests share one stable non-secret identity', () => {
+  const first = buildSkillCallerKey({ staticBearer: true });
+  const second = buildSkillCallerKey({ staticBearer: true });
+
+  assert.equal(first, second);
+  assert.notEqual(first, buildSkillCallerKey());
 });

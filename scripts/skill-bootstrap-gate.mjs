@@ -6,9 +6,10 @@ export const SKILL_CHECK_ADVISORY = 'Skill check: before changing the project, c
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'shell_execute']);
 const READ_TOOLS = new Set(['read_text_file', 'image_preview']);
 
-export function buildSkillCallerKey({ authorization = '', userAgent = '', remoteAddress = '', sessionId = '' } = {}) {
+export function buildSkillCallerKey({ oauthClientId = '', staticBearer = false, sessionId = '' } = {}) {
+  const identity = oauthClientId ? `oauth:${oauthClientId}` : staticBearer ? 'static-bearer' : 'anonymous';
   const digest = createHash('sha256')
-    .update([authorization, userAgent, remoteAddress, sessionId].map(String).join('\n'))
+    .update(sessionId ? `${identity}\nsession:${sessionId}` : identity)
     .digest('hex')
     .slice(0, 24);
   return `caller:${digest}`;
