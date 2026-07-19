@@ -1,0 +1,9 @@
+{
+  "source": "anthropic",
+  "repository": "https://github.com/anthropics/skills.git",
+  "ref": "main",
+  "commit": "9d2f1ae187231d8199c64b5b762e1bdf2244733d",
+  "path": "skills/skill-creator",
+  "license": "Apache-2.0 per included skill",
+  "overrides": {}
+}

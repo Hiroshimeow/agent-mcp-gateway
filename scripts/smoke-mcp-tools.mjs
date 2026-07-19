@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
 const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
+const observedProfiles = {};
 
 async function findFreePort() {
   return await new Promise((resolve, reject) => {
@@ -22,7 +25,11 @@ function parseMcpResponse(text) {
   const trimmed = text.trim();
   if (!trimmed) return null;
   if (trimmed.startsWith('{')) return JSON.parse(trimmed);
-  const dataLines = trimmed.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).filter(Boolean);
+  const dataLines = trimmed
+    .split(/\r?\n/)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trim())
+    .filter(Boolean);
   if (!dataLines.length) throw new Error(`Unexpected MCP response: ${trimmed.slice(0, 500)}`);
   return JSON.parse(dataLines.join('\n'));
 }
@@ -35,28 +42,45 @@ async function waitForHealth(baseUrl, child, profile) {
       const response = await fetch(`${baseUrl}/healthz`);
       if (response.ok) return;
     } catch {}
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`Timed out waiting for wrapper health check for ${profile}`);
 }
 
 async function withServer(profile, fn) {
   const port = await findFreePort();
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `mcp-smoke-${profile}-`));
+  const configPath = path.join(workspace, 'mcp-servers.toml');
+  fs.writeFileSync(configPath, `
+[server]
+name = "smoke-local-coding"
+title = "Local Coding Gateway"
+description = "Local coding workspace smoke instance."
+instructions = "Use the six core local coding tools."
+
+[trusted_roots]
+roots = ["${workspace.replaceAll('\\', '/')}"]
+
+[external_mcp]
+enabled = false
+default_enabled = false
+`, 'utf8');
+
   const env = {
     ...process.env,
     REPO_ROOT: root,
-    MCP_TRUSTED_ROOTS: root,
+    MCP_UPSTREAM_CONFIG: configPath,
     MCP_GATEWAY_HOST: '127.0.0.1',
     MCP_ADVERTISE_HOST: '127.0.0.1',
     MCP_GATEWAY_PORT: String(port),
     MCP_BEARER_TOKEN: smokeCredential,
     MCP_AUTH_PASSWORD: `placeholder_mcp_password_${process.pid}`,
-    MCP_SAFETY_PROFILE: profile,
+    MCP_RUNTIME_PROFILE: profile,
     ENABLE_FILESYSTEM: 'true',
-    // Deliberately do not set ENABLE_SHELL. This smoke validates the default.
+    ENABLE_SHELL: 'true',
     MCP_STATEFUL_SESSIONS: 'false'
   };
-  delete env.ENABLE_SHELL;
+
   const child = spawn(process.execPath, ['scripts/authenticated-mcp-wrapper.mjs'], {
     cwd: root,
     env,
@@ -67,11 +91,12 @@ async function withServer(profile, fn) {
   child.stdout.on('data', chunk => { logs += chunk.toString(); });
   child.stderr.on('data', chunk => { logs += chunk.toString(); });
   const baseUrl = `http://127.0.0.1:${port}`;
+
   try {
     await waitForHealth(baseUrl, child, profile);
-    return await fn({ baseUrl, profile });
+    return await fn({ baseUrl, profile, workspace, configPath });
   } catch (error) {
-    error.message += `\n--- wrapper logs (${profile}) ---\n${logs.slice(-4000)}`;
+    error.message += `\n--- wrapper logs (${profile}) ---\n${logs.slice(-6000)}`;
     throw error;
   } finally {
     child.kill('SIGTERM');
@@ -79,13 +104,14 @@ async function withServer(profile, fn) {
   }
 }
 
-async function mcpRequest(baseUrl, id, method, params = {}) {
+async function mcpRequest(baseUrl, id, method, params = {}, extraHeaders = {}) {
   const response = await fetch(`${baseUrl}/mcp`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${smokeCredential}`,
       accept: 'application/json, text/event-stream',
-      'content-type': 'application/json'
+      'content-type': 'application/json',
+      ...extraHeaders
     },
     body: JSON.stringify({ jsonrpc: '2.0', id, method, params })
   });
@@ -98,71 +124,142 @@ async function initialize(baseUrl) {
   const response = await mcpRequest(baseUrl, 1, 'initialize', {
     protocolVersion: '2025-03-26',
     capabilities: {},
-    clientInfo: { name: 'agent-mcp-gateway-tools-smoke', version: '1.0.0' }
+    clientInfo: { name: 'local-coding-tools-smoke', version: '1.0.0' }
   });
-  assert.ok(response.result.serverInfo, 'initialize returns serverInfo');
-}
-
-function toolMap(tools) {
-  return new Map(tools.map(tool => [tool.name, tool]));
+  assert.equal(response.result.serverInfo.title, 'Local Coding Gateway');
+  assert.match(response.result.serverInfo.description || '', /Local coding workspace/i);
+  return response;
 }
 
 async function listTools(baseUrl) {
-  const response = await mcpRequest(baseUrl, 2, 'tools/list', {});
-  return response.result.tools || [];
+  return (await mcpRequest(baseUrl, 2, 'tools/list', {})).result.tools || [];
 }
 
-async function callTool(baseUrl, id, name, args = {}) {
-  return await mcpRequest(baseUrl, id, 'tools/call', { name, arguments: args });
+async function callTool(baseUrl, id, name, args = {}, extraHeaders = {}) {
+  return await mcpRequest(baseUrl, id, 'tools/call', { name, arguments: args }, extraHeaders);
 }
 
-await withServer('yolo', async ({ baseUrl }) => {
+function names(tools) {
+  return tools.map(tool => tool.name).sort();
+}
+
+function portablePath(value) {
+  return path.resolve(value).replaceAll('\\', '/');
+}
+
+await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   await initialize(baseUrl);
-  const tools = toolMap(await listTools(baseUrl));
-  assert.ok(tools.has('custom_shell_execute'), 'yolo exposes custom_shell_execute by default');
-  assert.ok(tools.has('custom_git_push'), 'yolo exposes custom_git_push');
-  assert.ok(tools.has('custom_get_safety_profile'), 'yolo exposes custom_get_safety_profile');
-  const shell = tools.get('custom_shell_execute');
-  assert.equal(shell.annotations.destructiveHint, false);
-  assert.equal(shell.annotations.openWorldHint, false);
-  assert.equal(shell.annotations.readOnlyHint, true);
-  assert.doesNotMatch(shell.description, /local Windows machine/i);
-  assert.match(shell.description, /Runs project maintenance commands/i);
+  const tools = await listTools(baseUrl);
+  assert.deepEqual(names(tools), [
+    'edit_file',
+    'get_skill',
+    'image_preview',
+    'read_text_file',
+    'shell_execute',
+    'write_file'
+  ]);
+
+  const target = path.join(workspace, 'smoke.txt');
+  fs.writeFileSync(target, 'context', 'utf8');
+
+  const firstRead = await callTool(baseUrl, 3, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-a' });
+  assert.equal(firstRead.result.content[0].text, 'context');
+  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /before changing the project.*get_skill/i.test(item.text)));
+
+  const secondRead = await callTool(baseUrl, 4, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-b' });
+  assert.equal(secondRead.result.content.length, 1);
+
+  const firstBlocked = await callTool(baseUrl, 5, 'write_file', { path: target, content: 'first' });
+  assert.equal(firstBlocked.result.isError, true);
+  const firstBlockedPayload = JSON.parse(firstBlocked.result.content[0].text);
+  assert.equal(firstBlockedPayload.error.code, 'SKILL_BOOTSTRAP_REQUIRED');
+  assert.match(firstBlockedPayload.error.message, /before the first project-changing operation/i);
+
+  const invalidSkill = await callTool(baseUrl, 6, 'get_skill', { name: 'missing-smoke-skill' });
+  assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
+
+  const repeatedBlocked = await callTool(baseUrl, 7, 'edit_file', {
+    path: target,
+    edits: [{ oldText: 'context', newText: 'blocked' }],
+    dryRun: false
+  });
+  assert.equal(repeatedBlocked.result.isError, true);
+  assert.equal(JSON.parse(repeatedBlocked.result.content[0].text).error.message, 'Call get_skill().');
+
+  const bootstrap = await callTool(baseUrl, 8, 'get_skill', {});
+  assert.notEqual(bootstrap.result.isError, true);
+  assert.equal(JSON.parse(bootstrap.result.content[0].text).data.name, 'using_superpowers');
+
+  await callTool(baseUrl, 9, 'write_file', { path: target, content: 'first' });
+  await callTool(baseUrl, 10, 'edit_file', {
+    path: target,
+    edits: [{ oldText: 'first', newText: 'second' }],
+    dryRun: false
+  });
+  const read = await callTool(baseUrl, 11, 'read_text_file', { path: target });
+  assert.equal(read.result.content[0].text, 'second');
+  assert.equal(read.result.content.length, 1);
+
+  const concurrentRoots = [
+    fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-a-')),
+    fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-b-'))
+  ];
+  await Promise.all(concurrentRoots.map(async (dynamicRoot, index) => {
+    const dynamicTarget = path.join(dynamicRoot, `auto-trusted-${index}.txt`);
+    const write = await callTool(baseUrl, 20 + index * 2, 'write_file', { path: dynamicTarget, content: `auto-trusted-${index}` });
+    assert.notEqual(write.result?.isError, true);
+    const dynamicRead = await callTool(baseUrl, 21 + index * 2, 'read_text_file', { path: dynamicTarget });
+    assert.equal(dynamicRead.result.content[0].text, `auto-trusted-${index}`);
+  }));
+  const persistedConfig = fs.readFileSync(configPath, 'utf8');
+  for (const dynamicRoot of concurrentRoots) assert.ok(persistedConfig.includes(portablePath(dynamicRoot)));
+
+  const shellDynamicRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-shell-root-'));
+  const shellPathCommand = process.platform === 'win32' ? '(Get-Location).Path' : 'pwd';
+  const shellPath = await callTool(baseUrl, 30, 'shell_execute', {
+    command: shellPathCommand,
+    working_directory: shellDynamicRoot
+  });
+  const shellPathData = JSON.parse(shellPath.result.content[0].text);
+  assert.equal(shellPathData.exitCode, 0);
+  assert.equal(path.resolve(shellPathData.workingDirectoryResolved), path.resolve(shellDynamicRoot));
+  assert.ok(fs.readFileSync(configPath, 'utf8').includes(portablePath(shellDynamicRoot)));
+
+  const command = process.platform === 'win32'
+    ? "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); Write-Output 'Tiếng Việt 日本語'; [Console]::Error.WriteLine('warning')"
+    : "printf 'Tiếng Việt 日本語\\n'; printf 'warning\\n' >&2";
+  const shell = await callTool(baseUrl, 31, 'shell_execute', { command, working_directory: workspace });
+  const shellData = JSON.parse(shell.result.content[0].text);
+  assert.equal(shellData.exitCode, 0);
+  assert.match(shellData.stdout, /Tiếng Việt 日本語/);
+  assert.match(shellData.stderr, /warning/);
+  assert.equal(shellData.stderrClassification, 'warning');
+  assert.equal(shellData.encoding, 'utf-8');
+  assert.equal(shellData.returnedStdoutBytes <= shellData.stdoutBytes, true);
+  assert.equal(shellData.returnedStderrBytes <= shellData.stderrBytes, true);
+  observedProfiles.yolo = names(tools);
 });
 
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
-  const tools = toolMap(await listTools(baseUrl));
-  assert.equal(tools.has('custom_shell_execute'), false, 'safe hides shell');
-  assert.equal(tools.has('custom_git_push'), false, 'safe hides git_push');
-  assert.equal(tools.has('custom_read_text_file'), false, 'safe hides upstream read text file in compact profile');
-  assert.ok(tools.has('custom_file_inspector'), 'safe keeps compact file inspector');
-  assert.ok(tools.has('custom_get_safety_profile'), 'safe keeps safety profile tool');
-  const manifestResponse = await mcpRequest(baseUrl, 6, 'resources/read', { uri: 'repo://project/agent-mcp-gateway/tool-manifest' });
-  const manifest = JSON.parse(manifestResponse.result.contents[0].text);
-  const shellManifest = manifest.tools.find(tool => tool.name === 'custom_shell_execute');
-  const pushManifest = manifest.tools.find(tool => tool.name === 'custom_git_push');
-  const readManifest = manifest.tools.find(tool => tool.name === 'custom_read_text_file');
-  const inspectorManifest = manifest.tools.find(tool => tool.name === 'custom_file_inspector');
-  assert.equal(shellManifest?.visible, false, 'safe manifest includes shell as hidden');
-  assert.equal(pushManifest?.visible, false, 'safe manifest includes git_push as hidden');
-  assert.equal(readManifest, undefined, 'safe manifest omits hidden upstream read tool in compact profile');
-  assert.equal(inspectorManifest?.visible, true, 'safe manifest includes file inspector as visible');
-  const blocked = await callTool(baseUrl, 3, 'custom_shell_execute', { command: 'echo should-not-run' });
+  const tools = await listTools(baseUrl);
+  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'read_text_file']);
+  const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
-  const profile = await callTool(baseUrl, 4, 'custom_get_safety_profile', {});
-  assert.ok(profile.result?.content?.length, 'safe allows read-only safety profile call');
+  observedProfiles.safe = names(tools);
 });
 
 await withServer('assisted', async ({ baseUrl }) => {
   await initialize(baseUrl);
-  const tools = toolMap(await listTools(baseUrl));
-  assert.equal(tools.has('custom_shell_execute'), false, 'assisted hides shell');
-  assert.equal(tools.has('custom_git_push'), false, 'assisted hides git_push');
-  assert.ok(tools.has('custom_delete_file'), 'assisted exposes local mutating tools');
-  assert.ok(tools.has('custom_apply_patch'), 'assisted exposes preview/apply workflow tools');
-  const blocked = await callTool(baseUrl, 5, 'custom_git_push', { path: root });
+  const tools = await listTools(baseUrl);
+  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'read_text_file', 'write_file']);
+  const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
+  observedProfiles.assisted = names(tools);
 });
 
-console.log(JSON.stringify({ ok: true, profiles: ['yolo', 'safe', 'assisted'], checked: 'runtime tools/list and call-time profile enforcement' }, null, 2));
+console.log(JSON.stringify({
+  ok: true,
+  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, and structured UTF-8 shell output',
+  observedProfiles
+}, null, 2));

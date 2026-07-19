@@ -3,11 +3,11 @@ export function textJson(value) {
 }
 
 export function ok(tool, summary, data = {}) {
-  return textJson({ ok: true, tool: `custom_${tool}`, summary, data });
+  return textJson({ ok: true, tool: String(tool), summary, data });
 }
 
 export function fail(tool, code, message, details = {}) {
-  return textJson({ ok: false, tool: `custom_${tool}`, error: { code, message, details } });
+  return textJson({ ok: false, tool: String(tool), error: { code, message, details } });
 }
 
 export function redactSecret(value) {

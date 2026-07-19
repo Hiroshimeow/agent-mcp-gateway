@@ -26,13 +26,12 @@ test('profile exposure rules match configured modes', () => {
   const safe = getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'safe' });
   const assisted = getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'assisted' });
   const yolo = getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'yolo' });
-  assert.equal(shouldExposeToolForProfile('custom_read_text_file', safe), true);
-  assert.equal(shouldExposeToolForProfile('custom_delete_file', safe), false);
-  assert.equal(shouldExposeToolForProfile('custom_delete_file', assisted), true);
-  assert.equal(shouldExposeToolForProfile('custom_git_push', assisted), false);
-  assert.equal(shouldExposeToolForProfile('custom_shell_execute', assisted), false);
-  assert.equal(shouldExposeToolForProfile('custom_shell_execute', yolo), true);
-  assert.equal(shouldExposeToolForProfile('custom_git_push', yolo), true);
+  assert.equal(shouldExposeToolForProfile('read_text_file', safe), true);
+  assert.equal(shouldExposeToolForProfile('write_file', safe), false);
+  assert.equal(shouldExposeToolForProfile('write_file', assisted), true);
+  assert.equal(shouldExposeToolForProfile('shell_execute', assisted), false);
+  assert.equal(shouldExposeToolForProfile('shell_execute', yolo), true);
+  assert.equal(shouldExposeToolForProfile('image_preview', safe), true);
 });
 
 test('status returns flags only', () => {

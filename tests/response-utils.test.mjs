@@ -6,13 +6,13 @@ import { fail, ok, parseToolResult, redactSecret, truncateText } from '../script
 test('ok and fail return structured JSON text responses', () => {
   assert.deepEqual(parseToolResult(ok('grep', 'done', { count: 1 })), {
     ok: true,
-    tool: 'custom_grep',
+    tool: 'grep',
     summary: 'done',
     data: { count: 1 }
   });
   assert.deepEqual(parseToolResult(fail('grep', 'VALIDATION_ERROR', 'bad', { field: 'query' })), {
     ok: false,
-    tool: 'custom_grep',
+    tool: 'grep',
     error: { code: 'VALIDATION_ERROR', message: 'bad', details: { field: 'query' } }
   });
 });

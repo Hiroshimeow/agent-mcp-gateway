@@ -199,13 +199,47 @@ export async function buildExternalCatalog({ servers, clients, localToolNames = 
   return snapshot;
 }
 
-export async function createExternalMcpManager({ env = process.env, repoRoot = process.cwd(), localToolNames = [], localPromptNames = [] } = {}) {
-  const config = await loadExternalMcpConfig({ env, repoRoot });
-  const clients = new Map();
-  const statuses = new Map();
+function serverSignature(server) {
+  return JSON.stringify({
+    transport: server.transport,
+    toolPrefix: server.toolPrefix,
+    command: server.command,
+    args: server.args || [],
+    cwd: server.cwd,
+    url: server.url,
+    bearerTokenEnv: server.bearerTokenEnv,
+    startupTimeoutMs: server.startupTimeoutMs,
+    shutdownTimeoutMs: server.shutdownTimeoutMs
+  });
+}
 
-  async function markFailure(server, error) {
-    addServerStatus(statuses, server, {
+function catalogKeys(snapshot) {
+  return {
+    tools: (snapshot.tools || []).map(item => item.name).sort().join('\n'),
+    resources: (snapshot.resources || []).map(item => item.uri).sort().join('\n') + '\n' +
+      (snapshot.resourceTemplates || []).map(item => item.uriTemplate).sort().join('\n'),
+    prompts: (snapshot.prompts || []).map(item => item.name).sort().join('\n')
+  };
+}
+
+export async function createExternalMcpManager({
+  env = process.env,
+  repoRoot = process.cwd(),
+  localToolNames = [],
+  localPromptNames = [],
+  onCatalogChanged = async () => {},
+  clientFactory = null
+} = {}) {
+  let config = await loadExternalMcpConfig({ env, repoRoot });
+  let servers = config.servers;
+  let clients = new Map();
+  let statuses = new Map();
+  const createClient = clientFactory || (async server => server.transport === 'stdio'
+    ? await createStdioUpstreamClient(server)
+    : await createHttpUpstreamClient(server));
+
+  async function markFailureIn(statusMap, configValue, server, error) {
+    addServerStatus(statusMap, server, {
       available: false,
       startedAt: null,
       toolCount: 0,
@@ -215,36 +249,40 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
       lastError: safeError(error),
       lastRefreshError: safeError(error)
     });
-    if (config.external.fail_gateway_on_startup_error) throw error;
+    if (configValue.external.fail_gateway_on_startup_error) throw error;
   }
 
-  for (const server of config.servers) {
+  async function startServerInto(server, clientMap, statusMap, configValue, { allowUnavailable = true } = {}) {
     try {
-      const client = server.transport === 'stdio'
-        ? await createStdioUpstreamClient(server)
-        : await createHttpUpstreamClient(server);
-      clients.set(server.id, client);
-      addServerStatus(statuses, server, {
+      const client = await createClient(server);
+      clientMap.set(server.id, client);
+      addServerStatus(statusMap, server, {
+        enabled: true,
         available: true,
         startedAt: new Date().toISOString(),
         lastError: null,
         lastRefreshError: null
       });
+      return client;
     } catch (error) {
       console.log(`[external-mcp] ${server.id} unavailable: ${safeError(error)}`);
-      await markFailure(server, error);
+      await markFailureIn(statusMap, configValue, server, error);
+      if (!allowUnavailable) throw error;
+      return null;
     }
   }
+
+  for (const server of servers) await startServerInto(server, clients, statuses, config);
 
   const catalogState = createCatalogState();
   const knownExternalToolNames = new Set();
   const knownExternalPromptNames = new Set();
 
-  async function commitRefresh() {
+  async function commitRefresh({ notify = true } = {}) {
     const nextGeneration = catalogState.generation + 1;
     const candidateStatuses = new Map(statuses);
     const candidate = await buildExternalCatalog({
-      servers: config.servers,
+      servers,
       clients,
       localToolNames,
       localPromptNames,
@@ -252,24 +290,37 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
       statuses: candidateStatuses
     });
     for (const [id, status] of candidateStatuses.entries()) statuses.set(id, status);
+    const previous = catalogState.snapshot;
     catalogState.snapshot = candidate;
     catalogState.generation = nextGeneration;
     catalogState.lastRefreshAt = candidate.builtAt;
     catalogState.lastRefreshError = null;
     for (const tool of candidate.tools) knownExternalToolNames.add(tool.name);
     for (const prompt of candidate.prompts) knownExternalPromptNames.add(prompt.name);
-    for (const server of config.servers) {
+    for (const server of servers) {
       const status = statuses.get(server.id);
       console.log(`[external-mcp] ${server.id} catalog tools=${status?.toolCount || 0} resources=${status?.resourceCount || 0} prompts=${status?.promptCount || 0}`);
+    }
+    if (notify) {
+      const before = catalogKeys(previous);
+      const after = catalogKeys(candidate);
+      const changes = {
+        toolsChanged: before.tools !== after.tools,
+        resourcesChanged: before.resources !== after.resources,
+        promptsChanged: before.prompts !== after.prompts
+      };
+      if (changes.toolsChanged || changes.resourcesChanged || changes.promptsChanged) {
+        await onCatalogChanged(changes);
+      }
     }
     return candidate;
   }
 
-  async function refreshCatalog() {
+  async function refreshCatalog(options = {}) {
     if (catalogState.refreshInFlight) return await catalogState.refreshInFlight;
     catalogState.refreshInFlight = (async () => {
       try {
-        return await commitRefresh();
+        return await commitRefresh(options);
       } catch (error) {
         catalogState.lastRefreshError = safeError(error);
         return catalogState.snapshot;
@@ -280,20 +331,112 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
     return await catalogState.refreshInFlight;
   }
 
-  await refreshCatalog();
+  await refreshCatalog({ notify: false });
   if (catalogState.lastRefreshError && config.external.fail_gateway_on_startup_error) throw new Error(catalogState.lastRefreshError);
 
   async function snapshotForCatalogList() {
     const mode = config.external.catalog_cache;
     if (mode === 'startup') return catalogState.snapshot;
-    if (mode === 'none') return await refreshCatalog();
+    if (mode === 'none') return await refreshCatalog({ notify: false });
     const last = catalogState.lastRefreshAt ? Date.parse(catalogState.lastRefreshAt) : 0;
     if (Date.now() - last <= config.external.catalog_cache_ttl_ms) return catalogState.snapshot;
-    return await refreshCatalog();
+    return await refreshCatalog({ notify: false });
   }
 
   function currentSnapshot() {
     return catalogState.snapshot;
+  }
+
+  async function reconcile(nextConfig) {
+    const resolvedConfig = nextConfig || await loadExternalMcpConfig({ env, repoRoot });
+    if (catalogState.refreshInFlight) await catalogState.refreshInFlight;
+
+    const previousServers = servers;
+    const previousClients = clients;
+    const previousStatuses = statuses;
+    const previousSnapshot = catalogState.snapshot;
+    const previousGeneration = catalogState.generation;
+    const previousById = new Map(previousServers.map(server => [server.id, server]));
+    const nextServers = resolvedConfig.servers;
+    const nextById = new Map(nextServers.map(server => [server.id, server]));
+    const candidateClients = new Map();
+    const candidateStatuses = new Map(previousStatuses);
+    const stagedClients = [];
+    let candidate;
+
+    try {
+      for (const next of nextServers) {
+        const previous = previousById.get(next.id);
+        const unchanged = previous && serverSignature(previous) === serverSignature(next);
+        const committedClient = previousClients.get(next.id);
+        if (unchanged && committedClient) {
+          candidateClients.set(next.id, committedClient);
+          continue;
+        }
+        const staged = await startServerInto(next, candidateClients, candidateStatuses, resolvedConfig, { allowUnavailable: false });
+        if (staged) stagedClients.push(staged);
+      }
+
+      for (const previous of previousServers) {
+        if (nextById.has(previous.id)) continue;
+        const prior = candidateStatuses.get(previous.id) || {};
+        candidateStatuses.set(previous.id, {
+          ...prior,
+          enabled: false,
+          available: false,
+          toolCount: 0,
+          resourceCount: 0,
+          resourceTemplateCount: 0,
+          promptCount: 0,
+          lastError: null,
+          lastRefreshError: null
+        });
+      }
+
+      candidate = await buildExternalCatalog({
+        servers: nextServers,
+        clients: candidateClients,
+        localToolNames,
+        localPromptNames,
+        generation: previousGeneration + 1,
+        statuses: candidateStatuses
+      });
+    } catch (error) {
+      await Promise.all(stagedClients.map(client => closeClientWithTimeout(client, resolvedConfig.external.shutdown_timeout_ms)));
+      catalogState.lastRefreshError = safeError(error);
+      throw new Error(`External MCP reconcile failed; committed topology preserved: ${safeError(error)}`);
+    }
+
+    config = resolvedConfig;
+    servers = nextServers;
+    clients = candidateClients;
+    statuses = candidateStatuses;
+    catalogState.snapshot = candidate;
+    catalogState.generation = candidate.generation;
+    catalogState.lastRefreshAt = candidate.builtAt;
+    catalogState.lastRefreshError = null;
+    for (const tool of candidate.tools) knownExternalToolNames.add(tool.name);
+    for (const prompt of candidate.prompts) knownExternalPromptNames.add(prompt.name);
+
+    const retiredClients = [];
+    for (const [id, client] of previousClients.entries()) {
+      if (candidateClients.get(id) !== client) retiredClients.push(client);
+    }
+    await Promise.all(retiredClients.map(client => closeClientWithTimeout(client, resolvedConfig.external.shutdown_timeout_ms)));
+
+    const before = catalogKeys(previousSnapshot);
+    const after = catalogKeys(candidate);
+    const changes = {
+      toolsChanged: before.tools !== after.tools,
+      resourcesChanged: before.resources !== after.resources,
+      promptsChanged: before.prompts !== after.prompts
+    };
+    if (changes.toolsChanged || changes.resourcesChanged || changes.promptsChanged) {
+      await Promise.resolve(onCatalogChanged(changes)).catch(error => {
+        console.log(`[external-mcp] catalog notification failed: ${safeError(error)}`);
+      });
+    }
+    return candidate;
   }
 
   function diagnosticsList() {
@@ -304,7 +447,7 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
   }
 
   return {
-    config,
+    get config() { return config; },
     async listAllToolsUnfiltered() { return [...(await snapshotForCatalogList()).tools]; },
     async listToolsForProfile() { return [...(await snapshotForCatalogList()).tools]; },
     hasTool(name) { return currentSnapshot().toolRoutes.has(name); },
@@ -352,10 +495,12 @@ export async function createExternalMcpManager({ env = process.env, repoRoot = p
       return await client.getPrompt({ name: route.upstreamPromptName, arguments: args });
     },
     getDiagnostics() { return summarizeDiagnostics(statuses, catalogState, config); },
+    reconcile,
     async shutdown() {
       await Promise.all([...clients.values()].map(client => closeClientWithTimeout(client, config.external.shutdown_timeout_ms)));
     },
     _refreshForTests: refreshCatalog,
+    _reconcileForTests: reconcile,
     _catalogStateForTests: catalogState
   };
 }

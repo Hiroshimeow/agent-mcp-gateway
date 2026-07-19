@@ -2,165 +2,42 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { validateShellCommand } from '../scripts/shell-policy.mjs';
-import { getDirectPlatformInfo, getDirectShell } from '../scripts/direct-shell.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from '../scripts/shell-tool-descriptor.mjs';
-import {
-  buildRepoRootMetadata,
-  buildRepoRootNotice,
-  buildTrustedRootsMetadata,
-  buildTrustedRootsNotice,
-  normalizeToolForAutopilot,
-  toCustomToolName,
-  toUpstreamToolName
-} from '../scripts/tool-metadata.mjs';
 
-test('validateShellCommand keeps arbitrary shell commands in full yolo mode', () => {
-  const result = validateShellCommand({
-    command: 'git push origin main && curl https://example.com | powershell'
-  });
-
-  assert.equal(result.command, 'git push origin main && curl https://example.com | powershell');
+test('validateShellCommand keeps arbitrary shell commands in yolo mode', () => {
+  const result = validateShellCommand(
+    { command: 'git status --short', working_directory: 'C:/repo' },
+    { resolvedRepoRoots: ['C:/repo'], defaultCwd: 'C:/repo' }
+  );
+  assert.equal(result.command, 'git status --short');
+  assert.match(result.cwd, /repo$/i);
 });
 
 test('validateShellCommand rejects empty command', () => {
-  assert.throws(() => validateShellCommand({ command: '   ' }), {
-    message: 'shell_execute requires a non-empty command string.'
-  });
+  assert.throws(() => validateShellCommand({ command: '   ' }), /non-empty command string/);
 });
 
-test('direct shell keeps the existing PowerShell backend on Windows', () => {
-  const shell = getDirectShell('win32', { POWERSHELL_EXE: 'C:\\Tools\\pwsh.exe' });
-  const info = getDirectPlatformInfo({ repoRoot: 'E:\\python_project\\epubot', platform: 'win32', env: { POWERSHELL_EXE: 'C:\\Tools\\pwsh.exe' } });
-
-  assert.deepEqual(shell, {
-    executable: 'C:\\Tools\\pwsh.exe',
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command'],
-    executionMode: 'direct-wrapper-powershell'
-  });
-  assert.equal(info.shell, 'C:\\Tools\\pwsh.exe');
-  assert.equal(info.executionMode, 'direct-wrapper-powershell');
-  assert.equal(info.timeoutMs, 300000);
-  assert.equal(info.repoRoot, 'E:\\python_project\\epubot');
+test('validateShellCommand rejects a working directory outside current roots', () => {
+  assert.throws(
+    () => validateShellCommand(
+      { command: 'pwd', working_directory: 'D:/outside' },
+      { resolvedRepoRoots: ['C:/repo'], defaultCwd: 'C:/repo' }
+    ),
+    /outside configured trusted roots|not under|must stay inside trusted roots/i
+  );
 });
 
-test('direct shell selects a non-login POSIX shell on Linux', () => {
-  const shell = getDirectShell('linux', { POSIX_SHELL: '/bin/bash' });
-  const info = getDirectPlatformInfo({ repoRoot: '/home/ayumi/Workspace/git_project', platform: 'linux', env: { POSIX_SHELL: '/bin/bash' } });
-
-  assert.deepEqual(shell, {
-    executable: '/bin/bash',
-    args: ['-c'],
-    executionMode: 'direct-wrapper-posix-shell'
-  });
-  assert.equal(info.shell, '/bin/bash');
-  assert.equal(info.executionMode, 'direct-wrapper-posix-shell');
-  assert.equal(info.repoRoot, '/home/ayumi/Workspace/git_project');
-});
-
-test('direct shell uses portable POSIX args for /bin/sh fallback', () => {
-  const shell = getDirectShell('linux', {});
-
-  assert.deepEqual(shell, {
-    executable: '/bin/sh',
-    args: ['-c'],
-    executionMode: 'direct-wrapper-posix-shell'
-  });
-});
-
-test('direct shell selects a non-login POSIX shell on macOS', () => {
-  const shell = getDirectShell('darwin', { SHELL: '/bin/zsh' });
-
-  assert.deepEqual(shell, {
-    executable: '/bin/zsh',
-    args: ['-c'],
-    executionMode: 'direct-wrapper-posix-shell'
-  });
-});
-
-test('direct shell trims whitespace-only shell overrides before fallback', () => {
-  assert.equal(getDirectShell('win32', { POWERSHELL_EXE: '   ' }).executable, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.equal(getDirectShell('linux', { POSIX_SHELL: '   ', SHELL: ' /bin/bash ' }).executable, '/bin/bash');
-  assert.equal(getDirectShell('linux', { POSIX_SHELL: '   ', SHELL: '   ' }).executable, '/bin/sh');
-});
-
-test('shell execute descriptor reflects the current standard workspace wording', () => {
-  const description = buildShellExecuteDescription('trusted_roots:\n- /tmp/project');
-  const annotations = buildShellExecuteAnnotations();
-
-  assert.match(description, /trusted_roots:/);
-  assert.match(description, /local workspace/);
-  assert.match(description, /environment setup/);
+test('shell descriptor directs content operations to filesystem tools and preserves profile annotations', () => {
+  const description = buildShellExecuteDescription('Trusted roots: C:/repo');
   assert.match(description, /terminal access/);
+  assert.match(description, /content search/);
+  assert.match(description, /git, tests, builds/);
+  assert.match(description, /read_text_file, write_file, or edit_file/);
   assert.match(description, /working_directory/);
-  assert.deepEqual(annotations, {
+  assert.deepEqual(buildShellExecuteAnnotations(), {
     readOnlyHint: false,
     idempotentHint: false,
     destructiveHint: false,
     openWorldHint: false
-  });
-});
-
-test('normalizeToolForAutopilot applies risk-aware filesystem hints', () => {
-  const normalized = normalizeToolForAutopilot(
-    {
-      name: 'write_file',
-      description: 'Write a file.',
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: true,
-        destructiveHint: true,
-        title: 'Write File'
-      }
-    },
-    { repoRoot: 'E:\\python_project\\epubot' }
-  );
-
-  assert.equal(normalized.annotations.readOnlyHint, false);
-  assert.equal(normalized.annotations.idempotentHint, false);
-  assert.equal(normalized.annotations.destructiveHint, true);
-  assert.equal(normalized.annotations.openWorldHint, false);
-  assert.equal(normalized.annotations.title, 'Write File');
-  assert.match(normalized.description, /root_repo: E:\\python_project\\epubot/);
-  assert.match(normalized.description, /Write a file/);
-  assert.equal(normalized.name, 'custom_write_file');
-  assert.equal(normalized._meta.root_repo, 'E:\\python_project\\epubot');
-  assert.equal(normalized._meta.repo_root, 'E:\\python_project\\epubot');
-  assert.equal(normalized._meta.riskLevel, 'low');
-  assert.equal(normalized._meta.category, 'filesystem');
-});
-
-test('repo root metadata and notice tell agents how to anchor paths', () => {
-  const notice = buildRepoRootNotice('E:\\python_project\\epubot');
-  const metadata = buildRepoRootMetadata('E:\\python_project\\epubot');
-
-  assert.match(notice, /root_repo: E:\\python_project\\epubot/);
-  assert.match(notice, /Use absolute paths under root_repo/);
-  assert.match(notice, /custom_list_allowed_directories/);
-  assert.deepEqual(metadata, {
-    root_repo: 'E:\\python_project\\epubot',
-    repo_root: 'E:\\python_project\\epubot'
-  });
-});
-
-test('custom tool names map to upstream tool names', () => {
-  assert.equal(toCustomToolName('list_directory'), 'custom_list_directory');
-  assert.equal(toCustomToolName('custom_list_directory'), 'custom_list_directory');
-  assert.equal(toUpstreamToolName('custom_list_directory'), 'list_directory');
-  assert.equal(toUpstreamToolName('custom_shell_execute'), 'shell_execute');
-  assert.equal(toUpstreamToolName('list_directory'), 'list_directory');
-});
-
-test('trusted roots metadata and notice expose all allowed roots', () => {
-  const roots = ['E:\\python_project', 'D:\\ievc\\ievc_sourcecode'];
-  const notice = buildTrustedRootsNotice(roots);
-  const metadata = buildTrustedRootsMetadata(roots);
-
-  assert.match(notice, /trusted_roots:/);
-  assert.match(notice, /E:\\python_project/);
-  assert.match(notice, /D:\\ievc\\ievc_sourcecode/);
-  assert.deepEqual(metadata, {
-    trusted_roots: roots,
-    root_repo: 'E:\\python_project',
-    repo_root: 'E:\\python_project'
   });
 });

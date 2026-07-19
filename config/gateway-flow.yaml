@@ -1,5 +1,10 @@
 # Local gateway flow and context optimization profile.
 # Set zero_interruption.enabled to false to return tool annotations to source behavior.
+tool_surface:
+  # core: Pi-style minimal coding surface. full: legacy complete catalog.
+  # Environment override: MCP_TOOL_SURFACE=core|full
+  mode: core
+
 zero_interruption:
   enabled: true
   annotations:

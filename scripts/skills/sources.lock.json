@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "ponytail",
+      "repository": "https://github.com/DietrichGebert/ponytail.git",
+      "ref": "main",
+      "commit": "14a0d79548d4de8fc2de95c1b94bb0de63a739d3",
+      "license": "MIT",
+      "skills": [
+        {
+          "target": "ponytail",
+          "path": "skills/ponytail",
+          "overrides": {
+            "aliases": [
+              "lazy",
+              "lazy_mode",
+              "yagni"
+            ],
+            "uri": "skill://ponytail/ponytail/SKILL.md"
+          }
+        },
+        {
+          "target": "ponytail-audit",
+          "path": "skills/ponytail-audit",
+          "overrides": {
+            "aliases": [
+              "audit_over_engineering"
+            ],
+            "uri": "skill://ponytail/ponytail-audit/SKILL.md"
+          }
+        },
+        {
+          "target": "ponytail-debt",
+          "path": "skills/ponytail-debt",
+          "overrides": {
+            "aliases": [
+              "debt_ledger"
+            ],
+            "uri": "skill://ponytail/ponytail-debt/SKILL.md"
+          }
+        },
+        {
+          "target": "ponytail-gain",
+          "path": "skills/ponytail-gain"
+        },
+        {
+          "target": "ponytail-help",
+          "path": "skills/ponytail-help",
+          "overrides": {
+            "aliases": [
+              "ponytail_commands"
+            ],
+            "uri": "skill://ponytail/ponytail-help/SKILL.md"
+          }
+        },
+        {
+          "target": "ponytail-review",
+          "path": "skills/ponytail-review",
+          "overrides": {
+            "aliases": [
+              "review_for_over_engineering"
+            ],
+            "uri": "skill://ponytail/ponytail-review/SKILL.md"
+          }
+        }
+      ]
+    },
+    {
+      "id": "superpowers",
+      "repository": "https://github.com/obra/superpowers.git",
+      "ref": "main",
+      "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "license": "MIT",
+      "skills": [
+        {
+          "target": "brainstorming",
+          "path": "skills/brainstorming"
+        },
+        {
+          "target": "dispatching-parallel-agents",
+          "path": "skills/dispatching-parallel-agents"
+        },
+        {
+          "target": "executing-plans",
+          "path": "skills/executing-plans"
+        },
+        {
+          "target": "finishing-a-development-branch",
+          "path": "skills/finishing-a-development-branch"
+        },
+        {
+          "target": "receiving-code-review",
+          "path": "skills/receiving-code-review"
+        },
+        {
+          "target": "requesting-code-review",
+          "path": "skills/requesting-code-review"
+        },
+        {
+          "target": "subagent-driven-development",
+          "path": "skills/subagent-driven-development"
+        },
+        {
+          "target": "systematic-debugging",
+          "path": "skills/systematic-debugging"
+        },
+        {
+          "target": "test-driven-development",
+          "path": "skills/test-driven-development"
+        },
+        {
+          "target": "using-git-worktrees",
+          "path": "skills/using-git-worktrees"
+        },
+        {
+          "target": "using-superpowers",
+          "path": "skills/using-superpowers",
+          "overrides": {
+            "aliases": [
+              "superpower",
+              "superpowers",
+              "use_superpowers",
+              "skill_bootstrap",
+              "mcp_skill_bootstrap"
+            ],
+            "uri": "skill://superpowers/using-superpowers/SKILL.md"
+          }
+        },
+        {
+          "target": "verification-before-completion",
+          "path": "skills/verification-before-completion"
+        },
+        {
+          "target": "writing-plans",
+          "path": "skills/writing-plans"
+        },
+        {
+          "target": "writing-skills",
+          "path": "skills/writing-skills"
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "repository": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "commit": "9d2f1ae187231d8199c64b5b762e1bdf2244733d",
+      "license": "Apache-2.0 per included skill",
+      "skills": [
+        {
+          "target": "algorithmic-art",
+          "path": "skills/algorithmic-art"
+        },
+        {
+          "target": "brand-guidelines",
+          "path": "skills/brand-guidelines"
+        },
+        {
+          "target": "claude-api",
+          "path": "skills/claude-api"
+        },
+        {
+          "target": "frontend-design",
+          "path": "skills/frontend-design"
+        },
+        {
+          "target": "internal-comms",
+          "path": "skills/internal-comms"
+        },
+        {
+          "target": "mcp-builder",
+          "path": "skills/mcp-builder"
+        },
+        {
+          "target": "skill-creator",
+          "path": "skills/skill-creator"
+        },
+        {
+          "target": "slack-gif-creator",
+          "path": "skills/slack-gif-creator"
+        },
+        {
+          "target": "theme-factory",
+          "path": "skills/theme-factory"
+        },
+        {
+          "target": "web-artifacts-builder",
+          "path": "skills/web-artifacts-builder"
+        },
+        {
+          "target": "webapp-testing",
+          "path": "skills/webapp-testing"
+        }
+      ]
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createExternalMcpManager, buildExternalCatalog, closeClientWithTimeout } from '../scripts/upstreams/manager.mjs';
+import { loadExternalMcpConfig } from '../scripts/upstreams/config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dynamicServer = path.join(root, 'tests/fixtures/dynamic-mcp-server.mjs');
@@ -34,6 +35,7 @@ catalog_cache = "${mode}"
 catalog_cache_ttl_ms = ${ttl}
 
 [mcp_servers.dyn]
+enabled = true
 transport = "stdio"
 command = "${process.execPath.replaceAll('\\', '\\\\')}"
 args = ["${dynamicServer.replaceAll('\\', '\\\\')}", "${statePath.replaceAll('\\', '\\\\')}", "${countPath.replaceAll('\\', '\\\\')}"]
@@ -64,6 +66,51 @@ async function externalResourceNames(manager) {
 
 async function assertGeneration(manager, expected) {
   assert.equal(manager._catalogStateForTests.generation, expected);
+}
+
+function trackedClientFactory(tracker) {
+  let sequence = 0;
+  return async server => {
+    const instance = `${server.id}:${server.command}:${++sequence}`;
+    const client = {
+      id: server.id,
+      config: server,
+      capabilities: { tools: {}, resources: {}, prompts: {} },
+      closed: false,
+      async listTools() {
+        if (server.command.includes('fail-list')) throw new Error(`candidate list failure: ${instance}`);
+        return { tools: [{ name: 'a', inputSchema: { type: 'object' } }] };
+      },
+      async listResources() { return { resources: [] }; },
+      async listResourceTemplates() { return { resourceTemplates: [] }; },
+      async listPrompts() { return { prompts: [] }; },
+      async callTool() {
+        if (this.closed) throw new Error(`closed client: ${instance}`);
+        return { content: [{ type: 'text', text: instance }] };
+      },
+      async close() {
+        this.closed = true;
+        tracker.closed.push(instance);
+      }
+    };
+    tracker.created.push(instance);
+    tracker.clients.set(instance, client);
+    return client;
+  };
+}
+
+async function makeTrackedManager(serverBlocks, tracker, changes = []) {
+  const dir = await tempDir();
+  const configPath = path.join(dir, 'mcp-servers.toml');
+  await fs.promises.writeFile(configPath, `[external_mcp]\ncatalog_cache = "startup"\n${serverBlocks}`);
+  const env = { MCP_UPSTREAM_CONFIG: configPath };
+  const manager = await createExternalMcpManager({
+    repoRoot: dir,
+    env,
+    clientFactory: trackedClientFactory(tracker),
+    onCatalogChanged: change => changes.push(change)
+  });
+  return { manager, dir, configPath, env };
 }
 
 test('startup cache does not refresh when upstream catalog changes', async () => {
@@ -148,6 +195,7 @@ test('tool-only upstream imports tools and exposes empty optional catalogs', asy
 catalog_cache = "startup"
 
 [mcp_servers.dyn]
+enabled = true
 transport = "stdio"
 command = "${process.execPath.replaceAll('\\', '\\\\')}"
 args = ["${toolOnlyServer.replaceAll('\\', '\\\\')}"]
@@ -311,4 +359,134 @@ test('shutdown timeout only sends SIGKILL when client reports still running', as
   await closeClientWithTimeout(running, 10);
   await new Promise(resolve => setTimeout(resolve, 1100));
   assert.deepEqual(runningSignals, ['SIGTERM', 'SIGKILL']);
+});
+
+
+test('reconcile hot-enables and hot-disables an upstream and emits catalog changes', async () => {
+  const dir = await tempDir();
+  const statePath = path.join(dir, 'state.json');
+  const countPath = path.join(dir, 'count.txt');
+  const configPath = path.join(dir, 'mcp-servers.toml');
+  await writeState(statePath, { tools: ['a'] });
+
+  const serverBlock = `
+[mcp_servers.dyn]
+enabled = false
+transport = "stdio"
+command = "${process.execPath.replaceAll('\\', '\\\\')}"
+args = ["${dynamicServer.replaceAll('\\', '\\\\')}", "${statePath.replaceAll('\\', '\\\\')}", "${countPath.replaceAll('\\', '\\\\')}"]
+tool_prefix = "dyn"
+`;
+  await fs.promises.writeFile(configPath, serverBlock);
+  const changes = [];
+  const manager = await createExternalMcpManager({
+    repoRoot: root,
+    env: { MCP_UPSTREAM_CONFIG: configPath },
+    onCatalogChanged: change => changes.push(change)
+  });
+  try {
+    assert.deepEqual(await toolNames(manager), []);
+
+    await fs.promises.writeFile(configPath, serverBlock.replace('enabled = false', 'enabled = true'));
+    await manager.reconcile(await loadExternalMcpConfig({ repoRoot: root, env: { MCP_UPSTREAM_CONFIG: configPath } }));
+    assert.deepEqual(await toolNames(manager), ['dyn_a']);
+    assert.deepEqual(changes.at(-1), { toolsChanged: true, resourcesChanged: true, promptsChanged: true });
+
+    await fs.promises.writeFile(configPath, serverBlock);
+    await manager.reconcile(await loadExternalMcpConfig({ repoRoot: root, env: { MCP_UPSTREAM_CONFIG: configPath } }));
+    assert.deepEqual(await toolNames(manager), []);
+    assert.deepEqual(changes.at(-1), { toolsChanged: true, resourcesChanged: true, promptsChanged: true });
+  } finally {
+    await manager.shutdown();
+  }
+});
+
+test('failed reconcile preserves removed-server routes and all original clients', async () => {
+  const tracker = { created: [], closed: [], clients: new Map() };
+  const blocks = `
+[mcp_servers.alpha]
+enabled = true
+transport = "stdio"
+command = "old-alpha"
+
+[mcp_servers.beta]
+enabled = true
+transport = "stdio"
+command = "old-beta"
+`;
+  const { manager } = await makeTrackedManager(blocks, tracker);
+  try {
+    const alphaBefore = (await manager.callTool('alpha_a', {})).content[0].text;
+    const betaBefore = (await manager.callTool('beta_a', {})).content[0].text;
+    const generation = manager._catalogStateForTests.generation;
+    const alpha = manager.config.servers.find(server => server.id === 'alpha');
+
+    await assert.rejects(
+      () => manager.reconcile({ ...manager.config, servers: [{ ...alpha, command: 'fail-list-alpha' }] }),
+      /committed topology preserved.*candidate list failure/
+    );
+
+    assert.equal(manager._catalogStateForTests.generation, generation);
+    assert.equal((await manager.callTool('alpha_a', {})).content[0].text, alphaBefore);
+    assert.equal((await manager.callTool('beta_a', {})).content[0].text, betaBefore);
+    assert.equal(tracker.clients.get(alphaBefore).closed, false);
+    assert.equal(tracker.clients.get(betaBefore).closed, false);
+    const staged = tracker.created.find(name => name.includes('fail-list-alpha'));
+    assert.equal(tracker.clients.get(staged).closed, true);
+  } finally {
+    await manager.shutdown();
+  }
+});
+
+test('failed signature replacement closes staged client and leaves old route callable', async () => {
+  const tracker = { created: [], closed: [], clients: new Map() };
+  const blocks = `
+[mcp_servers.dyn]
+enabled = true
+transport = "stdio"
+command = "old-dyn"
+`;
+  const { manager } = await makeTrackedManager(blocks, tracker);
+  try {
+    const before = (await manager.callTool('dyn_a', {})).content[0].text;
+    const generation = manager._catalogStateForTests.generation;
+    const current = manager.config.servers[0];
+    await assert.rejects(
+      () => manager.reconcile({ ...manager.config, servers: [{ ...current, command: 'fail-list-dyn' }] }),
+      /committed topology preserved/
+    );
+    assert.equal(manager._catalogStateForTests.generation, generation);
+    assert.equal((await manager.callTool('dyn_a', {})).content[0].text, before);
+    assert.equal(tracker.clients.get(before).closed, false);
+    const staged = tracker.created.find(name => name.includes('fail-list-dyn'));
+    assert.equal(tracker.clients.get(staged).closed, true);
+  } finally {
+    await manager.shutdown();
+  }
+});
+
+test('successful signature replacement commits new client and emits no list change when catalog keys are unchanged', async () => {
+  const tracker = { created: [], closed: [], clients: new Map() };
+  const changes = [];
+  const blocks = `
+[mcp_servers.dyn]
+enabled = true
+transport = "stdio"
+command = "old-dyn"
+`;
+  const { manager } = await makeTrackedManager(blocks, tracker, changes);
+  try {
+    const before = (await manager.callTool('dyn_a', {})).content[0].text;
+    const generation = manager._catalogStateForTests.generation;
+    const current = manager.config.servers[0];
+    await manager.reconcile({ ...manager.config, servers: [{ ...current, command: 'new-dyn' }] });
+    const after = (await manager.callTool('dyn_a', {})).content[0].text;
+    assert.notEqual(after, before);
+    assert.match(after, /new-dyn/);
+    assert.equal(tracker.clients.get(before).closed, true);
+    assert.equal(manager._catalogStateForTests.generation, generation + 1);
+    assert.deepEqual(changes, []);
+  } finally {
+    await manager.shutdown();
+  }
 });

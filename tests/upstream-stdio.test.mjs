@@ -20,6 +20,7 @@ async function tempConfig(text) {
 test('manager imports and routes fake stdio upstream', async () => {
   const configPath = await tempConfig(`
 [mcp_servers.fake]
+enabled = true
 transport = "stdio"
 command = "${process.execPath.replaceAll('\\', '\\\\')}"
 args = ["${fakeServer.replaceAll('\\', '\\\\')}"]
@@ -49,6 +50,7 @@ args = ["${fakeServer.replaceAll('\\', '\\\\')}"]
 test('failed optional upstream does not throw and exposes diagnostics', async () => {
   const configPath = await tempConfig(`
 [mcp_servers.bad]
+enabled = true
 transport = "stdio"
 command = "definitely-not-a-real-command-for-mcp"
 `);

@@ -1,108 +1,82 @@
-# Agent MCP Gateway
+# Local Coding MCP Gateway
 
-Local MCP gateway for agent development workflows. It exposes project-aware tools, repository resources, prompt helpers, filesystem tools, shell helpers, and configured upstream MCP servers through one authenticated MCP endpoint.
+Generic authenticated MCP gateway for local coding workspaces. Deployment and connector names belong to host configuration; the repository itself is machine-neutral.
 
-The current design focuses on accurate, neutral tool presentation for large repositories. It reduces wrong tool calls and wording-driven false positives without hiding real behavior. Tools that stage files, edit files, run commands, or publish to remotes still describe those actions in plain language.
+## Core catalog
 
-## Current surface
+The local catalog contains exactly six tools:
 
-The local custom registry currently has 18 custom tools. In the configured compact profile, the expected visible target is 34 tools after local, filesystem, shell, and upstream MCP catalogs are merged.
+- `read_text_file`
+- `write_file`
+- `edit_file`
+- `shell_execute`
+- `image_preview`
+- `get_skill`
 
-Important local tools:
+Use the official filesystem tools for file content. Use `shell_execute` for `rg`, Git, tests, builds, linters, package managers, archives, and process operations. Specialized Git/search/review/release MCP wrappers were removed rather than hidden behind another surface mode.
 
-- `custom_file_inspector`: metadata, paginated line reads, shallow directory lists, and targeted edits.
-- `custom_grep`: text search with `limit`, `offset`, `nextOffset`, and `hasMore`.
-- `custom_git_diff`: returns scoped diffs; large repo-wide diffs fall back to summary output.
-- `custom_screenshot`: creates PNG previews from URL/file inputs.
-- `custom_get_safety_profile`: compatibility tool name; returns runtime flags only.
+## Live skills
 
-`custom_read_media_file` is for existing image/audio binary payloads, not text or code. In compact mode it is hidden from `tools/list`; text/code workflows should use `custom_file_inspector`. `custom_screenshot` is separate: it renders a preview, while media read inspects an existing image/audio file.
+Copy a standard `<name>/SKILL.md` folder into `scripts/skills/`. The gateway discovers additions, edits, and removals without restart, emits prompt/resource list-changed notifications, and returns the current names, aliases, and descriptions through `get_skill()` as `skillCatalog`.
 
-## Runtime profile and flow config
+The first `read_text_file` or `image_preview` call for an authenticated caller adds one short skill advisory. Before that caller's first `write_file`, `edit_file`, or `shell_execute`, the gateway requires one successful `get_skill(...)` call. The first block explains what to do; repeated blocks use only `Call get_skill().` Successful skill loading unlocks project-changing tools for four hours by default (`MCP_SKILL_BOOTSTRAP_TTL_MS`). Read operations remain available so the agent can inspect context before choosing a workflow.
 
-Flow settings live in `config/gateway-flow.yaml`, loaded through `scripts/gateway-flow-config.mjs`. Override the config path with `MCP_GATEWAY_FLOW_CONFIG`.
+`SKILL.md` requires YAML frontmatter with `name` and a selection-quality `description`. Optional `user-invocable: false` hides it from MCP prompts; `disable-model-invocation: true` keeps explicit loading but removes it from automatic agent selection. Invalid changes keep the last valid catalog.
 
-Default compact annotations:
+Upstream Ponytail, Superpowers, and redistributable Anthropic skills are tracked through `scripts/skills/sources.json`; exact commits are recorded in `sources.lock.json`. Use `npm run skills:check` to detect upstream movement and `npm run skills:sync` to fetch, validate, and stage the current manifest. The sync process preserves unmanaged local skills and enforces license, symlink, file-size, and font-file checks. Anthropic's proprietary document skills are intentionally excluded.
 
-```yaml
-zero_interruption:
-  enabled: true
-  annotations:
-    readOnlyHint: true
-    destructiveHint: false
-    openWorldHint: false
-```
+The loader and updater use Node filesystem/path APIs and repository-relative paths, so the same layout works on Linux and Windows. Deploying loader code requires one gateway restart; subsequent skill additions, edits, removals, and managed skill syncs do not. See `scripts/skills/README.md` for the update workflow and license policy.
 
-When enabled, exposed tools present those annotation hints consistently. Descriptions remain factual about the operation performed. The profile implementation now lives in `scripts/runtime-profile.mjs`; public compatibility names remain where needed.
+## Live workspace roots
 
-`custom_get_safety_profile` returns flags only: profile, default profile, shell availability, write-capable tool availability, external publish availability, and server-side approval requirement. It does not return warning or notice prose.
+`config/mcp-servers.toml` is the single configuration file for server metadata, trusted roots, optional upstreams, and tunnel settings.
 
-## Large-repo behavior
+When a structured tool call contains an absolute path that implements the user's request, the gateway:
 
-`custom_file_inspector` is the default text/file tool:
+1. normalizes the path and derives the smallest directory root;
+2. appends it to `[trusted_roots].roots` with a lock and atomic replace;
+3. reloads one in-memory workspace registry;
+4. sends `notifications/roots/list_changed` to the official filesystem server;
+5. waits until the exact root set is active;
+6. continues the original tool call without restart or a second approval prompt.
 
-- `metadata` returns type, size, mtime, and text line count.
-- `read` returns line-numbered ranges, defaulting to the first 500 lines.
-- `list` performs shallow directory listing with pagination.
-- `replace_lines` and `replace_text` perform targeted edits.
+Manual valid edits to the TOML file hot-reload. Invalid TOML keeps the last valid runtime state. Roots remain configured until explicitly removed.
 
-`custom_grep` returns at most 50 matches and includes pagination metadata. It excludes noisy repository paths such as dependency folders, VCS metadata, build outputs, logs, package output, and zip staging folders.
+`[trusted_roots].roots` is the only authorization source. `MCP_TRUSTED_ROOTS`, `MCP_IMAGE_PREVIEW_ROOTS`, and implicit home folders do not grant access. Migrate any legacy environment root into the TOML array. `image_preview`, filesystem operations, shell working directories, resources, and project discovery all consume the same live root set and canonical path policy. Lock files contain owner metadata; dead owners or locks older than the conservative 10-minute stale threshold are recoverable.
 
-`custom_git_diff` returns a summary and changed-file list for large unscoped diffs. Pass `files` for detailed per-file diffs.
+## Optional upstreams
 
-## Upstream MCP servers
+Context7, DeepWiki, Exa, and ESLint are configured with `enabled = false` by default. Changing one to `enabled = true` stages the candidate client and catalog, then atomically commits and emits list-changed notifications without restarting the gateway. Disabling or replacing a server is also transactional: if candidate startup or catalog discovery fails, the previous clients, routes, statuses, and generation remain active.
 
-External MCP servers are configured by `config/mcp-servers.toml`. Treat local edits to that file as environment-specific unless the task explicitly asks to update upstream configuration.
+Codegraph and ripgrep are CLI workflows, not MCP upstreams. The `local_coding` skill uses Codegraph only when the executable and an existing `.codegraph` index are present; otherwise it falls back to `rg` and `read_text_file`.
 
-The wrapper merges local tools, filesystem tools, shell helpers, and external MCP tools. Compact mode hides broad upstream filesystem tools such as full-file read/write, recursive tree, generic filename search, and media read; compatible legacy calls are routed through compact local tools where possible.
+## Shell result
 
-## Development commands
+`shell_execute` returns structured JSON containing the command, requested/resolved working directory, exit code, stdout, stderr, stderr classification, duration, timeout state, truncation metadata, original byte counts, returned byte counts, and UTF-8 encoding. Exit code `1` from `rg` means no matches, not a gateway failure.
+
+Runtime profiles remain `safe`, `assisted`, and `yolo`. `safe` hides mutating filesystem tools and shell; `assisted` permits file writes but hides shell; `yolo` exposes all six core tools.
+
+## Development
 
 ```bash
 npm test
+npm run skills:check
 npm run smoke:mcp-schemas
 npm run smoke:mcp:tools
+npm run smoke:mcp:upstreams
 ```
 
-Useful syntax checks:
+Useful checks:
 
 ```bash
-node --check scripts/runtime-profile.mjs
 node --check scripts/authenticated-mcp-wrapper.mjs
-node --check scripts/custom-tools/index.mjs
-node --check scripts/resources/index.mjs
-node --check scripts/prompts/index.mjs
+node --check scripts/workspace-registry.mjs
+node --check scripts/upstreams/manager.mjs
+git diff --check
 ```
 
-## Operational notes
+## Authentication and tunnel
 
-- Use `custom_file_inspector` for source, docs, JSON, YAML, TOML, and text files.
-- Use `custom_grep` for content search with pagination.
-- Prefer targeted edits or unified diffs over full-file overwrite.
-- Keep descriptions neutral and accurate; annotation hints are presentation hints controlled by `gateway-flow.yaml`.
-- Use structured checks for description hygiene rather than long ad hoc search terms.
+OAuth remains the primary ChatGPT path. Optional static bearer authentication may coexist for local clients; it does not replace OAuth discovery.
 
-## Auth compatibility
-
-Optional static bearer auth may coexist with OAuth metadata for local clients such as Hermes/OpenClaw. It is a compatibility path for local tooling, not a replacement for OAuth discovery.
-
-## OpenAI Secure MCP Tunnel
-
-`uv run main.py --repo <repo>` always starts the local MCP gateway at `http://127.0.0.1:8101/mcp`.
-
-Enable the ChatGPT tunnel in config:
-
-```toml
-[openai_tunnel]
-enabled = true
-command = "tunnel-client"
-profile = "local-gpt"
-```
-
-Or force it for one run:
-
-```bash
-uv run main.py --repo E:\ --tunnel
-```
-
-The gateway starts `tunnel-client run --profile <profile>` as a companion process. Tunnel credentials and runtime keys are not stored in this repo; they stay in the `tunnel-client` profile/environment. If the tunnel command is unavailable or not authenticated, the gateway prints a warning and keeps local `8101` running.
+`uv run main.py --repo <repo>` starts the local endpoint at `http://127.0.0.1:8101/mcp`. The optional tunnel is configured in `[openai_tunnel]`; credentials remain in the tunnel profile/environment, not this repository.

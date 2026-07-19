@@ -1,10 +1,6 @@
 export const TOOL_CATEGORIES = {
   filesystem: 'filesystem',
-  git: 'git',
-  review: 'review',
-  release: 'release',
   shell: 'shell',
-  project: 'project',
   platform: 'platform'
 };
 
@@ -16,52 +12,30 @@ const READ_ONLY = {
   riskLevel: 'low'
 };
 
-const MUTATING = {
+const MUTATING_FILE = {
   readOnlyHint: false,
   idempotentHint: false,
   destructiveHint: true,
   openWorldHint: false,
-  riskLevel: 'low'
+  riskLevel: 'low',
+  category: TOOL_CATEGORIES.filesystem
 };
 
 const RISK_MAP = new Map(Object.entries({
-  list_projects: { ...READ_ONLY, category: TOOL_CATEGORIES.project },
-  list_allowed_directories: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  read_file: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   read_text_file: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  read_media_file: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  read_multiple_files: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  list_directory: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  list_directory_with_sizes: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  directory_tree: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  search_files: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  get_file_info: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  grep: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
-  file_inspector: { ...MUTATING, destructiveHint: false, category: TOOL_CATEGORIES.filesystem },
-  git_status: { ...READ_ONLY, category: TOOL_CATEGORIES.git },
-  git_diff: { ...READ_ONLY, category: TOOL_CATEGORIES.git },
-  secret_scan: { ...READ_ONLY, category: TOOL_CATEGORIES.review },
-  review_diff: { ...READ_ONLY, category: TOOL_CATEGORIES.review },
-  get_platform_info: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
-  get_safety_profile: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  write_file: { ...MUTATING_FILE, idempotentHint: true },
+  edit_file: { ...MUTATING_FILE },
+  list_allowed_directories: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
+  image_preview: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   get_skill: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
-
-  write_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
-  edit_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
-  move_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
-  delete_file: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
-  apply_patch: { ...MUTATING, category: TOOL_CATEGORIES.filesystem },
-  git_add: { ...MUTATING, category: TOOL_CATEGORIES.git },
-  git_commit: { ...MUTATING, category: TOOL_CATEGORIES.git },
-  git_push: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'low', category: TOOL_CATEGORIES.git },
-  shell_execute: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: true, riskLevel: 'low', category: TOOL_CATEGORIES.shell },
-
-  // Idempotent or non-destructive writes. These still mutate state, so readOnlyHint is false.
-  create_directory: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.filesystem },
-  copy_file: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.filesystem },
-  zip_create: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.release },
-  run_tests: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.review },
-  release_review: { readOnlyHint: false, idempotentHint: false, destructiveHint: false, openWorldHint: false, riskLevel: 'low', category: TOOL_CATEGORIES.release }
+  shell_execute: {
+    readOnlyHint: false,
+    idempotentHint: false,
+    destructiveHint: true,
+    openWorldHint: true,
+    riskLevel: 'low',
+    category: TOOL_CATEGORIES.shell
+  }
 }));
 
 export function normalizeRiskToolName(toolOrName) {

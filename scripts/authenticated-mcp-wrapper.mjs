@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -20,24 +20,17 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
-import { executeDirectShell, getDirectPlatformInfo } from './direct-shell.mjs';
+import { executeDirectShell } from './direct-shell.mjs';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
+import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
+import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
 import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
-import { loadGatewayFlowConfig } from './gateway-flow-config.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
-import {
-  buildTrustedRootsMetadata,
-  buildTrustedRootsNotice,
-  normalizeToolForAutopilot,
-  normalizeToolForGateway,
-  toCustomToolName,
-  toUpstreamToolName
-} from './tool-metadata.mjs';
 import {
   FileBackedAuthState,
   PasswordProtectedAuthProvider,
@@ -46,11 +39,16 @@ import {
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
+import { buildSkillCallerKey, createSkillBootstrapGate } from './skill-bootstrap-gate.mjs';
+import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
-  buildTrustedRootsProjectRegistryFromRaw,
-  loadTrustedRootsRawFromUnifiedConfig,
-  resolveTrustedRootPaths
-} from './projects/trusted-roots-projects.mjs';
+  classifyWorkspaceChange,
+  createWorkspaceRegistry,
+  isAbsoluteWorkspacePath,
+  isPathInsideWorkspace,
+  normalizeWorkspacePath,
+  toFilesystemRootUri
+} from './workspace-registry.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = process.env.REPO_ROOT;
@@ -63,47 +61,25 @@ const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const runtimeProfile = getRuntimeProfile(process.env);
 const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
-const shellLogPath = process.env.SHELL_LOG_PATH;
 const authStatePath = process.env.AUTH_STATE_PATH;
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
 const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLowerCase() === 'true';
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
-const gatewayRuntimeCache = new Map();
-
-const COMPACT_HIDDEN_UPSTREAM_TOOLS = new Set([
-  'read_file',
-  'read_text_file',
-  'read_multiple_files',
-  'write_file',
-  'edit_file',
-  'list_directory',
-  'list_directory_with_sizes',
-  'directory_tree',
-  'search_files',
-  'get_file_info',
-  'read_media_file'
-]);
-
-
-function currentFlowConfig() {
-  return loadGatewayFlowConfig({ env: process.env, repoRoot: packageRoot });
-}
-
-function compactToolSurfaceEnabled(flowConfig = currentFlowConfig()) {
-  return Boolean(flowConfig.zero_interruption?.enabled);
-}
-
-function isCompactHiddenUpstreamTool(toolName, flowConfig = currentFlowConfig()) {
-  return compactToolSurfaceEnabled(flowConfig) && COMPACT_HIDDEN_UPSTREAM_TOOLS.has(toUpstreamToolName(toolName));
-}
+const skillBootstrapGate = createSkillBootstrapGate({
+  ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
+});
+const filesystemEntrypointPath = fileURLToPath(
+  new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
+);
+const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
+const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill']);
+const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
 if (!authPassword) throw new Error('MCP_AUTH_PASSWORD is required');
-if (!enableFilesystem && !enableShell) {
-  throw new Error('At least one upstream MCP server must be enabled');
-}
+if (!enableFilesystem && !enableShell) throw new Error('At least one local execution primitive must be enabled');
 
 function envFlag(value, defaultValue = false) {
   const text = String(value ?? '').trim().toLowerCase();
@@ -115,59 +91,28 @@ function envFlag(value, defaultValue = false) {
 
 function normalizeDurationMs(value, defaultValue) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return defaultValue;
-  return parsed;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
 }
 
-const trustedRootsRaw = loadTrustedRootsRawFromUnifiedConfig({
-  env: process.env,
-  repoRoot: packageRoot
+const configPath = findUnifiedMcpConfigPath(process.env, packageRoot);
+if (!configPath) throw new Error('config/mcp-servers.toml is required');
+const workspaceRegistry = createWorkspaceRegistry({
+  configPath,
+  repoRoot: packageRoot,
+  env: process.env
 });
 
-const { existingRoots: resolvedRepoRoots, missingRoots: missingTrustedRoots } = resolveTrustedRootPaths(
-  trustedRootsRaw,
-  repoRoot
-);
-const resolvedRepoRoot = resolvedRepoRoots[0];
-const projectRegistry = buildTrustedRootsProjectRegistryFromRaw(trustedRootsRaw, {
-  fallbackRoot: repoRoot,
-  defaultProjectId: process.env.MCP_DEFAULT_PROJECT_ID,
-  requireProjectId: envFlag(process.env.MCP_REQUIRE_PROJECT_ID, false),
-  pathInference: envFlag(process.env.MCP_ENABLE_PROJECT_PATH_INFERENCE, true),
-  exposeProjectPaths: envFlag(process.env.MCP_EXPOSE_PROJECT_PATHS, false),
-  checkExists: true
-});
-const filesystemEntrypointPath = fileURLToPath(
-  new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
-);
-
-function isSamePathOrInside(basePath, targetPath) {
-  const base = path.resolve(basePath);
-  const target = path.resolve(targetPath);
-  const relative = path.relative(base, target);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+function workspaceSnapshot() {
+  return workspaceRegistry.snapshot();
 }
 
-const shellExecuteSchema = {
-  type: 'object',
-  properties: {
-    command: {
-      type: 'string',
-      description:
-        'The system instruction to execute in the verified environment. Direct execution mode.'
-    },
-    working_directory: {
-      type: 'string',
-      description:
-        'The target workspace for execution.'
-    }
-  },
-  required: ['command'],
-  additionalProperties: false
-};
+function currentRoots() {
+  return workspaceSnapshot().roots;
+}
 
-const repoRootNotice = buildTrustedRootsNotice(resolvedRepoRoots);
-const repoRootMetadata = buildTrustedRootsMetadata(resolvedRepoRoots);
+function currentRoot() {
+  return currentRoots()[0] || path.resolve(repoRoot);
+}
 
 function appendStderrToLog(transport, logPath) {
   if (!logPath || !transport.stderr) return;
@@ -182,8 +127,8 @@ function createClient(name, version, transport, capabilities = {}) {
 function createFilesystemTransport() {
   const transport = new StdioClientTransport({
     command: 'node',
-    args: [filesystemEntrypointPath, ...resolvedRepoRoots],
-    cwd: resolvedRepoRoot,
+    args: [filesystemEntrypointPath],
+    cwd: currentRoot(),
     stderr: 'pipe'
   });
   appendStderrToLog(transport, filesystemLogPath);
@@ -191,346 +136,315 @@ function createFilesystemTransport() {
 }
 
 const filesystemTransport = enableFilesystem ? createFilesystemTransport() : null;
-const shellTransport = null;
-
 const filesystemClient = filesystemTransport
-  ? createClient('personal-mcp-launcher-filesystem', '1.3.0', filesystemTransport, { roots: {} })
+  ? createClient('personal-mcp-launcher-filesystem', '2.0.0', filesystemTransport, { roots: { listChanged: true } })
   : null;
-const shellClient = null;
 
 if (filesystemClient) {
   filesystemClient.setRequestHandler(ListRootsRequestSchema, async () => ({
-    roots: resolvedRepoRoots.map(root => ({
-      uri: pathToFileURL(root).href,
+    roots: currentRoots().map(root => ({
+      uri: toFilesystemRootUri(root),
       name: path.basename(root) || root
     }))
   }));
-}
-
-if (filesystemClient && filesystemTransport) {
   await filesystemClient.connect(filesystemTransport);
+  await activateFilesystemRoots();
 }
 
-async function listLocalToolNamesForCollisionCheck() {
-  const names = new Set();
-  if (filesystemClient) {
-    const filesystemResult = await filesystemClient.listTools();
-    for (const tool of filesystemResult.tools || []) {
-      names.add(tool.name);
-      names.add(toCustomToolName(tool.name));
-    }
+function textFromToolResult(result) {
+  return (result?.content || []).filter(item => item?.type === 'text').map(item => item.text || '').join('\n');
+}
+
+async function waitForFilesystemRoots(expectedRoots = currentRoots(), timeoutMs = 3000) {
+  if (!filesystemClient) return;
+  const deadline = Date.now() + timeoutMs;
+  let lastText = '';
+  while (Date.now() <= deadline) {
+    const result = await filesystemClient.callTool({ name: 'list_allowed_directories', arguments: {} });
+    lastText = textFromToolResult(result);
+    const activeLines = lastText.split(/\r?\n/).slice(1).filter(Boolean).map(value => normalizeWorkspacePath(value));
+    const exactRoots = activeLines.length === expectedRoots.length && expectedRoots.every(root =>
+      activeLines.some(active => isPathInsideWorkspace(active, root) && isPathInsideWorkspace(root, active))
+    );
+    if (exactRoots) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
-  for (const tool of listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry })) names.add(tool.name);
-  if (enableShell) {
-    names.add('custom_shell_execute');
-    names.add('custom_get_platform_info');
+  throw new Error(`Filesystem root activation timed out. Expected: ${expectedRoots.join('; ')}. Reported: ${lastText}`);
+}
+
+async function activateFilesystemRoots() {
+  if (!filesystemClient) return;
+  await filesystemClient.sendRootsListChanged();
+  await waitForFilesystemRoots(currentRoots());
+}
+
+async function broadcastCatalogChanges(changes = {}) {
+  const tasks = [];
+  for (const server of activeProxyServers) {
+    if (changes.toolsChanged) tasks.push(server.sendToolListChanged().catch(() => {}));
+    if (changes.resourcesChanged) tasks.push(server.sendResourceListChanged().catch(() => {}));
+    if (changes.promptsChanged) tasks.push(server.sendPromptListChanged().catch(() => {}));
   }
-  return [...names];
+  await Promise.all(tasks);
+}
+
+const stopSkillCatalogWatcher = watchSkillCatalog(async () => {
+  await broadcastCatalogChanges({ resourcesChanged: true, promptsChanged: true });
+});
+
+function localToolNamesForCollisionCheck() {
+  return [...CORE_TOOL_NAMES];
 }
 
 const externalMcpManager = await createExternalMcpManager({
   env: process.env,
   repoRoot: packageRoot,
-  localToolNames: await listLocalToolNamesForCollisionCheck(),
-  localPromptNames: listRepoPrompts({ runtimeProfile }).map(prompt => prompt.name)
+  localToolNames: localToolNamesForCollisionCheck(),
+  localPromptNames: listRepoPrompts({ runtimeProfile }).map(prompt => prompt.name),
+  onCatalogChanged: async changes => {
+    await broadcastCatalogChanges(changes);
+  }
 });
 
-function isWithinRepo(targetPath) {
-  return resolvedRepoRoots.some(root => {
-    const relative = path.relative(root, targetPath);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-  });
-}
+workspaceRegistry.subscribe(async (next, previous) => {
+  const { rootsChanged, upstreamChanged } = classifyWorkspaceChange(next, previous);
+  if (rootsChanged) {
+    await activateFilesystemRoots();
+    await broadcastCatalogChanges({ toolsChanged: true, resourcesChanged: true });
+  }
+  if (upstreamChanged) {
+    const nextExternalConfig = normalizeExternalMcpConfig(next.rawConfig, {
+      configPath,
+      repoRoot: packageRoot,
+      env: process.env
+    });
+    try {
+      await externalMcpManager.reconcile(nextExternalConfig);
+    } catch (error) {
+      console.error(`[external-mcp] reconcile failed; keeping committed topology: ${error.message}`);
+    }
+  }
+});
+
+const shellExecuteSchema = {
+  type: 'object',
+  properties: {
+    command: { type: 'string', description: 'The system instruction to execute in the verified environment.' },
+    working_directory: { type: 'string', description: 'The target workspace for execution.' }
+  },
+  required: ['command'],
+  additionalProperties: false
+};
 
 function customToolContext() {
+  const snapshot = workspaceSnapshot();
   return {
-    resolvedRepoRoots,
-    resolvedRepoRoot,
-    projectRegistry,
+    resolvedRepoRoots: snapshot.roots,
+    resolvedRepoRoot: snapshot.roots[0],
+    projectRegistry: snapshot.projectRegistry,
     executeDirectShell,
     packageRoot,
     env: process.env
   };
 }
 
-function toolCacheKey(flowConfig) {
-  return JSON.stringify({
-    flowMtime: flowConfig._meta?.mtimeMs || 0,
-    runtimeProfile: runtimeProfile.name,
-    filesystem: Boolean(filesystemClient),
-    shell: enableShell,
-    compact: compactToolSurfaceEnabled(flowConfig)
+function filesystemToolMeta(tool) {
+  const roots = currentRoots();
+  return applyToolRisk({
+    ...tool,
+    name: tool.name,
+    _meta: {
+      ...(tool._meta || {}),
+      trusted_roots: roots,
+      root_repo: roots[0],
+      repo_root: roots[0]
+    }
   });
+}
+
+async function listMergedTools() {
+  const tools = [];
+  if (filesystemClient) {
+    const result = await filesystemClient.listTools();
+    tools.push(...(result.tools || []).filter(tool => FILESYSTEM_TOOL_NAMES.has(tool.name)).map(filesystemToolMeta));
+  }
+  tools.push(...listCustomTools(customToolContext()));
+  if (enableShell) {
+    const roots = currentRoots();
+    tools.push(applyToolRisk({
+      name: 'shell_execute',
+      description: buildShellExecuteDescription(`Trusted roots: ${roots.join('; ')}`),
+      inputSchema: shellExecuteSchema,
+      _meta: { trusted_roots: roots, root_repo: roots[0], repo_root: roots[0] },
+      annotations: buildShellExecuteAnnotations()
+    }));
+  }
+  tools.push(...await externalMcpManager.listAllToolsUnfiltered());
+  return tools.filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
+}
+
+async function ensureFileTarget(args = {}) {
+  const target = args.path;
+  if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
+}
+
+async function ensureImageTarget(args = {}) {
+  const target = args.path || args.file || args.sourcePath;
+  if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
 }
 
 function structuredToolText(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
-function firstTextContent(result) {
-  return result?.content?.find?.(entry => entry?.type === 'text')?.text || '{}';
+function structuredToolError(toolName, error) {
+  return {
+    ...structuredToolText({ ok: false, tool: toolName, error }),
+    isError: true
+  };
 }
 
-function parseCustomResult(result) {
-  try { return JSON.parse(firstTextContent(result)); } catch { return {}; }
+function appendSkillAdvisory(result, advisory) {
+  if (!advisory || result?.isError) return result;
+  return {
+    ...result,
+    content: [...(result?.content || []), { type: 'text', text: advisory }]
+  };
 }
 
-async function routeUpstreamFileTool(upstreamToolName, args = {}) {
-  const context = customToolContext();
-  if (upstreamToolName === 'write_file') {
-    return structuredToolText({
-      ok: false,
-      tool: 'custom_write_file',
-      error: {
-        code: 'TARGETED_EDITS_REQUIRED',
-        message: 'Full-file overwrite is not exposed by the compact gateway surface. Use custom_file_inspector with replace_lines or replace_text.',
-        details: { path: args.path }
-      }
-    });
-  }
-
-  if (upstreamToolName === 'read_file' || upstreamToolName === 'read_text_file') {
-    const readArgs = { action: 'read', path: args.path };
-    if (args.head) {
-      readArgs.start_line = 1;
-      readArgs.end_line = Number(args.head);
-    } else if (args.tail) {
-      const metadata = parseCustomResult(await callCustomTool('file_inspector', { action: 'metadata', path: args.path }, context));
-      const lineCount = Number(metadata.data?.lineCount || 0);
-      readArgs.start_line = Math.max(1, lineCount - Number(args.tail) + 1);
-      readArgs.end_line = lineCount;
-    }
-    return await callCustomTool('file_inspector', readArgs, context);
-  }
-
-  if (upstreamToolName === 'read_multiple_files') {
-    const results = [];
-    for (const filePath of args.paths || []) {
-      results.push(parseCustomResult(await callCustomTool('file_inspector', { action: 'read', path: filePath }, context)));
-    }
-    return structuredToolText({ ok: true, tool: 'custom_read_multiple_files', summary: 'Read files through file_inspector', data: { results } });
-  }
-
-  if (upstreamToolName === 'get_file_info') {
-    return await callCustomTool('file_inspector', { action: 'metadata', path: args.path }, context);
-  }
-
-  if (upstreamToolName === 'list_directory' || upstreamToolName === 'list_directory_with_sizes') {
-    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: 1 }, context);
-  }
-
-  if (upstreamToolName === 'directory_tree') {
-    return await callCustomTool('file_inspector', { action: 'list', path: args.path, maxDepth: args.maxDepth || 2 }, context);
-  }
-
-  if (upstreamToolName === 'search_files') {
-    return structuredToolText({
-      ok: false,
-      tool: 'custom_search_files',
-      error: {
-        code: 'UNSUPPORTED_IN_COMPACT_MODE',
-        message: 'search_files is not exposed in compact mode. Use custom_grep for text search or custom_file_inspector with action=list for shallow directory inspection.',
-        details: { path: args.path, pattern: args.pattern }
-      }
-    });
-  }
-
-  if (upstreamToolName === 'edit_file') {
-    const edits = Array.isArray(args.edits) ? args.edits : [];
-    if (edits.length === 0) {
-      return structuredToolText({ ok: false, tool: 'custom_edit_file', error: { code: 'VALIDATION_ERROR', message: 'edits are required', details: {} } });
-    }
-    const results = [];
-    for (const edit of edits) {
-      results.push(parseCustomResult(await callCustomTool('file_inspector', {
-        action: 'replace_text',
-        path: args.path,
-        oldText: edit.oldText,
-        newText: edit.newText,
-        dryRun: Boolean(args.dryRun)
-      }, context)));
-    }
-    return structuredToolText({ ok: true, tool: 'custom_edit_file', summary: 'Applied targeted text replacements through file_inspector', data: { results } });
-  }
-
-  return null;
-}
-
-async function listAllMergedToolsUnfiltered() {
-  const flowConfig = currentFlowConfig();
-  const cacheKey = toolCacheKey(flowConfig);
-  const cacheEnabled = flowConfig.context_optimization?.tool_registry_cache !== false;
-  const cached = gatewayRuntimeCache.get('mergedTools');
-  if (cacheEnabled && cached?.key === cacheKey) return cached.tools;
-
-  const tools = [];
-
-  if (filesystemClient) {
-    const filesystemResult = await filesystemClient.listTools();
-    tools.push(...(filesystemResult.tools || [])
-      .filter(tool => !isCompactHiddenUpstreamTool(tool.name, flowConfig))
-      .map(tool => normalizeToolForAutopilot(tool, { repoRoots: resolvedRepoRoots, flowConfig })));
-  }
-
-  tools.push(...listCustomTools({ resolvedRepoRoots, resolvedRepoRoot, projectRegistry }));
-
-  if (enableShell) {
-    tools.push({
-      name: 'custom_shell_execute',
-      description: buildShellExecuteDescription(repoRootNotice),
-      inputSchema: shellExecuteSchema,
-      _meta: repoRootMetadata,
-      annotations: buildShellExecuteAnnotations()
-    });
-    tools.push({
-      name: 'custom_get_platform_info',
-      description: `${repoRootNotice}\n\nGet information about the current shell backend used by the launcher.`,
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      _meta: repoRootMetadata,
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-        destructiveHint: false,
-        openWorldHint: false
-      }
-    });
-  }
-
-  tools.push(...await externalMcpManager.listAllToolsUnfiltered());
-
-  const normalizedTools = tools
-    .map(tool => tool._meta?.upstream ? tool : applyToolRisk(tool))
-    .map(tool => normalizeToolForGateway(tool, { flowConfig }));
-
-  if (cacheEnabled) gatewayRuntimeCache.set('mergedTools', { key: cacheKey, tools: normalizedTools });
-  return normalizedTools;
-}
-
-async function listMergedTools() {
-  return (await listAllMergedToolsUnfiltered()).filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
-}
-
-async function routeToolCall(request) {
+async function routeToolCall(request, { callerKey } = {}) {
   const toolName = request.params.name;
-  const upstreamToolName = toUpstreamToolName(toolName);
-  assertToolAllowedForProfile(upstreamToolName, runtimeProfile);
-  if (isLocalCustomTool(upstreamToolName)) {
-    return await callCustomTool(upstreamToolName, request.params.arguments || {}, customToolContext());
-  }
+  assertToolAllowedForProfile(toolName, runtimeProfile);
 
-  if (enableShell && upstreamToolName === 'shell_execute') {
-    const validated = validateShellCommand(request.params.arguments, {
-      resolvedRepoRoots,
-      defaultCwd: resolvedRepoRoot
+  const bootstrapError = skillBootstrapGate.checkTool(callerKey, toolName);
+  if (bootstrapError) return structuredToolError(toolName, bootstrapError);
+
+  if (toolName === 'shell_execute' && enableShell) {
+    const args = request.params.arguments || {};
+    if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
+      await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
+    }
+    const roots = currentRoots();
+    const validated = validateShellCommand(args, { resolvedRepoRoots: roots, defaultCwd: roots[0] });
+    const result = await executeDirectShell(validated.command, {
+      cwd: validated.cwd || roots[0],
+      timeout: 300000,
+      env: process.env
     });
-    console.log('[shell] accepted');
-    const result = await executeDirectShell(validated.command, { cwd: validated.cwd || resolvedRepoRoot, timeout: 300000 });
-    return {
-      content: [
-        {
-          type: 'text',
-          text: result.stdout || ''
-        },
-        {
-          type: 'text',
-          text: result.stderr ? `Error output: ${result.stderr}` : ''
-        }
-      ]
-    };
+    return structuredToolText({
+      command: validated.command,
+      workingDirectoryRequested: args.working_directory ?? null,
+      workingDirectoryResolved: validated.cwd || roots[0],
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      stderrClassification: result.exitCode !== 0 || result.timedOut ? 'error' : (result.stderr ? 'warning' : 'none'),
+      durationMs: result.durationMs,
+      timedOut: result.timedOut,
+      stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
+      stdoutBytes: result.stdoutBytes,
+      stderrBytes: result.stderrBytes,
+      returnedStdoutBytes: result.returnedStdoutBytes,
+      returnedStderrBytes: result.returnedStderrBytes,
+      encoding: result.encoding
+    });
   }
 
-  if (enableShell && upstreamToolName === 'get_platform_info') {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            getDirectPlatformInfo({ repoRoot: resolvedRepoRoot, trustedRoots: resolvedRepoRoots }),
-            null,
-            2
-          )
-        }
-      ]
-    };
+  if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
+    await ensureFileTarget(request.params.arguments || {});
+    const result = await filesystemClient.callTool(request.params);
+    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
+  }
+
+  if (toolName === 'image_preview') await ensureImageTarget(request.params.arguments || {});
+  if (isLocalCustomTool(toolName)) {
+    const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext());
+    if (toolName === 'get_skill') skillBootstrapGate.markBootstrapped(callerKey);
+    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
   if (externalMcpManager.isExternalToolName(toolName)) {
     return await externalMcpManager.callTool(toolName, request.params.arguments || {}, runtimeProfile);
   }
 
-  if (filesystemClient) {
-    if (compactToolSurfaceEnabled() && COMPACT_HIDDEN_UPSTREAM_TOOLS.has(upstreamToolName)) {
-      const routed = await routeUpstreamFileTool(upstreamToolName, request.params.arguments || {});
-      if (routed) return routed;
-    }
-    return await filesystemClient.callTool({ ...request.params, name: upstreamToolName });
-  }
-
   throw new Error(`Unknown or disabled tool: ${toolName}`);
 }
 
-async function routeObservedToolCall(request) {
+async function routeObservedToolCall(request, context) {
   const toolName = request.params?.name || 'unknown';
   const startedAt = Date.now();
   console.log(`[tool-call:start] ${toolName}`);
-
   try {
-    const result = await routeToolCall(request);
+    const result = await routeToolCall(request, context);
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
-    if (durationMs > slowToolThresholdMs) {
-      console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
-    }
+    if (durationMs > slowToolThresholdMs) console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
     return result;
   } catch (error) {
-    const durationMs = Date.now() - startedAt;
-    console.log(`[tool-call:error] ${toolName} durationMs=${durationMs}`);
+    console.log(`[tool-call:error] ${toolName} durationMs=${Date.now() - startedAt}`);
     throw error;
   }
 }
 
-function createProxyServer() {
+function currentResourceContext() {
+  const snapshot = workspaceSnapshot();
+  return {
+    resolvedRepoRoots: snapshot.roots,
+    resolvedRepoRoot: snapshot.roots[0],
+    projectRegistry: snapshot.projectRegistry,
+    packageRoot,
+    env: process.env,
+    listTools: listMergedTools
+  };
+}
+
+function createProxyServer(callerKey) {
+  const metadata = workspaceSnapshot().server;
   const server = new Server(
-    { name: 'personal-mcp-launcher', version: '1.3.0' },
     {
+      name: metadata.name,
+      title: metadata.title,
+      version: '2.0.0',
+      description: metadata.description
+    },
+    {
+      instructions: [metadata.instructions, SKILL_AGENT_INSTRUCTIONS].filter(Boolean).join(' '),
       capabilities: {
-        tools: { listChanged: false },
-        resources: { subscribe: false, listChanged: false },
-        prompts: { listChanged: false }
+        tools: { listChanged: true },
+        resources: { subscribe: false, listChanged: true },
+        prompts: { listChanged: true }
       }
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: await listMergedTools() };
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey }));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const context = currentResourceContext();
+    return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
   });
-
-  server.setRequestHandler(CallToolRequestSchema, async request => {
-    return await routeObservedToolCall(request);
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+    const context = currentResourceContext();
+    return { resourceTemplates: [...listRepoResourceTemplates(context), ...await externalMcpManager.listResourceTemplates()] };
   });
-
-  const resourceContext = {
-    resolvedRepoRoots,
-    resolvedRepoRoot,
-    projectRegistry,
-    packageRoot,
-    env: process.env,
-    listTools: listAllMergedToolsUnfiltered
-  };
-
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [...listRepoResources(resourceContext), ...await externalMcpManager.listResources()] }));
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [...listRepoResourceTemplates(resourceContext), ...await externalMcpManager.listResourceTemplates()] }));
   server.setRequestHandler(ReadResourceRequestSchema, async request => {
     if (isExternalResourceUri(request.params.uri)) return await externalMcpManager.readResource(request.params.uri);
-    return await readRepoResource(request.params.uri, resourceContext);
+    return await readRepoResource(request.params.uri, currentResourceContext());
   });
-
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [...listRepoPrompts({ runtimeProfile }), ...await externalMcpManager.listPrompts()] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [...listRepoPrompts({ runtimeProfile }), ...await externalMcpManager.listPrompts()]
+  }));
   server.setRequestHandler(GetPromptRequestSchema, async request => {
-    if (externalMcpManager.isExternalPromptName(request.params.name)) return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
-    return getRepoPrompt(request.params.name, request.params.arguments || {}, { runtimeProfile, defaultProjectId: projectRegistry.defaultProjectId });
+    if (externalMcpManager.isExternalPromptName(request.params.name)) {
+      return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
+    }
+    return getRepoPrompt(request.params.name, request.params.arguments || {}, {
+      runtimeProfile,
+      defaultProjectId: workspaceSnapshot().projectRegistry.defaultProjectId
+    });
   });
-
+  activeProxyServers.add(server);
   return server;
 }
 
@@ -562,6 +476,14 @@ function setIncomingHeader(req, name, value) {
 function fingerprint(value) {
   const text = String(value || '');
   return `${text.length}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`;
+}
+
+function skillCallerKeyFromRequest(req) {
+  return buildSkillCallerKey({
+    oauthClientId: req.auth?.clientId || '',
+    staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
+    sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
+  });
 }
 
 function getProvidedAuthorizationToken(authorizationHeader) {
@@ -732,17 +654,17 @@ function mcpAuthMiddleware(req, res, next) {
 
 const transports = {};
 
-async function createTransport() {
+async function createTransport(req) {
+  let transport;
+  const server = createProxyServer(skillCallerKeyFromRequest(req));
+
   if (!useStatefulMcpSessions) {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined
-    });
-    const server = createProxyServer();
+    transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    transport.onclose = () => activeProxyServers.delete(server);
     await server.connect(transport);
     return transport;
   }
 
-  let transport;
   transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: id => {
@@ -751,13 +673,11 @@ async function createTransport() {
   });
 
   transport.onclose = () => {
+    activeProxyServers.delete(server);
     const sid = transport.sessionId;
-    if (sid && transports[sid]) {
-      delete transports[sid];
-    }
+    if (sid && transports[sid]) delete transports[sid];
   };
 
-  const server = createProxyServer();
   await server.connect(transport);
   return transport;
 }
@@ -776,7 +696,7 @@ const mcpPostHandler = async (req, res) => {
       shouldCreateTransportForRequest(sessionId, req.body, transports) ||
       (!sessionId && isInitializeRequest(req.body))
     ) {
-      transport = await createTransport();
+      transport = await createTransport(req);
       await transport.handleRequest(req, res, req.body);
       return;
     } else {
@@ -842,13 +762,11 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   console.log(`Authenticated MCP wrapper listening on http://${gatewayHost}:${gatewayPort}/mcp`);
   console.log(`OAuth issuer: ${issuerUrl.href}`);
   console.log(`MCP resource URL: ${resourceServerUrl.href}`);
-  console.log(`Trusted roots: ${resolvedRepoRoots.join('; ')}`);
+  const snapshot = workspaceSnapshot();
+  console.log(`Trusted roots: ${snapshot.roots.join('; ')}`);
   console.log(
-    `Project registry: ${projectRegistry.projects.size} project(s), default=${projectRegistry.defaultProjectId || 'none'}`
+    `Project registry: ${snapshot.projectRegistry.projects.size} project(s), default=${snapshot.projectRegistry.defaultProjectId || 'none'}`
   );
-  if (missingTrustedRoots.length > 0) {
-    console.log(`Skipped missing trusted roots: ${missingTrustedRoots.join('; ')}`);
-  }
   console.log(`Filesystem enabled: ${enableFilesystem}`);
   console.log(`Shell enabled: ${enableShell}`);
   console.log(`Runtime profile: ${runtimeProfile.name}`);
@@ -858,6 +776,8 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
 
 async function shutdown() {
   serverInstance.close();
+  stopSkillCatalogWatcher();
+  workspaceRegistry.close();
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

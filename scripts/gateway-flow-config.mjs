@@ -4,6 +4,9 @@ import path from 'node:path';
 const fileCache = new Map();
 
 const DEFAULT_GATEWAY_FLOW_CONFIG = {
+  tool_surface: {
+    mode: 'core'
+  },
   zero_interruption: {
     enabled: false,
     annotations: {

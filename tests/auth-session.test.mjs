@@ -44,12 +44,11 @@ test('static bearer docs describe optional dual auth without replacing OAuth', (
   const security = fs.readFileSync(new URL('../SECURITY.md', import.meta.url), 'utf8');
 
   assert.match(envExample, /^MCP_BEARER_TOKEN=$/m);
-  assert.match(readme, /Hermes\/OpenClaw/);
-  assert.match(readme, /Authorization: Bearer <token>/);
-  assert.match(readme, /OAuth vẫn giữ nguyên cho ChatGPT/);
-  assert.match(readme, /Nếu `MCP_BEARER_TOKEN` trống, launcher chỉ chấp nhận OAuth như trước/);
+  assert.match(readme, /Static bearer auth/);
+  assert.match(readme, /OAuth vẫn là đường chính cho ChatGPT/);
+  assert.match(readme, /không thay OAuth discovery/);
   assert.match(security, /GODMODE ACTIVE/);
-  assert.match(security, /custom_shell_execute/);
+  assert.match(security, /shell_execute/);
 });
 
 test('PasswordProtectedAuthProvider persists clients and tokens across instances', async () => {

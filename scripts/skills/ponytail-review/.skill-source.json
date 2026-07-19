@@ -1,0 +1,14 @@
+{
+  "source": "ponytail",
+  "repository": "https://github.com/DietrichGebert/ponytail.git",
+  "ref": "main",
+  "commit": "14a0d79548d4de8fc2de95c1b94bb0de63a739d3",
+  "path": "skills/ponytail-review",
+  "license": "MIT",
+  "overrides": {
+    "aliases": [
+      "review_for_over_engineering"
+    ],
+    "uri": "skill://ponytail/ponytail-review/SKILL.md"
+  }
+}
