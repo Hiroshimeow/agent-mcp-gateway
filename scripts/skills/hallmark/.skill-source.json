@@ -1,0 +1,153 @@
+{
+  "source": "hallmark",
+  "repository": "https://github.com/nutlope/hallmark.git",
+  "ref": "main",
+  "commit": "aeb42fb354ff4efa36ab475773a082315a3af2ce",
+  "path": "skills/hallmark",
+  "license": "MIT",
+  "overrides": {
+    "aliases": [
+      "anti_ai_slop",
+      "hallmark_audit"
+    ],
+    "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
+  },
+  "compatibility": {
+    "files": [
+      {
+        "path": "site/css/tokens.css",
+        "target": "references/upstream/tokens.css"
+      },
+      {
+        "path": "docs/recipes.md",
+        "target": "references/upstream/recipes.md"
+      },
+      {
+        "path": "docs/study-examples.md",
+        "target": "references/upstream/study-examples.md"
+      }
+    ],
+    "replacements": [
+      {
+        "path": "SKILL.md",
+        "search": "../../site/css/tokens.css",
+        "replace": "references/upstream/tokens.css"
+      },
+      {
+        "path": "SKILL.md",
+        "search": "../../docs/recipes.md",
+        "replace": "references/upstream/recipes.md",
+        "count": 2
+      },
+      {
+        "path": "SKILL.md",
+        "search": "../../docs/study-examples.md",
+        "replace": "references/upstream/study-examples.md",
+        "count": 2
+      },
+      {
+        "path": "references/custom-theme.md",
+        "search": "../../../site/css/tokens.css",
+        "replace": "upstream/tokens.css",
+        "count": 2
+      },
+      {
+        "path": "references/hero-enrichment.md",
+        "search": "../../../site/_tests/05-tracejam-saas/",
+        "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/05-tracejam-saas"
+      },
+      {
+        "path": "references/hero-enrichment.md",
+        "search": "../../../site/_tests/03-maple-bakery/",
+        "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/03-maple-bakery"
+      },
+      {
+        "path": "references/themes/carnival.md",
+        "search": "../../../../site/css/tokens.css",
+        "replace": "../upstream/tokens.css"
+      },
+      {
+        "path": "references/themes/cobalt.md",
+        "search": "../../../../site/css/tokens.css",
+        "replace": "../upstream/tokens.css"
+      },
+      {
+        "path": "references/themes/cobalt.md",
+        "search": "../../../../site/examples/cobalt-01/",
+        "replace": "https://github.com/nutlope/hallmark/tree/main/site/examples/cobalt-01",
+        "count": 2
+      },
+      {
+        "path": "references/themes/hum.md",
+        "search": "../../../../site/css/tokens.css",
+        "replace": "../upstream/tokens.css"
+      },
+      {
+        "path": "references/themes/lumen.md",
+        "search": "../../../../site/css/tokens.css",
+        "replace": "../upstream/tokens.css"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/01-tide-podcast/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/01-tide-podcast/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/02-streampipe-cli/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/02-streampipe-cli/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/03-maple-bakery/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/03-maple-bakery/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/04-meridian-manifesto/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/04-meridian-manifesto/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/05-tracejam-saas/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/05-tracejam-saas/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/06-anya-portfolio/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/06-anya-portfolio/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/07-foundry-compliance/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/07-foundry-compliance/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/08-cohort-courses/index.html",
+        "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/08-cohort-courses/index.html"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../../site/_tests/",
+        "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/"
+      },
+      {
+        "path": "references/upstream/recipes.md",
+        "search": "../SKILL.md",
+        "replace": "../../SKILL.md",
+        "count": 2
+      },
+      {
+        "path": "references/upstream/study-examples.md",
+        "search": "](study.md)",
+        "replace": "](../study.md)"
+      },
+      {
+        "path": "references/component-cookbook.md",
+        "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+        "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+      }
+    ]
+  }
+}

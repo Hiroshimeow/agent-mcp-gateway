@@ -126,13 +126,14 @@ test('startup cache does not refresh when upstream catalog changes', async () =>
 });
 
 test('ttl cache refreshes only after ttl expires', async () => {
-  const { manager, statePath, countPath } = await makeDynamicManager({ mode: 'ttl', ttl: 100 });
+  const ttl = 60_000;
+  const { manager, statePath, countPath } = await makeDynamicManager({ mode: 'ttl', ttl });
   try {
     assert.deepEqual(await toolNames(manager), ['dyn_a']);
     await writeState(statePath, { tools: ['a', 'b'] });
     assert.deepEqual(await toolNames(manager), ['dyn_a']);
     assert.equal(await readCount(countPath), 1);
-    await new Promise(resolve => setTimeout(resolve, 130));
+    manager._catalogStateForTests.lastRefreshAt = new Date(Date.now() - ttl - 1).toISOString();
     assert.deepEqual(await toolNames(manager), ['dyn_a', 'dyn_b']);
     assert.equal(await readCount(countPath), 2);
     const call = await manager.callTool('dyn_b', {});

@@ -527,7 +527,18 @@ export function createSkillRegistry({ directory = DEFAULT_SKILLS_DIRECTORY, buil
 
 const registry = createSkillRegistry();
 
-export const SKILL_AGENT_INSTRUCTIONS = 'Read relevant context first when needed. Before the first project-changing tool call, call get_skill without arguments to discover the live catalog, then load the smallest relevant workflow; the gateway reminds once and blocks write_file, edit_file, and shell_execute until a skill loads successfully.';
+export const SKILL_ROUTING_POLICY = Object.freeze([
+  'Explicitly requested skills win; otherwise load only skills that materially change the work.',
+  'Process first: new behavior -> brainstorming; bug or unexpected failure -> systematic_debugging; implementation -> test_driven_development; existing written plan -> executing_plans.',
+  'Repository operations -> local_coding; smallest sufficient coding diff -> ponytail; completion claims -> verification_before_completion.',
+  'Design: general UI, including ordinary audits, redesigns, and screenshot studies -> frontend_design; explicit Hallmark or anti-AI-slop requests -> hallmark; vague Google Stitch prompt -> enhance_prompt; existing frontend to DESIGN.md -> stitch_extract_design_md; complex React/Tailwind/shadcn artifact after visual direction is set -> web_artifacts_builder.'
+]);
+
+export const SKILL_AGENT_INSTRUCTIONS = [
+  'Before first use of local write_file, edit_file, or shell_execute, call get_skill without arguments to discover the live catalog, inspect its routingPolicy and skillCatalog, then load the smallest relevant workflow; the gateway blocks those local tools until a skill loads successfully.',
+  'Do not probe shell_execute first.',
+  `Routing policy: ${SKILL_ROUTING_POLICY.join(' ')}`
+].join(' ');
 
 export function listSkills() {
   return registry.listSkills();
@@ -599,6 +610,7 @@ export function getSkillTool(args = {}) {
     },
     loadDiscipline: 'Read once per task. Do not call get_skill again for the same skill in the same task unless the user asks to refresh it.',
     body: skill.body,
+    routingPolicy: [...SKILL_ROUTING_POLICY],
     availableSkills: skillCatalog.map(item => item.name),
     skillCatalog
   };

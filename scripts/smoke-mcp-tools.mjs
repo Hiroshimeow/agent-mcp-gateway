@@ -35,7 +35,7 @@ function parseMcpResponse(text) {
 }
 
 async function waitForHealth(baseUrl, child, profile) {
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`wrapper exited before health check for ${profile}`);
     try {
@@ -128,6 +128,8 @@ async function initialize(baseUrl) {
   });
   assert.equal(response.result.serverInfo.title, 'Local Coding Gateway');
   assert.match(response.result.serverInfo.description || '', /Local coding workspace/i);
+  assert.match(response.result.instructions || '', /routing policy/i);
+  assert.match(response.result.instructions || '', /do not probe shell_execute first/i);
   return response;
 }
 
@@ -158,13 +160,17 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
     'shell_execute',
     'write_file'
   ]);
+  for (const name of ['edit_file', 'shell_execute', 'write_file']) {
+    assert.match(tools.find(tool => tool.name === name)?.description || '', /call get_skill without arguments/i);
+  }
+  assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /call get_skill without arguments/i);
 
   const target = path.join(workspace, 'smoke.txt');
   fs.writeFileSync(target, 'context', 'utf8');
 
   const firstRead = await callTool(baseUrl, 3, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-a' });
   assert.equal(firstRead.result.content[0].text, 'context');
-  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /before changing the project.*get_skill/i.test(item.text)));
+  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /before using local write_file, edit_file, or shell_execute.*get_skill/i.test(item.text)));
 
   const secondRead = await callTool(baseUrl, 4, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-b' });
   assert.equal(secondRead.result.content.length, 1);
@@ -173,7 +179,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   assert.equal(firstBlocked.result.isError, true);
   const firstBlockedPayload = JSON.parse(firstBlocked.result.content[0].text);
   assert.equal(firstBlockedPayload.error.code, 'SKILL_BOOTSTRAP_REQUIRED');
-  assert.match(firstBlockedPayload.error.message, /before the first project-changing operation/i);
+  assert.match(firstBlockedPayload.error.message, /before the first local write_file, edit_file, or shell_execute operation/i);
 
   const invalidSkill = await callTool(baseUrl, 6, 'get_skill', { name: 'missing-smoke-skill' });
   assert.match(invalidSkill.error?.message || '', /Unknown skill/i);

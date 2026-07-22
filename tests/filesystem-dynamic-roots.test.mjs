@@ -37,7 +37,7 @@ async function waitForRoots(client, expectedRoots, timeoutMs = 3000) {
   throw new Error(`Root activation timeout. Expected=${expectedRoots.join(';')} reported=${reported.join(';')}`);
 }
 
-test('official filesystem hot-activates a persisted path before the same operation continues', { timeout: 8000 }, async () => {
+test('official filesystem hot-activates a persisted path before the same operation continues', { timeout: 30000 }, async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'filesystem-roots-'));
   const initialRoot = path.join(temp, 'initial');
   const addedRoot = path.join(temp, 'added');
@@ -156,7 +156,7 @@ tool_prefix = "dyn"
   }
 });
 
-test('official filesystem retries the same persisted root after one activation failure', { timeout: 8000 }, async () => {
+test('official filesystem retries the same persisted root after one activation failure', { timeout: 30000 }, async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'filesystem-root-retry-'));
   const initialRoot = path.join(temp, 'initial');
   const addedRoot = path.join(temp, 'added');

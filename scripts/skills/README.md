@@ -44,7 +44,7 @@ If a new or edited file is invalid, the gateway logs the error and keeps the las
 
 ## Agent bootstrap gate
 
-Read-only context stays available before skill selection. The first `read_text_file` or `image_preview` result for an authenticated caller includes one short advisory. The first attempted `write_file`, `edit_file`, or `shell_execute` without a successful skill load returns `SKILL_BOOTSTRAP_REQUIRED`; repeated attempts return only `Call get_skill().` to avoid token waste.
+Read-only context stays available before skill selection. The first `read_text_file` or `image_preview` result for an authenticated caller includes one short advisory. The first attempted local `write_file`, `edit_file`, or `shell_execute` without a successful skill load returns `SKILL_BOOTSTRAP_REQUIRED`; repeated attempts return only `Call get_skill().` to avoid token waste. External MCP tools are outside this local gate.
 
 Any successful `get_skill(...)` call unlocks the caller for the TTL. The default is four hours and can be changed with `MCP_SKILL_BOOTSTRAP_TTL_MS`. Stateless mode keys the state from a hash of the verified OAuth client ID, or a fixed non-secret identity for configured static bearer access; raw credentials are never stored. Changing access tokens or stale `mcp-session-id` headers do not reset the stateless gate.
 
@@ -57,8 +57,14 @@ Current managed sources:
 - `DietrichGebert/ponytail` — MIT
 - `obra/superpowers` — MIT
 - redistributable Apache-2.0 skills from `anthropics/skills`
+- selected Apache-2.0 design skills from `google-labs-code/stitch-skills`
+- `nutlope/hallmark` — MIT
 
 Anthropic's proprietary `docx`, `pdf`, `pptx`, and `xlsx` skills are not vendored because their license prohibits redistribution. `doc-coauthoring` is excluded because its folder does not declare a redistributable license. `canvas-design` is excluded because it includes bundled font files.
+
+From Stitch Skills, only `extract-design-md` and `enhance-prompt` are vendored. Stitch-MCP-dependent workflows are excluded until that server is configured. `taste-design` is excluded because it overlaps `frontend-design` while imposing brittle universal font, motion, and layout rules; the more context-sensitive `frontend-design` remains the default visual-design skill.
+
+Hallmark is vendored as an opt-in anti-AI-slop design workflow. Its local selection trigger is intentionally narrower than upstream so generic UI work continues to use `frontend-design`; Hallmark activates when named explicitly or for Hallmark `audit`, `redesign`, or `study` requests.
 
 Each managed skill contains `.skill-source.json` with its repository, upstream path, commit, license, and any local compatibility metadata. Upstream license and notice files are retained in `_upstream_licenses/` and, where supplied, inside each skill folder.
 
@@ -87,7 +93,7 @@ git diff -- scripts/skills/sources.lock.json
 git diff -- scripts/skills/<changed-skill>
 ```
 
-The updater clones into a temporary directory, checks licenses, rejects symlinks, large files, and font files, validates the complete prepared catalog, and only then swaps managed folders. It never deletes unmanaged local skills and refuses to overwrite an unmanaged folder with the same name.
+The updater clones into a temporary directory, realpath-checks every upstream file it reads or copies, rejects path escapes, symlinks, large files, and font files, validates the complete prepared catalog, and only then swaps managed folders. It never deletes unmanaged local skills and refuses to overwrite an unmanaged folder with the same name.
 
 Updating skill files takes effect through hot reload. Restart the MCP server only when the loader or updater code itself changes.
 
@@ -97,4 +103,5 @@ Updating skill files takes effect through hot reload. Restart the MCP server onl
 2. Use explicit `include` entries rather than importing an entire repository implicitly.
 3. Record license requirements and exclusions in the manifest.
 4. Add compatibility aliases/URIs under `overrides` only when an existing MCP contract must remain stable.
-5. Run `npm run skills:sync`, `npm test`, and review the resulting diff.
+5. Use per-skill `compatibility.files` and exact-count `compatibility.replacements` only when upstream references escape the included skill folder.
+6. Run `npm run skills:sync`, `npm test`, and review the resulting diff.

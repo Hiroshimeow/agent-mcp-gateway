@@ -5,7 +5,7 @@
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail.git",
       "ref": "main",
-      "commit": "14a0d79548d4de8fc2de95c1b94bb0de63a739d3",
+      "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
       "license": "MIT",
       "skills": [
         {
@@ -145,7 +145,7 @@
       "id": "anthropic",
       "repository": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "9d2f1ae187231d8199c64b5b762e1bdf2244733d",
+      "commit": "fa0fa64bdc967915dc8399e803be67759e1e62b8",
       "license": "Apache-2.0 per included skill",
       "skills": [
         {
@@ -162,7 +162,10 @@
         },
         {
           "target": "frontend-design",
-          "path": "skills/frontend-design"
+          "path": "skills/frontend-design",
+          "overrides": {
+            "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+          }
         },
         {
           "target": "internal-comms",
@@ -182,15 +185,233 @@
         },
         {
           "target": "theme-factory",
-          "path": "skills/theme-factory"
+          "path": "skills/theme-factory",
+          "overrides": {
+            "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
+          }
         },
         {
           "target": "web-artifacts-builder",
-          "path": "skills/web-artifacts-builder"
+          "path": "skills/web-artifacts-builder",
+          "overrides": {
+            "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
+          }
         },
         {
           "target": "webapp-testing",
           "path": "skills/webapp-testing"
+        }
+      ]
+    },
+    {
+      "id": "stitch-design",
+      "repository": "https://github.com/google-labs-code/stitch-skills.git",
+      "ref": "main",
+      "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+      "license": "Apache-2.0",
+      "skills": [
+        {
+          "target": "extract-design-md",
+          "path": "plugins/stitch-design/skills/extract-design-md",
+          "overrides": {
+            "aliases": [
+              "extract_design_system",
+              "design_extraction"
+            ],
+            "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface."
+          }
+        }
+      ]
+    },
+    {
+      "id": "stitch-utilities",
+      "repository": "https://github.com/google-labs-code/stitch-skills.git",
+      "ref": "main",
+      "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+      "license": "Apache-2.0",
+      "skills": [
+        {
+          "target": "enhance-prompt",
+          "path": "plugins/stitch-utilities/skills/enhance-prompt",
+          "overrides": {
+            "aliases": [
+              "design_prompt",
+              "stitch_prompt"
+            ],
+            "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+          },
+          "compatibility": {
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+              },
+              {
+                "path": "SKILL.md",
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hallmark",
+      "repository": "https://github.com/nutlope/hallmark.git",
+      "ref": "main",
+      "commit": "aeb42fb354ff4efa36ab475773a082315a3af2ce",
+      "license": "MIT",
+      "skills": [
+        {
+          "target": "hallmark",
+          "path": "skills/hallmark",
+          "overrides": {
+            "aliases": [
+              "anti_ai_slop",
+              "hallmark_audit"
+            ],
+            "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
+          },
+          "compatibility": {
+            "files": [
+              {
+                "path": "site/css/tokens.css",
+                "target": "references/upstream/tokens.css"
+              },
+              {
+                "path": "docs/recipes.md",
+                "target": "references/upstream/recipes.md"
+              },
+              {
+                "path": "docs/study-examples.md",
+                "target": "references/upstream/study-examples.md"
+              }
+            ],
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "search": "../../site/css/tokens.css",
+                "replace": "references/upstream/tokens.css"
+              },
+              {
+                "path": "SKILL.md",
+                "search": "../../docs/recipes.md",
+                "replace": "references/upstream/recipes.md",
+                "count": 2
+              },
+              {
+                "path": "SKILL.md",
+                "search": "../../docs/study-examples.md",
+                "replace": "references/upstream/study-examples.md",
+                "count": 2
+              },
+              {
+                "path": "references/custom-theme.md",
+                "search": "../../../site/css/tokens.css",
+                "replace": "upstream/tokens.css",
+                "count": 2
+              },
+              {
+                "path": "references/hero-enrichment.md",
+                "search": "../../../site/_tests/05-tracejam-saas/",
+                "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/05-tracejam-saas"
+              },
+              {
+                "path": "references/hero-enrichment.md",
+                "search": "../../../site/_tests/03-maple-bakery/",
+                "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/03-maple-bakery"
+              },
+              {
+                "path": "references/themes/carnival.md",
+                "search": "../../../../site/css/tokens.css",
+                "replace": "../upstream/tokens.css"
+              },
+              {
+                "path": "references/themes/cobalt.md",
+                "search": "../../../../site/css/tokens.css",
+                "replace": "../upstream/tokens.css"
+              },
+              {
+                "path": "references/themes/cobalt.md",
+                "search": "../../../../site/examples/cobalt-01/",
+                "replace": "https://github.com/nutlope/hallmark/tree/main/site/examples/cobalt-01",
+                "count": 2
+              },
+              {
+                "path": "references/themes/hum.md",
+                "search": "../../../../site/css/tokens.css",
+                "replace": "../upstream/tokens.css"
+              },
+              {
+                "path": "references/themes/lumen.md",
+                "search": "../../../../site/css/tokens.css",
+                "replace": "../upstream/tokens.css"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/01-tide-podcast/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/01-tide-podcast/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/02-streampipe-cli/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/02-streampipe-cli/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/03-maple-bakery/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/03-maple-bakery/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/04-meridian-manifesto/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/04-meridian-manifesto/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/05-tracejam-saas/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/05-tracejam-saas/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/06-anya-portfolio/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/06-anya-portfolio/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/07-foundry-compliance/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/07-foundry-compliance/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/08-cohort-courses/index.html",
+                "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/08-cohort-courses/index.html"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../../site/_tests/",
+                "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/"
+              },
+              {
+                "path": "references/upstream/recipes.md",
+                "search": "../SKILL.md",
+                "replace": "../../SKILL.md",
+                "count": 2
+              },
+              {
+                "path": "references/upstream/study-examples.md",
+                "search": "](study.md)",
+                "replace": "](../study.md)"
+              },
+              {
+                "path": "references/component-cookbook.md",
+                "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+                "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+              }
+            ]
+          }
         }
       ]
     }

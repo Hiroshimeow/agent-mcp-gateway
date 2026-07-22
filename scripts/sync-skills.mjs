@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { assertSafeRelativePath, resolveSafeFile } from './skill-source-safety.mjs';
 import { createSkillRegistry } from './skills/index.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -41,12 +42,15 @@ function assertSafeSegment(value, label) {
   }
 }
 
-function assertSafeRelativePath(value, label) {
-  const normalized = path.normalize(String(value || ''));
-  if (!normalized || path.isAbsolute(normalized) || normalized.split(path.sep).includes('..')) {
-    throw new Error(`Unsafe ${label}: ${value}`);
+function assertSafeFile(filePath, label) {
+  if (!fs.existsSync(filePath)) throw new Error(`Missing ${label}: ${filePath}`);
+  const stat = fs.lstatSync(filePath);
+  if (stat.isSymbolicLink()) throw new Error(`Symlink is not allowed for ${label}: ${filePath}`);
+  if (!stat.isFile()) throw new Error(`Expected file for ${label}: ${filePath}`);
+  if (stat.size > maxFileBytes) throw new Error(`${label} exceeds ${maxFileBytes} bytes: ${filePath}`);
+  if (forbiddenExtensions.has(path.extname(filePath).toLowerCase())) {
+    throw new Error(`Font files are not vendored: ${filePath}`);
   }
-  return normalized;
 }
 
 function assertSafeTree(root) {
@@ -62,13 +66,47 @@ function assertSafeTree(root) {
         pending.push(entryPath);
         continue;
       }
-      if (!stat.isFile()) throw new Error(`Unsupported filesystem entry: ${entryPath}`);
-      if (stat.size > maxFileBytes) throw new Error(`Skill file exceeds ${maxFileBytes} bytes: ${entryPath}`);
-      if (forbiddenExtensions.has(path.extname(entry.name).toLowerCase())) {
-        throw new Error(`Font files are not vendored: ${entryPath}`);
-      }
+      assertSafeFile(entryPath, 'skill file');
     }
   }
+}
+
+function applyCompatibility(cloneDirectory, targetDirectory, compatibility, sourceId, folder) {
+  for (const file of compatibility.files || []) {
+    const sourceFile = resolveSafeFile(cloneDirectory, file.path, `compatibility file for ${sourceId}/${folder}`, {
+      maxFileBytes,
+      forbiddenExtensions
+    });
+    const targetFile = path.join(targetDirectory, assertSafeRelativePath(file.target, 'compatibility target path'));
+    if (fs.existsSync(targetFile)) throw new Error(`Compatibility target already exists: ${targetFile}`);
+    fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+    fs.copyFileSync(sourceFile, targetFile);
+  }
+
+  for (const replacement of compatibility.replacements || []) {
+    const targetFile = resolveSafeFile(targetDirectory, replacement.path, `compatibility replacement file for ${sourceId}/${folder}`, {
+      maxFileBytes,
+      forbiddenExtensions
+    });
+    if (typeof replacement.search !== 'string' || !replacement.search) {
+      throw new Error(`Compatibility replacement search is required for ${sourceId}/${folder}`);
+    }
+    if (typeof replacement.replace !== 'string') {
+      throw new Error(`Compatibility replacement value is required for ${sourceId}/${folder}`);
+    }
+    const text = fs.readFileSync(targetFile, 'utf8');
+    const occurrences = text.split(replacement.search).length - 1;
+    const expectedOccurrences = replacement.count ?? 1;
+    if (!Number.isInteger(expectedOccurrences) || expectedOccurrences < 1) {
+      throw new Error(`Compatibility replacement count must be a positive integer for ${sourceId}/${folder}`);
+    }
+    if (occurrences !== expectedOccurrences) {
+      throw new Error(`Expected ${expectedOccurrences} compatibility replacement matches in ${targetFile}, found ${occurrences}`);
+    }
+    fs.writeFileSync(targetFile, text.replaceAll(replacement.search, replacement.replace));
+  }
+
+  assertSafeTree(targetDirectory);
 }
 
 function replaceDirectory(target, staged) {
@@ -117,10 +155,10 @@ try {
     const installed = [];
 
     if (source.requireRootLicense) {
-      const licensePath = path.join(cloneDirectory, assertSafeRelativePath(source.requireRootLicense.path, 'root license path'));
-      if (!fs.existsSync(licensePath) || !fs.statSync(licensePath).isFile()) {
-        throw new Error(`Missing root license for ${source.id}: ${source.requireRootLicense.path}`);
-      }
+      const licensePath = resolveSafeFile(cloneDirectory, source.requireRootLicense.path, `root license for ${source.id}`, {
+        maxFileBytes,
+        forbiddenExtensions
+      });
       const licenseText = fs.readFileSync(licensePath, 'utf8');
       if (!licenseText.includes(source.requireRootLicense.contains)) {
         throw new Error(`Unexpected root license for ${source.id}`);
@@ -133,15 +171,20 @@ try {
       if (owner) throw new Error(`Skill folder collision: ${folder} (${owner}, ${source.id})`);
       targetOwners.set(folder, source.id);
 
-      const sourceDirectory = path.join(cloneDirectory, assertSafeRelativePath(source.skillRoot, 'skill root'), folder);
-      if (!fs.existsSync(path.join(sourceDirectory, 'SKILL.md'))) {
-        throw new Error(`Missing SKILL.md for ${source.id}/${folder}`);
-      }
+      const skillFile = resolveSafeFile(
+        cloneDirectory,
+        path.join(source.skillRoot, folder, 'SKILL.md'),
+        `SKILL.md for ${source.id}/${folder}`,
+        { maxFileBytes, forbiddenExtensions }
+      );
+      const sourceDirectory = path.dirname(skillFile);
       assertSafeTree(sourceDirectory);
 
       if (source.requireSkillLicense) {
-        const licensePath = path.join(sourceDirectory, assertSafeRelativePath(source.requireSkillLicense.path, 'skill license path'));
-        if (!fs.existsSync(licensePath)) throw new Error(`Missing required license: ${source.id}/${folder}`);
+        const licensePath = resolveSafeFile(sourceDirectory, source.requireSkillLicense.path, `required license for ${source.id}/${folder}`, {
+          maxFileBytes,
+          forbiddenExtensions
+        });
         const licenseText = fs.readFileSync(licensePath, 'utf8');
         if (!licenseText.includes(source.requireSkillLicense.contains)) {
           throw new Error(`Unexpected license for ${source.id}/${folder}`);
@@ -150,6 +193,11 @@ try {
 
       const targetDirectory = path.join(preparedSkills, folder);
       fs.cpSync(sourceDirectory, targetDirectory, { recursive: true, errorOnExist: true, force: false });
+      const overrides = source.overrides?.[folder] || {};
+      const compatibility = source.compatibility?.[folder] || {};
+      if (Object.keys(compatibility).length) {
+        applyCompatibility(cloneDirectory, targetDirectory, compatibility, source.id, folder);
+      }
       writeJsonAtomic(path.join(targetDirectory, '.skill-source.json'), {
         source: source.id,
         repository: source.repository,
@@ -157,22 +205,23 @@ try {
         commit,
         path: `${source.skillRoot}/${folder}`,
         license: source.license,
-        overrides: source.overrides?.[folder] || {}
+        overrides,
+        ...(Object.keys(compatibility).length ? { compatibility } : {})
       });
-      const overrides = source.overrides?.[folder] || {};
       installed.push({
         target: folder,
         path: `${source.skillRoot}/${folder}`,
-        ...(Object.keys(overrides).length ? { overrides } : {})
+        ...(Object.keys(overrides).length ? { overrides } : {}),
+        ...(Object.keys(compatibility).length ? { compatibility } : {})
       });
     }
 
     for (const rootFile of source.rootFiles || []) {
-      const sourceFile = path.join(cloneDirectory, assertSafeRelativePath(rootFile.path, 'root notice path'));
+      const sourceFile = resolveSafeFile(cloneDirectory, rootFile.path, `root notice for ${source.id}`, {
+        maxFileBytes,
+        forbiddenExtensions
+      });
       assertSafeSegment(rootFile.target, 'root notice target');
-      if (!fs.existsSync(sourceFile) || !fs.statSync(sourceFile).isFile()) {
-        throw new Error(`Missing source notice: ${source.id}/${rootFile.path}`);
-      }
       fs.copyFileSync(sourceFile, path.join(preparedLicenses, rootFile.target));
     }
 

@@ -39,7 +39,7 @@ import {
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
-import { buildSkillCallerKey, createSkillBootstrapGate } from './skill-bootstrap-gate.mjs';
+import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -253,6 +253,7 @@ function filesystemToolMeta(tool) {
   return applyToolRisk({
     ...tool,
     name: tool.name,
+    description: decorateSkillBootstrapDescription(tool.name, tool.description),
     _meta: {
       ...(tool._meta || {}),
       trusted_roots: roots,

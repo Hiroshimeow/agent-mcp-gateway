@@ -2,7 +2,7 @@
   "source": "ponytail",
   "repository": "https://github.com/DietrichGebert/ponytail.git",
   "ref": "main",
-  "commit": "14a0d79548d4de8fc2de95c1b94bb0de63a739d3",
+  "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
   "path": "skills/ponytail-review",
   "license": "MIT",
   "overrides": {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { SKILL_AGENT_INSTRUCTIONS, buildSkillPrompt, createSkillRegistry, getSkillDefinition, getSkillTool, listSkillPromptDefinitions, listSkillResources, readSkillResource } from '../scripts/skills/index.mjs';
+import { SKILL_AGENT_INSTRUCTIONS, SKILL_ROUTING_POLICY, buildSkillPrompt, createSkillRegistry, getSkillDefinition, getSkillTool, listSkillPromptDefinitions, listSkillResources, readSkillResource } from '../scripts/skills/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from '../scripts/prompts/index.mjs';
 import { listRepoResources, readRepoResource } from '../scripts/resources/index.mjs';
 
@@ -63,8 +63,19 @@ test('get_skill defaults to the superpowers bootstrap for skillless agents', () 
   assert.ok(payload.availableSkills.includes('systematic_debugging'));
   assert.ok(ponytail?.description);
   assert.match(payload.body, /invoke relevant or requested skills|skill priority/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /before the first project-changing tool call/i);
+  assert.deepEqual(payload.routingPolicy, SKILL_ROUTING_POLICY);
+  assert.ok(payload.routingPolicy.some(rule => /general UI(?: audit| redesign| study)?.*frontend_design/i.test(rule)));
+  assert.ok(payload.routingPolicy.some(rule => /explicit Hallmark or anti-AI-slop.*hallmark/i.test(rule)));
+  assert.doesNotMatch(payload.routingPolicy.join(' '), /Hallmark, audit, redesign, or study -> hallmark/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /before first use of local write_file, edit_file, or shell_execute/i);
   assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /routing policy/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /do not probe shell_execute first/i);
+
+  const referencedSkills = [...SKILL_ROUTING_POLICY.join(' ').matchAll(/->\s*([a-z][a-z0-9_]*)/g)].map(match => match[1]);
+  for (const referencedSkill of referencedSkills) {
+    assert.ok(payload.availableSkills.includes(referencedSkill), `routing policy references missing skill: ${referencedSkill}`);
+  }
 });
 
 function writeSkill(directory, folder, { description = 'Use for dynamic debugging work.', body = '# Dynamic Debugging\n\nInspect before changing.', extra = '' } = {}) {

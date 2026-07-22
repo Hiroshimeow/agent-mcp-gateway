@@ -112,6 +112,17 @@
         "web-artifacts-builder",
         "webapp-testing"
       ],
+      "overrides": {
+        "frontend-design": {
+          "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+        },
+        "theme-factory": {
+          "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
+        },
+        "web-artifacts-builder": {
+          "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
+        }
+      },
       "requireSkillLicense": {
         "path": "LICENSE.txt",
         "contains": "Apache License"
@@ -130,6 +141,255 @@
         "pptx": "Anthropic source-available proprietary license prohibits redistribution.",
         "xlsx": "Anthropic source-available proprietary license prohibits redistribution."
       }
+    },
+    {
+      "id": "stitch-design",
+      "repository": "https://github.com/google-labs-code/stitch-skills.git",
+      "ref": "main",
+      "skillRoot": "plugins/stitch-design/skills",
+      "license": "Apache-2.0",
+      "requireRootLicense": {
+        "path": "LICENSE",
+        "contains": "Apache License"
+      },
+      "include": [
+        "extract-design-md"
+      ],
+      "overrides": {
+        "extract-design-md": {
+          "aliases": [
+            "extract_design_system",
+            "design_extraction"
+          ],
+          "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface."
+        }
+      },
+      "rootFiles": [
+        {
+          "path": "LICENSE",
+          "target": "stitch-skills-LICENSE.txt"
+        }
+      ],
+      "excluded": {
+        "code-to-design": "Requires the Stitch MCP server and multiple excluded Stitch workflow skills.",
+        "extract-static-html": "Useful capture utility but not a design-analysis skill; excluded to keep the catalog focused.",
+        "generate-design": "Requires the Stitch MCP server, which is not configured in this launcher.",
+        "manage-design-system": "Requires the Stitch MCP server, which is not configured in this launcher.",
+        "upload-to-stitch": "Requires Stitch credentials and the Stitch MCP workflow."
+      }
+    },
+    {
+      "id": "stitch-utilities",
+      "repository": "https://github.com/google-labs-code/stitch-skills.git",
+      "ref": "main",
+      "skillRoot": "plugins/stitch-utilities/skills",
+      "license": "Apache-2.0",
+      "requireRootLicense": {
+        "path": "LICENSE",
+        "contains": "Apache License"
+      },
+      "include": [
+        "enhance-prompt"
+      ],
+      "overrides": {
+        "enhance-prompt": {
+          "aliases": [
+            "design_prompt",
+            "stitch_prompt"
+          ],
+          "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+        }
+      },
+      "compatibility": {
+        "enhance-prompt": {
+          "replacements": [
+            {
+              "path": "SKILL.md",
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+            },
+            {
+              "path": "SKILL.md",
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+            }
+          ]
+        }
+      },
+      "excluded": {
+        "design-md": "Requires an existing Stitch project and Stitch MCP server; extract-design-md covers local source analysis.",
+        "stitch-loop": "Requires Stitch and Chrome MCP servers and adds an autonomous workflow outside the requested design scope.",
+        "taste-design": "Overlaps frontend-design but is less context-sensitive and imposes brittle universal rules such as mandatory perpetual motion and blanket font/layout bans."
+      }
+    },
+    {
+      "id": "hallmark",
+      "repository": "https://github.com/nutlope/hallmark.git",
+      "ref": "main",
+      "skillRoot": "skills",
+      "license": "MIT",
+      "requireRootLicense": {
+        "path": "LICENSE",
+        "contains": "MIT License"
+      },
+      "include": [
+        "hallmark"
+      ],
+      "overrides": {
+        "hallmark": {
+          "aliases": [
+            "anti_ai_slop",
+            "hallmark_audit"
+          ],
+          "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
+        }
+      },
+      "compatibility": {
+        "hallmark": {
+          "files": [
+            {
+              "path": "site/css/tokens.css",
+              "target": "references/upstream/tokens.css"
+            },
+            {
+              "path": "docs/recipes.md",
+              "target": "references/upstream/recipes.md"
+            },
+            {
+              "path": "docs/study-examples.md",
+              "target": "references/upstream/study-examples.md"
+            }
+          ],
+          "replacements": [
+            {
+              "path": "SKILL.md",
+              "search": "../../site/css/tokens.css",
+              "replace": "references/upstream/tokens.css"
+            },
+            {
+              "path": "SKILL.md",
+              "search": "../../docs/recipes.md",
+              "replace": "references/upstream/recipes.md",
+              "count": 2
+            },
+            {
+              "path": "SKILL.md",
+              "search": "../../docs/study-examples.md",
+              "replace": "references/upstream/study-examples.md",
+              "count": 2
+            },
+            {
+              "path": "references/custom-theme.md",
+              "search": "../../../site/css/tokens.css",
+              "replace": "upstream/tokens.css",
+              "count": 2
+            },
+            {
+              "path": "references/hero-enrichment.md",
+              "search": "../../../site/_tests/05-tracejam-saas/",
+              "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/05-tracejam-saas"
+            },
+            {
+              "path": "references/hero-enrichment.md",
+              "search": "../../../site/_tests/03-maple-bakery/",
+              "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/03-maple-bakery"
+            },
+            {
+              "path": "references/themes/carnival.md",
+              "search": "../../../../site/css/tokens.css",
+              "replace": "../upstream/tokens.css"
+            },
+            {
+              "path": "references/themes/cobalt.md",
+              "search": "../../../../site/css/tokens.css",
+              "replace": "../upstream/tokens.css"
+            },
+            {
+              "path": "references/themes/cobalt.md",
+              "search": "../../../../site/examples/cobalt-01/",
+              "replace": "https://github.com/nutlope/hallmark/tree/main/site/examples/cobalt-01",
+              "count": 2
+            },
+            {
+              "path": "references/themes/hum.md",
+              "search": "../../../../site/css/tokens.css",
+              "replace": "../upstream/tokens.css"
+            },
+            {
+              "path": "references/themes/lumen.md",
+              "search": "../../../../site/css/tokens.css",
+              "replace": "../upstream/tokens.css"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/01-tide-podcast/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/01-tide-podcast/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/02-streampipe-cli/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/02-streampipe-cli/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/03-maple-bakery/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/03-maple-bakery/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/04-meridian-manifesto/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/04-meridian-manifesto/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/05-tracejam-saas/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/05-tracejam-saas/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/06-anya-portfolio/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/06-anya-portfolio/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/07-foundry-compliance/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/07-foundry-compliance/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/08-cohort-courses/index.html",
+              "replace": "https://github.com/nutlope/hallmark/blob/main/site/_tests/08-cohort-courses/index.html"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../../site/_tests/",
+              "replace": "https://github.com/nutlope/hallmark/tree/main/site/_tests/"
+            },
+            {
+              "path": "references/upstream/recipes.md",
+              "search": "../SKILL.md",
+              "replace": "../../SKILL.md",
+              "count": 2
+            },
+            {
+              "path": "references/upstream/study-examples.md",
+              "search": "](study.md)",
+              "replace": "](../study.md)"
+            },
+            {
+              "path": "references/component-cookbook.md",
+              "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+              "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+            }
+          ]
+        }
+      },
+      "rootFiles": [
+        {
+          "path": "LICENSE",
+          "target": "hallmark-LICENSE.txt"
+        }
+      ]
     }
   ]
 }

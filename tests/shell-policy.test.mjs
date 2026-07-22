@@ -29,6 +29,7 @@ test('validateShellCommand rejects a working directory outside current roots', (
 
 test('shell descriptor directs content operations to filesystem tools and preserves profile annotations', () => {
   const description = buildShellExecuteDescription('Trusted roots: C:/repo');
+  assert.match(description, /call get_skill without arguments/i);
   assert.match(description, /terminal access/);
   assert.match(description, /content search/);
   assert.match(description, /git, tests, builds/);

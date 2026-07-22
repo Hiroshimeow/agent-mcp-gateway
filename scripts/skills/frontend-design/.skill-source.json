@@ -2,8 +2,10 @@
   "source": "anthropic",
   "repository": "https://github.com/anthropics/skills.git",
   "ref": "main",
-  "commit": "9d2f1ae187231d8199c64b5b762e1bdf2244733d",
+  "commit": "fa0fa64bdc967915dc8399e803be67759e1e62b8",
   "path": "skills/frontend-design",
   "license": "Apache-2.0 per included skill",
-  "overrides": {}
+  "overrides": {
+    "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+  }
 }

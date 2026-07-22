@@ -1,0 +1,29 @@
+{
+  "source": "stitch-utilities",
+  "repository": "https://github.com/google-labs-code/stitch-skills.git",
+  "ref": "main",
+  "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+  "path": "plugins/stitch-utilities/skills/enhance-prompt",
+  "license": "Apache-2.0",
+  "overrides": {
+    "aliases": [
+      "design_prompt",
+      "stitch_prompt"
+    ],
+    "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+  },
+  "compatibility": {
+    "replacements": [
+      {
+        "path": "SKILL.md",
+        "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
+        "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+      },
+      {
+        "path": "SKILL.md",
+        "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
+        "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+      }
+    ]
+  }
+}

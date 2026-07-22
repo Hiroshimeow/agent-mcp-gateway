@@ -1,0 +1,15 @@
+{
+  "source": "stitch-design",
+  "repository": "https://github.com/google-labs-code/stitch-skills.git",
+  "ref": "main",
+  "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+  "path": "plugins/stitch-design/skills/extract-design-md",
+  "license": "Apache-2.0",
+  "overrides": {
+    "aliases": [
+      "extract_design_system",
+      "design_extraction"
+    ],
+    "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface."
+  }
+}

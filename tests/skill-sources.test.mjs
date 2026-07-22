@@ -47,6 +47,7 @@ test('managed skill lock matches the source manifest and vendored metadata', () 
       assert.equal(metadata.commit, source.commit);
       assert.equal(metadata.path, skill.path);
       assert.deepEqual(metadata.overrides, skill.overrides || {});
+      assert.deepEqual(metadata.compatibility || {}, skill.compatibility || {});
 
       if (configured.requireSkillLicense) {
         const license = fs.readFileSync(path.join(directory, configured.requireSkillLicense.path), 'utf8');
@@ -80,6 +81,51 @@ test('all managed skill folders are accepted by the live registry', () => {
   const expected = lock.sources.reduce((total, source) => total + source.skills.length, 0);
   const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
   assert.equal(registry.listSkills().length, expected);
+});
+
+test('design skills expose non-overlapping selection triggers in the live catalog', () => {
+  const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
+  const descriptions = new Map(registry.listSkills().map(skill => [skill.name, skill.description]));
+
+  assert.match(descriptions.get('frontend_design'), /^Use when designing, building, or materially reshaping a web or application UI\b/);
+  assert.match(descriptions.get('enhance_prompt'), /^Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt\b/);
+  assert.match(descriptions.get('stitch_extract_design_md'), /^Use when analyzing an existing frontend source tree\b/);
+  assert.match(descriptions.get('theme_factory'), /^Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts\b/);
+  assert.match(descriptions.get('web_artifacts_builder'), /^Use when implementing a complex interactive HTML artifact\b/);
+  assert.match(descriptions.get('hallmark'), /^Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design\b/);
+});
+
+test('Hallmark is a pinned managed MIT skill with explicit aliases', () => {
+  const source = manifest.sources.find(item => item.id === 'hallmark');
+  assert.ok(source);
+  assert.equal(source.repository, 'https://github.com/nutlope/hallmark.git');
+  assert.equal(source.skillRoot, 'skills');
+  assert.deepEqual(source.include, ['hallmark']);
+  assert.equal(source.license, 'MIT');
+  assert.equal(source.compatibility.hallmark.files.length, 3);
+  assert.equal(source.compatibility.hallmark.replacements.length, 23);
+
+  const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
+  assert.equal(registry.getSkillDefinition('anti_ai_slop')?.name, 'hallmark');
+  assert.equal(registry.getSkillDefinition('hallmark_audit')?.name, 'hallmark');
+  assert.equal(registry.getSkillDefinition('design_audit'), null);
+});
+
+test('Hallmark Markdown references are self-contained after sync', () => {
+  const hallmarkDirectory = path.join(skillsDirectory, 'hallmark');
+  const markdownFiles = walkFiles(hallmarkDirectory).filter(file => path.extname(file).toLowerCase() === '.md');
+
+  for (const markdownFile of markdownFiles) {
+    const markdown = fs.readFileSync(markdownFile, 'utf8');
+    const links = [...markdown.matchAll(/\]\(([^)]+)\)/g)].map(match => match[1].split('#')[0].split('?')[0]);
+    const localLinks = links.filter(link => link && !/^(?:https?:|mailto:|data:|#|\/\/)/i.test(link));
+
+    for (const link of localLinks) {
+      const target = path.resolve(path.dirname(markdownFile), decodeURIComponent(link));
+      const relativeFile = path.relative(hallmarkDirectory, markdownFile);
+      assert.equal(fs.existsSync(target), true, `broken Hallmark reference in ${relativeFile}: ${link}`);
+    }
+  }
 });
 
 test('package exposes cross-platform skill sync commands', () => {
