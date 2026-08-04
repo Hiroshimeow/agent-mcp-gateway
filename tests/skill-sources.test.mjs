@@ -128,6 +128,17 @@ test('Hallmark Markdown references are self-contained after sync', () => {
   }
 });
 
+test('managed SDD preserves host task orchestration precedence across syncs', () => {
+  const sdd = fs.readFileSync(path.join(skillsDirectory, 'subagent-driven-development', 'SKILL.md'), 'utf8');
+  assert.match(
+    sdd,
+    /If the current task supplies its own orchestration or durable state, that task's orchestration and state are authoritative whenever they conflict with this skill\./,
+  );
+
+  const readme = fs.readFileSync(path.join(skillsDirectory, 'README.md'), 'utf8');
+  assert.match(readme, /Local compatibility edits to managed skills belong in `sources\.json`/);
+});
+
 test('package exposes cross-platform skill sync commands', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(packageJson.scripts['skills:sync'], 'node scripts/sync-skills.mjs');

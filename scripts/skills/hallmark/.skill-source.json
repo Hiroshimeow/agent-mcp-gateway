@@ -145,8 +145,8 @@
       },
       {
         "path": "references/component-cookbook.md",
-        "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
-        "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+        "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n\n\n",
+        "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n"
       }
     ]
   }

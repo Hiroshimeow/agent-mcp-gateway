@@ -2,7 +2,7 @@
   "source": "stitch-design",
   "repository": "https://github.com/google-labs-code/stitch-skills.git",
   "ref": "main",
-  "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+  "commit": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
   "path": "plugins/stitch-design/skills/extract-design-md",
   "license": "Apache-2.0",
   "overrides": {

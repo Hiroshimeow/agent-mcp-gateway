@@ -86,6 +86,17 @@
           "uri": "skill://superpowers/using-superpowers/SKILL.md"
         }
       },
+      "compatibility": {
+        "subagent-driven-development": {
+          "replacements": [
+            {
+              "path": "SKILL.md",
+              "search": "## Setup\n\nEnsure the work happens in an isolated workspace:",
+              "replace": "## Setup\n\nIf the current task supplies its own orchestration or durable state, that task's orchestration and state are authoritative whenever they conflict with this skill.\n\nEnsure the work happens in an isolated workspace:"
+            }
+          ]
+        }
+      },
       "rootFiles": [
         {
           "path": "LICENSE",
@@ -205,13 +216,13 @@
           "replacements": [
             {
               "path": "SKILL.md",
-              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
-              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill. This ensures all generated pages share the \nsame visual language.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill. This ensures all generated pages share the\nsame visual language."
             },
             {
               "path": "SKILL.md",
-              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
-              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill."
             }
           ]
         }
@@ -378,8 +389,8 @@
             },
             {
               "path": "references/component-cookbook.md",
-              "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
-              "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+              "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n\n\n",
+              "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n"
             }
           ]
         }

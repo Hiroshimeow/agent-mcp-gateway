@@ -70,7 +70,7 @@
       "id": "superpowers",
       "repository": "https://github.com/obra/superpowers.git",
       "ref": "main",
-      "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
       "license": "MIT",
       "skills": [
         {
@@ -99,7 +99,16 @@
         },
         {
           "target": "subagent-driven-development",
-          "path": "skills/subagent-driven-development"
+          "path": "skills/subagent-driven-development",
+          "compatibility": {
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "search": "## Setup\n\nEnsure the work happens in an isolated workspace:",
+                "replace": "## Setup\n\nIf the current task supplies its own orchestration or durable state, that task's orchestration and state are authoritative whenever they conflict with this skill.\n\nEnsure the work happens in an isolated workspace:"
+              }
+            ]
+          }
         },
         {
           "target": "systematic-debugging",
@@ -145,7 +154,7 @@
       "id": "anthropic",
       "repository": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "fa0fa64bdc967915dc8399e803be67759e1e62b8",
+      "commit": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
       "license": "Apache-2.0 per included skill",
       "skills": [
         {
@@ -207,7 +216,7 @@
       "id": "stitch-design",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
-      "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+      "commit": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
       "license": "Apache-2.0",
       "skills": [
         {
@@ -227,7 +236,7 @@
       "id": "stitch-utilities",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
-      "commit": "7b53207b94e62911777d53d4238b5f8c88c2b519",
+      "commit": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
       "license": "Apache-2.0",
       "skills": [
         {
@@ -244,13 +253,13 @@
             "replacements": [
               {
                 "path": "SKILL.md",
-                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
-                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill. This ensures all generated pages share the \nsame visual language.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill. This ensures all generated pages share the\nsame visual language."
               },
               {
                 "path": "SKILL.md",
-                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
-                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill."
               }
             ]
           }
@@ -407,8 +416,8 @@
               },
               {
                 "path": "references/component-cookbook.md",
-                "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
-                "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
+                "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n\n\n",
+                "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n"
               }
             ]
           }

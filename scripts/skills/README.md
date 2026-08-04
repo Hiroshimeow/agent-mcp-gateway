@@ -93,6 +93,8 @@ git diff -- scripts/skills/sources.lock.json
 git diff -- scripts/skills/<changed-skill>
 ```
 
+Local compatibility edits to managed skills belong in `sources.json`, not in vendored skill folders. If an upstream update makes an exact compatibility replacement stop matching, inspect the new upstream text, update only that manifest match, rerun `npm run skills:sync` and `npm test`, and review the generated skill diff before committing.
+
 The updater clones into a temporary directory, realpath-checks every upstream file it reads or copies, rejects path escapes, symlinks, large files, and font files, validates the complete prepared catalog, and only then swaps managed folders. It never deletes unmanaged local skills and refuses to overwrite an unmanaged folder with the same name.
 
 Updating skill files takes effect through hot reload. Restart the MCP server only when the loader or updater code itself changes.
@@ -103,5 +105,5 @@ Updating skill files takes effect through hot reload. Restart the MCP server onl
 2. Use explicit `include` entries rather than importing an entire repository implicitly.
 3. Record license requirements and exclusions in the manifest.
 4. Add compatibility aliases/URIs under `overrides` only when an existing MCP contract must remain stable.
-5. Use per-skill `compatibility.files` and exact-count `compatibility.replacements` only when upstream references escape the included skill folder.
+5. Use per-skill `compatibility.files` and exact-count `compatibility.replacements` for intentional local managed adaptations or when upstream references escape the included skill folder; do not patch vendored managed files by hand.
 6. Run `npm run skills:sync`, `npm test`, and review the resulting diff.
