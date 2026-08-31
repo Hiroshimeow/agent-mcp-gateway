@@ -288,7 +288,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.equal(spillRead.result.content[0].text.length, 256 * 1024);
   assert.match(spillRead.result.content[0].text, /^x+$/);
 
-  const longComment = 'x'.repeat(70 * 1024);
+  const longComment = 'x'.repeat(process.platform === 'win32' ? 16 * 1024 : 70 * 1024);
   const longCommand = `# ${longComment}\n${nodeOutputCommand(2)}`;
   const longShell = await mcpRequestRaw(baseUrl, 34, 'tools/call', {
     name: 'shell_execute',

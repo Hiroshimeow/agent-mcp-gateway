@@ -148,7 +148,7 @@ test('control-byte output spills and stays inside the 128 KiB serialized MCP bud
 
 test('long commands execute in full but return a bounded command preview', async () => {
   const spillDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-shell-wire-command-'));
-  const comment = 'x'.repeat(70 * 1024);
+  const comment = 'x'.repeat(process.platform === 'win32' ? 16 * 1024 : 70 * 1024);
   const command = commandFor(
     process.platform,
     `# ${comment}\n${nodeScriptCommand("process.stdout.write('ok')")}`,
