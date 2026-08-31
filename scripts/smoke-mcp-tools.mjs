@@ -157,10 +157,14 @@ function portablePath(value) {
   return path.resolve(value).replaceAll('\\', '/');
 }
 
-function nodeOutputCommand(bytes) {
+function nodeByteOutputCommand(bytes, value = 120) {
   const executable = `'${process.execPath.replaceAll("'", "''")}'`;
-  const script = `'process.stdout.write(Buffer.alloc(${bytes}, 120))'`;
+  const script = `'process.stdout.write(Buffer.alloc(${bytes}, ${value}))'`;
   return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
+}
+
+function nodeOutputCommand(bytes) {
+  return nodeByteOutputCommand(bytes);
 }
 
 await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirectory }) => {
@@ -303,6 +307,26 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   observedResponseBudgets.longCommandWireBytes = longShell.wireBytes;
   assert.deepEqual(longShell.parsed.result.structuredContent, longShellData);
 
+  let compositeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-budget-cwd-'));
+  const depth = process.platform === 'win32' ? 1 : 17;
+  const componentBytes = process.platform === 'win32' ? 120 : 190;
+  for (let index = 0; index < depth; index += 1) {
+    compositeCwd = path.join(compositeCwd, `${index}-${'d'.repeat(componentBytes)}`);
+    fs.mkdirSync(compositeCwd);
+  }
+  const compositeCommand = `#${'\u0001'.repeat(900)}\n${nodeByteOutputCommand(64 * 1024, 0)}`;
+  const compositeShell = await mcpRequestRaw(baseUrl, 35, 'tools/call', {
+    name: 'shell_execute',
+    arguments: { command: compositeCommand, working_directory: compositeCwd }
+  });
+  const compositeShellData = JSON.parse(compositeShell.parsed.result.content[0].text);
+  assert.equal(compositeShellData.exitCode, 0);
+  assert.equal(compositeShellData.stdoutBytes, 64 * 1024);
+  assert.equal(compositeShellData.stdoutTruncated, true);
+  assert.ok(compositeShell.wireBytes <= 128 * 1024);
+  observedResponseBudgets.compositeWireBytes = compositeShell.wireBytes;
+  assert.deepEqual(compositeShell.parsed.result.structuredContent, compositeShellData);
+
   const metricsText = fs.readFileSync(path.join(runtimeDirectory, 'mcp-calls.ndjson'), 'utf8');
   const metrics = metricsText.trim().split('\n').map(JSON.parse);
   assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.truncated && metric.spill));
@@ -331,7 +355,7 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and long-command response budget',
+  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and final serialized shell response budgets',
   observedProfiles,
   observedResponseBudgets
 }, null, 2));

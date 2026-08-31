@@ -6,7 +6,7 @@ import path from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 300000;
 export const DEFAULT_SHELL_RESPONSE_BUDGET_BYTES = 128 * 1024;
-const DEFAULT_TOTAL_PREVIEW_BYTES = 8 * 1024;
+const DEFAULT_TOTAL_PREVIEW_BYTES = 4 * 1024;
 const DEFAULT_COMMAND_PREVIEW_BYTES = 1024;
 const DEFAULT_CAPTURE_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_WINDOWS_POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
@@ -143,7 +143,7 @@ function createCollector(captureBytes, { spillDirectory, streamName }) {
       const previewTailBytes = previewBudget - previewHeadBytes;
       const previewHead = head.subarray(0, previewHeadBytes);
       const previewTail = previewTailBytes > 0 ? tail.subarray(Math.max(0, tail.length - previewTailBytes)) : Buffer.alloc(0);
-      const marker = `\n... [truncated; full raw output: ${spillPath}] ...\n`;
+      const marker = `\n... [truncated; see ${streamName}SpillPath] ...\n`;
       return {
         text: `${previewHead.toString('utf8')}${marker}${previewTail.toString('utf8')}`,
         totalBytes,

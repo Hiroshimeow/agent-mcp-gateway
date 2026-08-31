@@ -20,7 +20,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
-import { executeDirectShell } from './direct-shell.mjs';
+import { DEFAULT_SHELL_RESPONSE_BUDGET_BYTES, executeDirectShell } from './direct-shell.mjs';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
@@ -251,7 +251,13 @@ const shellExecuteOutputSchema = {
     returnedCommandBytes: { type: 'number' },
     commandTruncated: { type: 'boolean' },
     workingDirectoryRequested: {},
+    workingDirectoryRequestedBytes: { type: 'number' },
+    returnedWorkingDirectoryRequestedBytes: { type: 'number' },
+    workingDirectoryRequestedTruncated: { type: 'boolean' },
     workingDirectoryResolved: { type: 'string' },
+    workingDirectoryResolvedBytes: { type: 'number' },
+    returnedWorkingDirectoryResolvedBytes: { type: 'number' },
+    workingDirectoryResolvedTruncated: { type: 'boolean' },
     exitCode: { type: 'number' },
     stdout: { type: 'string' },
     stderr: { type: 'string' },
@@ -338,6 +344,113 @@ function structuredToolText(value, { includeStructured = false } = {}) {
   return includeStructured ? { ...result, structuredContent: value } : result;
 }
 
+const SHELL_TOOL_RESULT_BUDGET_BYTES = DEFAULT_SHELL_RESPONSE_BUDGET_BYTES - (8 * 1024);
+
+function utf8Head(text, maxBytes) {
+  let result = '';
+  let bytes = 0;
+  for (const char of String(text ?? '')) {
+    const charBytes = Buffer.byteLength(char);
+    if (bytes + charBytes > maxBytes) break;
+    result += char;
+    bytes += charBytes;
+  }
+  return result;
+}
+
+function utf8Tail(text, maxBytes) {
+  const chars = Array.from(String(text ?? ''));
+  let result = '';
+  let bytes = 0;
+  for (let index = chars.length - 1; index >= 0; index -= 1) {
+    const char = chars[index];
+    const charBytes = Buffer.byteLength(char);
+    if (bytes + charBytes > maxBytes) break;
+    result = char + result;
+    bytes += charBytes;
+  }
+  return result;
+}
+
+function previewReturnedText(value, maxBytes, label, totalBytes = Buffer.byteLength(String(value ?? ''))) {
+  if (value === null || value === undefined) return { text: value, returnedBytes: 0, truncated: false };
+  const text = String(value);
+  if (Buffer.byteLength(text) <= maxBytes) return { text, returnedBytes: Buffer.byteLength(text), truncated: false };
+  const marker = `\n... [${label} truncated; ${totalBytes} bytes total] ...\n`;
+  const remaining = Math.max(0, maxBytes - Buffer.byteLength(marker));
+  const head = utf8Head(text, Math.ceil(remaining / 2));
+  const tail = utf8Tail(text, Math.floor(remaining / 2));
+  const preview = `${head}${marker}${tail}`;
+  return { text: preview, returnedBytes: Buffer.byteLength(preview), truncated: true };
+}
+
+function shrinkStreamPreview(value, streamName, maxPreviewBytes) {
+  const spillPath = value[`${streamName}SpillPath`];
+  if (!spillPath) return value;
+  const marker = `\n... [truncated; see ${streamName}SpillPath] ...\n`;
+  const current = String(value[streamName] ?? '');
+  const markerIndex = current.indexOf(marker);
+  const headText = markerIndex >= 0 ? current.slice(0, markerIndex) : current;
+  const tailText = markerIndex >= 0 ? current.slice(markerIndex + marker.length) : '';
+  const head = utf8Head(headText, Math.ceil(maxPreviewBytes / 2));
+  const tail = utf8Tail(tailText, Math.floor(maxPreviewBytes / 2));
+  return {
+    ...value,
+    [streamName]: `${head}${marker}${tail}`,
+    [`returned${streamName[0].toUpperCase()}${streamName.slice(1)}Bytes`]: Buffer.byteLength(head) + Buffer.byteLength(tail),
+    [`${streamName}HeadBytes`]: Buffer.byteLength(head),
+    [`${streamName}TailBytes`]: Buffer.byteLength(tail),
+    [`${streamName}Truncated`]: true
+  };
+}
+
+function boundedShellToolText(value) {
+  const requested = String(value.workingDirectoryRequested ?? '');
+  const resolved = String(value.workingDirectoryResolved ?? '');
+  const base = {
+    ...value,
+    workingDirectoryRequestedBytes: Buffer.byteLength(requested),
+    returnedWorkingDirectoryRequestedBytes: Buffer.byteLength(requested),
+    workingDirectoryRequestedTruncated: false,
+    workingDirectoryResolvedBytes: Buffer.byteLength(resolved),
+    returnedWorkingDirectoryResolvedBytes: Buffer.byteLength(resolved),
+    workingDirectoryResolvedTruncated: false
+  };
+  const build = candidate => structuredToolText(candidate, { includeStructured: true });
+  let response = build(base);
+  if (Buffer.byteLength(JSON.stringify(response)) <= SHELL_TOOL_RESULT_BUDGET_BYTES) return response;
+
+  for (const limits of [
+    { stream: 2048, command: 512, path: 1024 },
+    { stream: 1024, command: 256, path: 512 },
+    { stream: 256, command: 128, path: 256 },
+    { stream: 0, command: 64, path: 128 }
+  ]) {
+    let candidate = { ...base };
+    const command = previewReturnedText(base.command, limits.command, 'command', base.commandBytes);
+    candidate.command = command.text;
+    candidate.returnedCommandBytes = command.returnedBytes;
+    candidate.commandTruncated = base.commandTruncated || command.truncated;
+
+    const requestedPreview = previewReturnedText(base.workingDirectoryRequested, limits.path, 'working directory', base.workingDirectoryRequestedBytes);
+    candidate.workingDirectoryRequested = requestedPreview.text;
+    candidate.returnedWorkingDirectoryRequestedBytes = requestedPreview.returnedBytes;
+    candidate.workingDirectoryRequestedTruncated = requestedPreview.truncated;
+
+    const resolvedPreview = previewReturnedText(base.workingDirectoryResolved, limits.path, 'working directory', base.workingDirectoryResolvedBytes);
+    candidate.workingDirectoryResolved = resolvedPreview.text;
+    candidate.returnedWorkingDirectoryResolvedBytes = resolvedPreview.returnedBytes;
+    candidate.workingDirectoryResolvedTruncated = resolvedPreview.truncated;
+
+    candidate = shrinkStreamPreview(candidate, 'stdout', limits.stream);
+    candidate = shrinkStreamPreview(candidate, 'stderr', limits.stream);
+    response = build(candidate);
+    if (Buffer.byteLength(JSON.stringify(response)) <= SHELL_TOOL_RESULT_BUDGET_BYTES) return response;
+  }
+
+  throw new Error(`shell_execute response exceeds ${DEFAULT_SHELL_RESPONSE_BUDGET_BYTES} byte budget after preview reduction`);
+}
+
 function structuredToolError(toolName, error) {
   return {
     ...structuredToolText({ ok: false, tool: toolName, error }),
@@ -373,7 +486,7 @@ async function routeToolCall(request, { callerKey } = {}) {
       env: process.env,
       spillDirectory: path.join(runtimeDirectory, 'shell-output')
     });
-    return structuredToolText({
+    return boundedShellToolText({
       command: result.command,
       commandBytes: result.commandBytes,
       returnedCommandBytes: result.returnedCommandBytes,
@@ -399,7 +512,7 @@ async function routeToolCall(request, { callerKey } = {}) {
       stdoutSpillPath: result.stdoutSpillPath,
       stderrSpillPath: result.stderrSpillPath,
       encoding: result.encoding
-    }, { includeStructured: true });
+    });
   }
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
