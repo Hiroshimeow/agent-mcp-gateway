@@ -8,6 +8,7 @@ import path from 'node:path';
 const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
 const observedProfiles = {};
+const observedResponseBudgets = {};
 
 async function findFreePort() {
   return await new Promise((resolve, reject) => {
@@ -106,7 +107,7 @@ default_enabled = false
   }
 }
 
-async function mcpRequest(baseUrl, id, method, params = {}, extraHeaders = {}) {
+async function mcpRequestRaw(baseUrl, id, method, params = {}, extraHeaders = {}) {
   const response = await fetch(`${baseUrl}/mcp`, {
     method: 'POST',
     headers: {
@@ -117,9 +118,14 @@ async function mcpRequest(baseUrl, id, method, params = {}, extraHeaders = {}) {
     },
     body: JSON.stringify({ jsonrpc: '2.0', id, method, params })
   });
-  const text = await response.text();
+  const body = Buffer.from(await response.arrayBuffer());
+  const text = body.toString('utf8');
   if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${text.slice(0, 500)}`);
-  return parseMcpResponse(text);
+  return { parsed: parseMcpResponse(text), wireBytes: body.length };
+}
+
+async function mcpRequest(baseUrl, id, method, params = {}, extraHeaders = {}) {
+  return (await mcpRequestRaw(baseUrl, id, method, params, extraHeaders)).parsed;
 }
 
 async function initialize(baseUrl) {
@@ -282,6 +288,21 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.equal(spillRead.result.content[0].text.length, 256 * 1024);
   assert.match(spillRead.result.content[0].text, /^x+$/);
 
+  const longComment = 'x'.repeat(70 * 1024);
+  const longCommand = `# ${longComment}\n${nodeOutputCommand(2)}`;
+  const longShell = await mcpRequestRaw(baseUrl, 34, 'tools/call', {
+    name: 'shell_execute',
+    arguments: { command: longCommand, working_directory: workspace }
+  });
+  const longShellData = JSON.parse(longShell.parsed.result.content[0].text);
+  assert.equal(longShellData.exitCode, 0);
+  assert.equal(longShellData.stdout, 'xx');
+  assert.equal(longShellData.commandBytes, Buffer.byteLength(longCommand));
+  assert.equal(longShellData.commandTruncated, true);
+  assert.ok(longShell.wireBytes <= 128 * 1024);
+  observedResponseBudgets.longCommandWireBytes = longShell.wireBytes;
+  assert.deepEqual(longShell.parsed.result.structuredContent, longShellData);
+
   const metricsText = fs.readFileSync(path.join(runtimeDirectory, 'mcp-calls.ndjson'), 'utf8');
   const metrics = metricsText.trim().split('\n').map(JSON.parse);
   assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.truncated && metric.spill));
@@ -310,6 +331,7 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, and structured UTF-8 shell output',
-  observedProfiles
+  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and long-command response budget',
+  observedProfiles,
+  observedResponseBudgets
 }, null, 2));

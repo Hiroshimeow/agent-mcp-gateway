@@ -247,6 +247,9 @@ const shellExecuteOutputSchema = {
   type: 'object',
   properties: {
     command: { type: 'string' },
+    commandBytes: { type: 'number' },
+    returnedCommandBytes: { type: 'number' },
+    commandTruncated: { type: 'boolean' },
     workingDirectoryRequested: {},
     workingDirectoryResolved: { type: 'string' },
     exitCode: { type: 'number' },
@@ -371,7 +374,10 @@ async function routeToolCall(request, { callerKey } = {}) {
       spillDirectory: path.join(runtimeDirectory, 'shell-output')
     });
     return structuredToolText({
-      command: validated.command,
+      command: result.command,
+      commandBytes: result.commandBytes,
+      returnedCommandBytes: result.returnedCommandBytes,
+      commandTruncated: result.commandTruncated,
       workingDirectoryRequested: args.working_directory ?? null,
       workingDirectoryResolved: validated.cwd || roots[0],
       exitCode: result.exitCode,

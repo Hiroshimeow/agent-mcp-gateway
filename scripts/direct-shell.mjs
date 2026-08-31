@@ -7,6 +7,7 @@ import path from 'node:path';
 const DEFAULT_TIMEOUT_MS = 300000;
 export const DEFAULT_SHELL_RESPONSE_BUDGET_BYTES = 128 * 1024;
 const DEFAULT_TOTAL_PREVIEW_BYTES = 8 * 1024;
+const DEFAULT_COMMAND_PREVIEW_BYTES = 1024;
 const DEFAULT_CAPTURE_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_WINDOWS_POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const DEFAULT_POSIX_SHELL = '/bin/sh';
@@ -162,6 +163,29 @@ function createCollector(captureBytes, { spillDirectory, streamName }) {
   };
 }
 
+function previewCommand(command, maxBytes = DEFAULT_COMMAND_PREVIEW_BYTES) {
+  const raw = Buffer.from(String(command), 'utf8');
+  const totalBytes = raw.length;
+  const budget = Math.max(0, Number(maxBytes) || 0);
+  if (totalBytes <= budget) {
+    return { text: String(command), totalBytes, returnedBytes: totalBytes, truncated: false };
+  }
+
+  const marker = `\n... [command truncated; ${totalBytes} bytes total] ...\n`;
+  const markerBytes = Buffer.byteLength(marker);
+  const previewBytes = Math.max(0, budget - markerBytes);
+  const headBudget = Math.ceil(previewBytes / 2);
+  const tailBudget = previewBytes - headBudget;
+
+  let headEnd = Math.min(raw.length, headBudget);
+  while (headEnd > 0 && headEnd < raw.length && (raw[headEnd] & 0xc0) === 0x80) headEnd -= 1;
+  let tailStart = Math.max(0, raw.length - tailBudget);
+  while (tailStart < raw.length && (raw[tailStart] & 0xc0) === 0x80) tailStart += 1;
+
+  const text = `${raw.subarray(0, headEnd).toString('utf8')}${marker}${raw.subarray(tailStart).toString('utf8')}`;
+  return { text, totalBytes, returnedBytes: Buffer.byteLength(text), truncated: true };
+}
+
 function allocatePreviewBudgets(stdoutBytes, stderrBytes, totalPreviewBytes) {
   const totalBudget = Math.max(0, Number(totalPreviewBytes) || 0);
   if (stdoutBytes + stderrBytes <= totalBudget) return { stdout: stdoutBytes, stderr: stderrBytes };
@@ -186,6 +210,7 @@ export async function executeDirectShell(command, options = {}) {
   const baseEnv = options.env || process.env;
   const shell = getDirectShell(platform, baseEnv);
   const totalPreviewBytes = options.maxOutputBytes ?? DEFAULT_TOTAL_PREVIEW_BYTES;
+  const commandPreview = previewCommand(command);
   const captureBytes = Math.max(DEFAULT_CAPTURE_OUTPUT_BYTES, Number(totalPreviewBytes) || 0);
   const spillDirectory = options.spillDirectory || path.join(os.tmpdir(), 'agent-mcp-gateway-shell-output');
   const startedAt = Date.now();
@@ -232,7 +257,10 @@ export async function executeDirectShell(command, options = {}) {
       const stderr = stderrCollector.result(previewBudgets.stderr);
       const exitCode = typeof code === 'number' ? code : (timedOut ? 124 : 1);
       resolve({
-        command,
+        command: commandPreview.text,
+        commandBytes: commandPreview.totalBytes,
+        returnedCommandBytes: commandPreview.returnedBytes,
+        commandTruncated: commandPreview.truncated,
         exitCode,
         signal: signal || null,
         stdout: stdout.text,

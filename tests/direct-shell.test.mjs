@@ -20,7 +20,10 @@ function nodeScriptCommand(script) {
 
 function serializedShellResultBytes(result) {
   const value = {
-    command: 'benchmark',
+    command: result.command,
+    commandBytes: result.commandBytes,
+    returnedCommandBytes: result.returnedCommandBytes,
+    commandTruncated: result.commandTruncated,
     workingDirectoryRequested: process.cwd(),
     workingDirectoryResolved: process.cwd(),
     exitCode: result.exitCode,
@@ -138,6 +141,27 @@ test('control-byte output spills and stays inside the 128 KiB serialized MCP bud
     assert.equal(result.stdoutTruncated, true);
     assert.ok(serializedShellResultBytes(result) <= DEFAULT_SHELL_RESPONSE_BUDGET_BYTES);
     assert.equal(fs.readFileSync(result.stdoutSpillPath).equals(Buffer.alloc(bytes)), true);
+  } finally {
+    fs.rmSync(spillDirectory, { recursive: true, force: true });
+  }
+});
+
+test('long commands execute in full but return a bounded command preview', async () => {
+  const spillDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-shell-wire-command-'));
+  const comment = 'x'.repeat(70 * 1024);
+  const command = commandFor(
+    process.platform,
+    `# ${comment}\n${nodeScriptCommand("process.stdout.write('ok')")}`,
+    `# ${comment}\n${nodeScriptCommand("process.stdout.write('ok')")}`
+  );
+  try {
+    const result = await executeDirectShell(command, { cwd: process.cwd(), spillDirectory });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, 'ok');
+    assert.equal(result.commandBytes, Buffer.byteLength(command));
+    assert.equal(result.commandTruncated, true);
+    assert.ok(result.returnedCommandBytes < result.commandBytes);
+    assert.ok(serializedShellResultBytes(result) <= DEFAULT_SHELL_RESPONSE_BUDGET_BYTES);
   } finally {
     fs.rmSync(spillDirectory, { recursive: true, force: true });
   }
