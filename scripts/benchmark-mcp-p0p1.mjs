@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { buildNodeOutputCommand } from './benchmark-command.mjs';
 
 const root = process.cwd();
 const credential = `benchmark_mcp_${process.pid}`;
@@ -94,14 +95,6 @@ function initializeParams() {
   };
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-function outputCommand(bytes) {
-  return `${shellQuote(process.execPath)} -e ${shellQuote(`process.stdout.write(Buffer.alloc(${bytes}, 120))`)}`;
-}
-
 async function bench(label, fn) {
   for (let index = 0; index < warmup; index += 1) await fn();
   const samples = [];
@@ -182,13 +175,13 @@ try {
     const key = String(bytes);
     const [, summary] = await bench(`shell-${key}`, () => mcpRequest(baseUrl, nextId++, 'tools/call', {
       name: 'shell_execute',
-      arguments: { command: outputCommand(bytes), working_directory: workspace }
+      arguments: { command: buildNodeOutputCommand(bytes), working_directory: workspace }
     }));
     shell[key] = summary;
 
     const sample = await mcpRequest(baseUrl, nextId++, 'tools/call', {
       name: 'shell_execute',
-      arguments: { command: outputCommand(bytes), working_directory: workspace }
+      arguments: { command: buildNodeOutputCommand(bytes), working_directory: workspace }
     });
     const payload = JSON.parse(sample.parsed.result.content[0].text);
     assert.equal(payload.stdoutBytes, bytes);
@@ -216,7 +209,7 @@ try {
   await workflow('initialize', initializeParams());
   await workflow('tools/list', {});
   await workflow('tools/call', { name: 'get_skill', arguments: { name: 'local_coding' } });
-  await workflow('tools/call', { name: 'shell_execute', arguments: { command: outputCommand(1024), working_directory: workspace } });
+  await workflow('tools/call', { name: 'shell_execute', arguments: { command: buildNodeOutputCommand(1024), working_directory: workspace } });
 
   const result = {
     schemaVersion: 1,
