@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 300000;
-const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+export const DEFAULT_SHELL_RESPONSE_BUDGET_BYTES = 128 * 1024;
+const DEFAULT_TOTAL_PREVIEW_BYTES = 8 * 1024;
+const DEFAULT_CAPTURE_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_WINDOWS_POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const DEFAULT_POSIX_SHELL = '/bin/sh';
 const SPILL_PREFIX = 'mcp-shell-';
@@ -67,8 +69,8 @@ function appendTail(current, chunk, maxBytes) {
   return Buffer.concat([current.subarray(current.length - keep), chunk]);
 }
 
-function createCollector(maxBytes, { spillDirectory, streamName }) {
-  const budget = Math.max(0, Number(maxBytes) || 0);
+function createCollector(captureBytes, { spillDirectory, streamName }) {
+  const budget = Math.max(0, Number(captureBytes) || 0);
   const headLimit = Math.ceil(budget / 2);
   const tailLimit = budget - headLimit;
   let chunks = [];
@@ -113,12 +115,17 @@ function createCollector(maxBytes, { spillDirectory, streamName }) {
       openSpill();
       if (spillFd !== null) fs.writeSync(spillFd, chunk);
     },
-    result() {
+    bytes() {
+      return totalBytes;
+    },
+    result(previewBytes) {
+      const previewBudget = Math.max(0, Math.min(budget, Number(previewBytes) || 0));
+      const truncated = totalBytes > previewBudget;
+      if (truncated && spillFd === null) openSpill();
       if (spillFd !== null) {
         fs.closeSync(spillFd);
         spillFd = null;
       }
-      const truncated = totalBytes > budget;
       if (!truncated) {
         const raw = Buffer.concat(chunks);
         return {
@@ -131,13 +138,17 @@ function createCollector(maxBytes, { spillDirectory, streamName }) {
           spillPath: null
         };
       }
+      const previewHeadBytes = Math.ceil(previewBudget / 2);
+      const previewTailBytes = previewBudget - previewHeadBytes;
+      const previewHead = head.subarray(0, previewHeadBytes);
+      const previewTail = previewTailBytes > 0 ? tail.subarray(Math.max(0, tail.length - previewTailBytes)) : Buffer.alloc(0);
       const marker = `\n... [truncated; full raw output: ${spillPath}] ...\n`;
       return {
-        text: `${head.toString('utf8')}${marker}${tail.toString('utf8')}`,
+        text: `${previewHead.toString('utf8')}${marker}${previewTail.toString('utf8')}`,
         totalBytes,
-        returnedBytes: head.length + tail.length,
-        headBytes: head.length,
-        tailBytes: tail.length,
+        returnedBytes: previewHead.length + previewTail.length,
+        headBytes: previewHead.length,
+        tailBytes: previewTail.length,
         truncated: true,
         spillPath
       };
@@ -151,17 +162,35 @@ function createCollector(maxBytes, { spillDirectory, streamName }) {
   };
 }
 
+function allocatePreviewBudgets(stdoutBytes, stderrBytes, totalPreviewBytes) {
+  const totalBudget = Math.max(0, Number(totalPreviewBytes) || 0);
+  if (stdoutBytes + stderrBytes <= totalBudget) return { stdout: stdoutBytes, stderr: stderrBytes };
+
+  let stdout = Math.min(stdoutBytes, Math.ceil(totalBudget / 2));
+  let stderr = Math.min(stderrBytes, totalBudget - stdout);
+  let remaining = totalBudget - stdout - stderr;
+
+  if (remaining > 0) {
+    const stdoutExtra = Math.min(remaining, Math.max(0, stdoutBytes - stdout));
+    stdout += stdoutExtra;
+    remaining -= stdoutExtra;
+  }
+  if (remaining > 0) stderr += Math.min(remaining, Math.max(0, stderrBytes - stderr));
+  return { stdout, stderr };
+}
+
 export async function executeDirectShell(command, options = {}) {
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const cwd = options.cwd;
   const platform = options.platform || os.platform();
   const baseEnv = options.env || process.env;
   const shell = getDirectShell(platform, baseEnv);
-  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const totalPreviewBytes = options.maxOutputBytes ?? DEFAULT_TOTAL_PREVIEW_BYTES;
+  const captureBytes = Math.max(DEFAULT_CAPTURE_OUTPUT_BYTES, Number(totalPreviewBytes) || 0);
   const spillDirectory = options.spillDirectory || path.join(os.tmpdir(), 'agent-mcp-gateway-shell-output');
   const startedAt = Date.now();
-  const stdoutCollector = createCollector(maxOutputBytes, { spillDirectory, streamName: 'stdout' });
-  const stderrCollector = createCollector(maxOutputBytes, { spillDirectory, streamName: 'stderr' });
+  const stdoutCollector = createCollector(captureBytes, { spillDirectory, streamName: 'stdout' });
+  const stderrCollector = createCollector(captureBytes, { spillDirectory, streamName: 'stderr' });
 
   return await new Promise((resolve, reject) => {
     let timedOut = false;
@@ -198,8 +227,9 @@ export async function executeDirectShell(command, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
-      const stdout = stdoutCollector.result();
-      const stderr = stderrCollector.result();
+      const previewBudgets = allocatePreviewBudgets(stdoutCollector.bytes(), stderrCollector.bytes(), totalPreviewBytes);
+      const stdout = stdoutCollector.result(previewBudgets.stdout);
+      const stderr = stderrCollector.result(previewBudgets.stderr);
       const exitCode = typeof code === 'number' ? code : (timedOut ? 124 : 1);
       resolve({
         command,
