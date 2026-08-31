@@ -153,3 +153,17 @@ test('skill watcher emits after a valid disk catalog change', async t => {
   ]);
   assert.ok(catalog.some(skill => skill.name === 'verification'));
 });
+
+
+test('human_comms is discoverable and defines the concise human-facing contract', () => {
+  const payload = getSkillTool();
+  const skill = getSkillDefinition('human_comms');
+  assert.ok(skill, 'human_comms skill must exist');
+  assert.ok(payload.availableSkills.includes('human_comms'));
+  assert.match(skill.description, /^Use when .*repl|^Use when .*human-facing/i);
+  assert.match(skill.body, /human(?:'s)? intent.*not.*all available information/i);
+  assert.match(skill.body, /enough to act/i);
+  assert.match(skill.body, /numbers.*dates.*prices?.*scope/is);
+  assert.match(skill.body, /PLAN.*report/is);
+  assert.ok(skill.body.split(/\s+/).filter(Boolean).length < 220, 'frequently loaded skill should stay under 220 words');
+});

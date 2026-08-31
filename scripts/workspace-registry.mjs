@@ -360,7 +360,9 @@ export function createWorkspaceRegistry(options = {}) {
 
   function buildState(content) {
     const rawConfig = toml.parse(content || '');
-    const roots = rootsFromRawConfig(rawConfig, { repoRoot, env, platform }).map(item => item.path);
+    const roots = rootsFromRawConfig(rawConfig, { repoRoot, env, platform })
+      .map(item => item.path)
+      .filter(root => fs.existsSync(root));
     const rawRoots = trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot });
     const projectRegistry = buildTrustedRootsProjectRegistryFromRaw(rawRoots, {
       defaultProjectId: env.MCP_DEFAULT_PROJECT_ID,
@@ -484,6 +486,12 @@ export function createWorkspaceRegistry(options = {}) {
         await waitForActiveReload();
         if (state.roots.some(existing => isPathInsideWorkspace(existing, root, { platform }))) {
           return { added: false, absolute: true, root, snapshot: publicSnapshot() };
+        }
+        if (!fs.existsSync(root)) {
+          const error = new Error(`Trusted root does not exist: ${root}`);
+          error.code = 'TRUSTED_ROOT_NOT_FOUND';
+          error.details = { root };
+          throw error;
         }
         const result = await persistTrustedRoot(configPath, root, { ...options, repoRoot, env, platform });
         await reloadAfterSelfWrite();

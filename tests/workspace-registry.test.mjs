@@ -121,6 +121,43 @@ test('registry hot reloads valid changes and keeps last valid snapshot', async (
   }
 });
 
+test('registry excludes configured trusted roots that no longer exist', () => {
+  const directory = tempDir();
+  const configPath = path.join(directory, 'mcp-servers.toml');
+  const existingRoot = path.join(directory, 'existing');
+  const missingRoot = path.join(directory, 'missing');
+  fs.mkdirSync(existingRoot);
+  fs.writeFileSync(configPath, `[trusted_roots]\nroots = ["${existingRoot.replaceAll('\\', '/')}", "${missingRoot.replaceAll('\\', '/')}"]\n`, 'utf8');
+
+  const registry = createWorkspaceRegistry({ configPath, repoRoot: existingRoot, watchIntervalMs: 25 });
+  try {
+    assert.deepEqual(registry.snapshot().roots, [path.resolve(existingRoot)]);
+  } finally {
+    registry.close();
+  }
+});
+
+test('ensureTrustedPath rejects a missing root without persisting it', async () => {
+  const directory = tempDir();
+  const configPath = path.join(directory, 'mcp-servers.toml');
+  const existingRoot = path.join(directory, 'existing');
+  const missingRoot = path.join(directory, 'missing');
+  fs.mkdirSync(existingRoot);
+  fs.writeFileSync(configPath, `[trusted_roots]\nroots = ["${existingRoot.replaceAll('\\', '/')}"]\n`, 'utf8');
+
+  const registry = createWorkspaceRegistry({ configPath, repoRoot: existingRoot, watchIntervalMs: 25 });
+  try {
+    const before = fs.readFileSync(configPath, 'utf8');
+    await assert.rejects(
+      () => registry.ensureTrustedPath(path.join(missingRoot, 'future.txt'), 'file'),
+      /Trusted root does not exist/
+    );
+    assert.equal(fs.readFileSync(configPath, 'utf8'), before);
+  } finally {
+    registry.close();
+  }
+});
+
 test('ensureTrustedPath persists containing directory for a file target', async () => {
   const directory = tempDir();
   const configPath = path.join(directory, 'mcp-servers.toml');
