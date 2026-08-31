@@ -15,6 +15,7 @@ test('local registry exposes only the two non-filesystem core helpers without al
     assert.equal(tool.annotations.readOnlyHint, true);
     assert.equal(tool.annotations.openWorldHint, false);
   }
+  assert.equal(tools.find(tool => tool.name === 'get_skill').outputSchema.type, 'object');
 });
 
 test('isLocalCustomTool accepts only canonical retained names', () => {
@@ -26,20 +27,24 @@ test('isLocalCustomTool accepts only canonical retained names', () => {
   assert.equal(isLocalCustomTool('custom_git_status'), false);
 });
 
-test('get_skill returns a registered skill definition', async () => {
-  const payload = parseToolResult(await callCustomTool('get_skill', { name: 'ponytail-review' }, {}));
-  assert.equal(payload.ok, true);
-  assert.equal(payload.data.name, 'ponytail_review');
-  assert.equal(payload.data.mcpSurfaces.tool, 'get_skill');
+test('get_skill returns a structured named skill without repeating the catalog', async () => {
+const result = await callCustomTool('get_skill', { name: 'ponytail-review' }, {});
+const payload = parseToolResult(result);
+assert.deepEqual(result.structuredContent, payload);
+assert.equal(payload.ok, true);
+assert.equal(payload.data.name, 'ponytail_review');
+assert.equal(payload.data.mcpSurfaces.tool, 'get_skill');
   assert.match(payload.data.body, /unnecessary complexity|net: -<N> lines/i);
-  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'ponytail_review'));
+  assert.equal(payload.data.skillCatalog, undefined);
 });
 
-test('get_skill defaults to using_superpowers bootstrap', async () => {
-  const payload = parseToolResult(await callCustomTool('get_skill', {}, {}));
-  assert.equal(payload.ok, true);
-  assert.equal(payload.data.name, 'using_superpowers');
-  assert.match(payload.data.body, /invoke relevant or requested skills|skill priority/i);
-  assert.ok(payload.data.availableSkills.includes('local_coding'));
-  assert.ok(payload.data.availableSkills.includes('systematic_debugging'));
+test('get_skill discovery is structured and catalog-only', async () => {
+const result = await callCustomTool('get_skill', {}, {});
+const payload = parseToolResult(result);
+assert.deepEqual(result.structuredContent, payload);
+assert.equal(payload.ok, true);
+  assert.equal(payload.data.mode, 'discovery');
+  assert.equal(payload.data.body, undefined);
+  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'local_coding'));
+  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'systematic_debugging'));
 });

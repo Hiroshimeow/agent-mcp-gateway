@@ -53,29 +53,39 @@ test('skill resources are listed and readable through repo resources', async () 
   assert.match(resource.contents[0].text, /lazy senior developer/i);
 });
 
-test('get_skill defaults to the superpowers bootstrap for skillless agents', () => {
+test('get_skill discovery returns compact routing metadata without a skill body', () => {
   const payload = getSkillTool();
   const ponytail = payload.skillCatalog.find(skill => skill.name === 'ponytail');
-  assert.equal(payload.name, 'using_superpowers');
-  assert.equal(payload.mcpSurfaces.tool, 'get_skill');
-  assert.ok(payload.availableSkills.includes('ponytail'));
-  assert.ok(payload.availableSkills.includes('local_coding'));
-  assert.ok(payload.availableSkills.includes('systematic_debugging'));
+  assert.equal(payload.mode, 'discovery');
+  assert.equal(payload.body, undefined);
+  assert.equal(payload.availableSkills, undefined);
   assert.ok(ponytail?.description);
-  assert.match(payload.body, /invoke relevant or requested skills|skill priority/i);
+  assert.ok(payload.skillCatalog.every(skill => skill.description.length <= 96));
+  assert.ok(payload.skillCatalog.every(skill => skill.aliases === undefined));
   assert.deepEqual(payload.routingPolicy, SKILL_ROUTING_POLICY);
   assert.ok(payload.routingPolicy.some(rule => /general UI(?: audit| redesign| study)?.*frontend_design/i.test(rule)));
   assert.ok(payload.routingPolicy.some(rule => /explicit Hallmark or anti-AI-slop.*hallmark/i.test(rule)));
   assert.doesNotMatch(payload.routingPolicy.join(' '), /Hallmark, audit, redesign, or study -> hallmark/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /before first use of local write_file, edit_file, or shell_execute/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /routing policy/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /do not probe shell_execute first/i);
 
   const referencedSkills = [...SKILL_ROUTING_POLICY.join(' ').matchAll(/->\s*([a-z][a-z0-9_]*)/g)].map(match => match[1]);
+  const names = payload.skillCatalog.map(skill => skill.name);
   for (const referencedSkill of referencedSkills) {
-    assert.ok(payload.availableSkills.includes(referencedSkill), `routing policy references missing skill: ${referencedSkill}`);
+    assert.ok(names.includes(referencedSkill), `routing policy references missing skill: ${referencedSkill}`);
   }
+});
+
+test('get_skill named load returns only the requested skill and supports direct bootstrap wording', () => {
+  const payload = getSkillTool({ name: 'local-coding' });
+  assert.equal(payload.mode, 'skill');
+  assert.equal(payload.name, 'local_coding');
+  assert.equal(payload.mcpSurfaces.tool, 'get_skill');
+  assert.match(payload.body, /six core tools/i);
+  assert.equal(payload.skillCatalog, undefined);
+  assert.equal(payload.routingPolicy, undefined);
+  assert.equal(payload.availableSkills, undefined);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill with a known skill name directly/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments.*then load/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /do not probe shell_execute first/i);
 });
 
 function writeSkill(directory, folder, { description = 'Use for dynamic debugging work.', body = '# Dynamic Debugging\n\nInspect before changing.', extra = '' } = {}) {
@@ -159,7 +169,7 @@ test('human_comms is discoverable and defines the concise human-facing contract'
   const payload = getSkillTool();
   const skill = getSkillDefinition('human_comms');
   assert.ok(skill, 'human_comms skill must exist');
-  assert.ok(payload.availableSkills.includes('human_comms'));
+  assert.ok(payload.skillCatalog.some(item => item.name === 'human_comms'));
   assert.match(skill.description, /^Use when .*repl|^Use when .*human-facing/i);
   assert.match(skill.body, /human(?:'s)? intent.*not.*all available information/i);
   assert.match(skill.body, /enough to act/i);

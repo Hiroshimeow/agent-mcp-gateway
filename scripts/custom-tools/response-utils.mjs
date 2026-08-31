@@ -3,7 +3,8 @@ export function textJson(value) {
 }
 
 export function ok(tool, summary, data = {}) {
-  return textJson({ ok: true, tool: String(tool), summary, data });
+  const value = { ok: true, tool: String(tool), summary, data };
+  return { ...textJson(value), structuredContent: value };
 }
 
 export function fail(tool, code, message, details = {}) {

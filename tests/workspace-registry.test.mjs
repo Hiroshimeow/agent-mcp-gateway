@@ -158,23 +158,35 @@ test('ensureTrustedPath rejects a missing root without persisting it', async () 
   }
 });
 
-test('ensureTrustedPath persists containing directory for a file target', async () => {
+test('ensureTrustedPath writes runtime overlay without mutating static config', async () => {
   const directory = tempDir();
   const configPath = path.join(directory, 'mcp-servers.toml');
+  const runtimeRootsPath = path.join(directory, '.runtime', 'trusted-roots.toml');
   const initialRoot = path.join(directory, 'initial');
   const newRoot = path.join(directory, 'new-root');
   fs.mkdirSync(initialRoot);
   fs.mkdirSync(newRoot);
-  fs.writeFileSync(configPath, `[trusted_roots]\nroots = ["${initialRoot.replaceAll('\\', '/')}"]\n`, 'utf8');
-  const registry = createWorkspaceRegistry({ configPath, repoRoot: initialRoot, watchIntervalMs: 25 });
+  const base = `[server]\ntitle = "Pinned"\n[trusted_roots]\nroots = ["${initialRoot.replaceAll('\\', '/')}"]\n`;
+  fs.writeFileSync(configPath, base, 'utf8');
+  const registry = createWorkspaceRegistry({ configPath, runtimeRootsPath, repoRoot: initialRoot, watchIntervalMs: 25 });
   try {
     const result = await registry.ensureTrustedPath(path.join(newRoot, 'future.txt'), 'file');
     assert.equal(result.added, true);
     assert.equal(registry.contains(path.join(newRoot, 'future.txt')), true);
-    const content = fs.readFileSync(configPath, 'utf8');
-    assert.ok(content.includes(newRoot.replaceAll('\\', '/')));
+    assert.equal(fs.readFileSync(configPath, 'utf8'), base);
+    assert.ok(fs.readFileSync(runtimeRootsPath, 'utf8').includes(newRoot.replaceAll('\\', '/')));
+    assert.deepEqual(registry.snapshot().staticRoots, [normalizeWorkspacePath(initialRoot)]);
+    assert.deepEqual(registry.snapshot().runtimeRoots, [normalizeWorkspacePath(newRoot)]);
   } finally {
     registry.close();
+  }
+
+  const restarted = createWorkspaceRegistry({ configPath, runtimeRootsPath, repoRoot: initialRoot, watchIntervalMs: 25 });
+  try {
+    assert.equal(restarted.contains(newRoot), true);
+    assert.equal(restarted.snapshot().server.title, 'Pinned');
+  } finally {
+    restarted.close();
   }
 });
 
@@ -373,7 +385,8 @@ test('failed activation restores synchronized state and the same persisted root 
     const target = path.join(addedRoot, 'file.txt');
     await assert.rejects(() => registry.ensureTrustedPath(target, 'file'), /activation failed/);
     assert.equal(registry.contains(addedRoot), false);
-    assert.ok(fs.readFileSync(configPath, 'utf8').includes(addedRoot.replaceAll('\\', '/')));
+    assert.equal(fs.readFileSync(configPath, 'utf8').includes(addedRoot.replaceAll('\\', '/')), false);
+    assert.ok(fs.readFileSync(registry.snapshot().runtimeRootsPath, 'utf8').includes(addedRoot.replaceAll('\\', '/')));
 
     failActivation = false;
     const retried = await registry.ensureTrustedPath(target, 'file');

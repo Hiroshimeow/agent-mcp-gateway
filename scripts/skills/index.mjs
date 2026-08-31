@@ -233,13 +233,13 @@ const BUILTIN_SKILLS = new Map([
       '- prompts: user/client-selected reusable workflows.',
       '- resources: read-only SKILL.md bodies and references.',
       '- get_skill: the reliable read-only loader a normal agent can call by name.',
-      '- skillCatalog: the live names, aliases, and descriptions returned by get_skill so newly added disk skills can be selected without a server restart.',
+      '- get_skill() discovery: the compact live names, aliases, descriptions, and routing policy used only when the next skill is not already known.',
       '',
       '## Load Protocol',
       '',
-      '1. At the start of substantial coding, debugging, review, refactor, automation, or project work, load this skill once if it is not already loaded.',
-      '2. Inspect the returned skillCatalog and compare its descriptions with the task. If there is even a reasonable match, call get_skill with the smallest relevant skill name or alias.',
-      '3. Read the returned skill body once, keep it in task context, and do not call get_skill again for that same skill in the same task unless the user asks to refresh.',
+      '1. If the relevant skill name is already known, call get_skill with that name or alias directly; a successful direct load satisfies bootstrap.',
+      '2. If the relevant skill is not known, call get_skill() once for compact discovery, compare the returned catalog with the task, then load the smallest relevant skill.',
+      '3. Read the returned named skill body once, keep it in task context, and do not call get_skill again for that same skill in the same task unless the user asks to refresh.',
       '4. Prefer one skill at a time. Load multiple skills only when each one changes the work materially.',
       '5. Apply the loaded skill as operating guidance, while system, developer, and explicit user instructions remain higher priority.',
       '',
@@ -535,7 +535,7 @@ export const SKILL_ROUTING_POLICY = Object.freeze([
 ]);
 
 export const SKILL_AGENT_INSTRUCTIONS = [
-  'Before first use of local write_file, edit_file, or shell_execute, call get_skill without arguments to discover the live catalog, inspect its routingPolicy and skillCatalog, then load the smallest relevant workflow; the gateway blocks those local tools until a skill loads successfully.',
+  'Before first use of local write_file, edit_file, or shell_execute, call get_skill with a known skill name directly, or call get_skill without arguments only when discovery is needed; any successful skill load satisfies bootstrap.',
   'Do not probe shell_execute first.',
   `Routing policy: ${SKILL_ROUTING_POLICY.join(' ')}`
 ].join(' ');
@@ -589,15 +589,28 @@ export function watchSkillCatalog(onChange, options) {
   return registry.watch(onChange, options);
 }
 
+function compactSkillDescription(description, maxLength = 96) {
+  const normalized = String(description || '').replace(/\s+/g, ' ').trim();
+  const firstSentence = normalized.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || normalized;
+  return firstSentence.length <= maxLength ? firstSentence : `${firstSentence.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
 export function getSkillTool(args = {}) {
-  const requested = args.name || args.skill || 'using_superpowers';
+  const requested = args.name || args.skill;
+  if (!requested) {
+    return {
+      mode: 'discovery',
+      routingPolicy: [...SKILL_ROUTING_POLICY],
+      skillCatalog: listSkills().filter(item => item.modelInvocable).map(item => ({
+        name: item.name,
+        description: compactSkillDescription(item.description)
+      }))
+    };
+  }
+
   const skill = requireSkillDefinition(requested);
-  const skillCatalog = listSkills().filter(item => item.modelInvocable).map(item => ({
-    name: item.name,
-    description: item.description,
-    aliases: item.aliases
-  }));
   return {
+    mode: 'skill',
     name: skill.name,
     title: skill.title,
     description: skill.description,
@@ -609,9 +622,6 @@ export function getSkillTool(args = {}) {
       tool: 'get_skill'
     },
     loadDiscipline: 'Read once per task. Do not call get_skill again for the same skill in the same task unless the user asks to refresh it.',
-    body: skill.body,
-    routingPolicy: [...SKILL_ROUTING_POLICY],
-    availableSkills: skillCatalog.map(item => item.name),
-    skillCatalog
+    body: skill.body
   };
 }

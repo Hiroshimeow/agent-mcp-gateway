@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 
 export const SKILL_BOOTSTRAP_CODE = 'SKILL_BOOTSTRAP_REQUIRED';
-export const SKILL_CHECK_ADVISORY = 'Skill check: before using local write_file, edit_file, or shell_execute, call get_skill() and load the workflow matching the context you inspected.';
-export const SKILL_TOOL_BOOTSTRAP_NOTICE = 'Before first use of this local changing tool, call get_skill without arguments; inspect its routingPolicy and skillCatalog, then load the smallest relevant skill.';
+export const SKILL_CHECK_ADVISORY = 'Skill check: before using local write_file, edit_file, or shell_execute, load a known workflow with get_skill(name), or call get_skill() only when discovery is needed.';
+export const SKILL_TOOL_BOOTSTRAP_NOTICE = 'Before first use of this local changing tool, load a known workflow with get_skill(name), or call get_skill() only when discovery is needed.';
 
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'shell_execute']);
 const READ_TOOLS = new Set(['read_text_file', 'image_preview']);
@@ -61,7 +61,7 @@ export function createSkillBootstrapGate({ ttlMs = 4 * 60 * 60 * 1_000, now = Da
       return {
         code: SKILL_BOOTSTRAP_CODE,
         message: state.blockedCount === 1
-          ? 'Call get_skill() before the first local write_file, edit_file, or shell_execute operation; load the workflow matching the context you inspected.'
+          ? 'Before the first local write_file, edit_file, or shell_execute operation, load a known workflow with get_skill(name), or call get_skill() when discovery is needed.'
           : 'Call get_skill().'
       };
     },

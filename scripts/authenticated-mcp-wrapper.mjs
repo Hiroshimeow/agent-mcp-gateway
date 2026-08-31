@@ -20,7 +20,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
-import { executeDirectShell } from './direct-shell.mjs';
+import { DEFAULT_SHELL_RESPONSE_BUDGET_BYTES, executeDirectShell } from './direct-shell.mjs';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
@@ -40,6 +40,7 @@ import {
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
 import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
+import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -51,6 +52,7 @@ import {
 } from './workspace-registry.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(packageRoot, '.runtime'));
 const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
 const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() || '127.0.0.1';
@@ -67,6 +69,10 @@ const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLower
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
+const toolMetrics = createToolMetricsRecorder({
+  metricsPath: path.resolve(process.env.MCP_METRICS_PATH || path.join(runtimeDirectory, 'mcp-calls.ndjson')),
+  enabled: envFlag(process.env.MCP_METRICS_ENABLED, true)
+});
 const skillBootstrapGate = createSkillBootstrapGate({
   ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
 });
@@ -98,6 +104,7 @@ const configPath = findUnifiedMcpConfigPath(process.env, packageRoot);
 if (!configPath) throw new Error('config/mcp-servers.toml is required');
 const workspaceRegistry = createWorkspaceRegistry({
   configPath,
+  runtimeRootsPath: path.join(runtimeDirectory, 'trusted-roots.toml'),
   repoRoot: packageRoot,
   env: process.env
 });
@@ -236,6 +243,43 @@ const shellExecuteSchema = {
   additionalProperties: false
 };
 
+const shellExecuteOutputSchema = {
+  type: 'object',
+  properties: {
+    command: { type: 'string' },
+    commandBytes: { type: 'number' },
+    returnedCommandBytes: { type: 'number' },
+    commandTruncated: { type: 'boolean' },
+    workingDirectoryRequested: {},
+    workingDirectoryRequestedBytes: { type: 'number' },
+    returnedWorkingDirectoryRequestedBytes: { type: 'number' },
+    workingDirectoryRequestedTruncated: { type: 'boolean' },
+    workingDirectoryResolved: { type: 'string' },
+    workingDirectoryResolvedBytes: { type: 'number' },
+    returnedWorkingDirectoryResolvedBytes: { type: 'number' },
+    workingDirectoryResolvedTruncated: { type: 'boolean' },
+    exitCode: { type: 'number' },
+    stdout: { type: 'string' },
+    stderr: { type: 'string' },
+    stderrClassification: { type: 'string' },
+    durationMs: { type: 'number' },
+    timedOut: { type: 'boolean' },
+    stdoutTruncated: { type: 'boolean' },
+    stderrTruncated: { type: 'boolean' },
+    stdoutBytes: { type: 'number' },
+    stderrBytes: { type: 'number' },
+    returnedStdoutBytes: { type: 'number' },
+    returnedStderrBytes: { type: 'number' },
+    stdoutHeadBytes: { type: 'number' },
+    stdoutTailBytes: { type: 'number' },
+    stderrHeadBytes: { type: 'number' },
+    stderrTailBytes: { type: 'number' },
+    stdoutSpillPath: {},
+    stderrSpillPath: {},
+    encoding: { type: 'string' }
+  }
+};
+
 function customToolContext() {
   const snapshot = workspaceSnapshot();
   return {
@@ -274,8 +318,9 @@ async function listMergedTools() {
     const roots = currentRoots();
     tools.push(applyToolRisk({
       name: 'shell_execute',
-      description: buildShellExecuteDescription(`Trusted roots: ${roots.join('; ')}`),
+      description: buildShellExecuteDescription(`Trusted roots: ${roots.join('; ')}. Oversized stdout/stderr return a bounded head/tail preview plus a full raw spill path readable with existing file/shell tools.`),
       inputSchema: shellExecuteSchema,
+      outputSchema: shellExecuteOutputSchema,
       _meta: { trusted_roots: roots, root_repo: roots[0], repo_root: roots[0] },
       annotations: buildShellExecuteAnnotations()
     }));
@@ -294,8 +339,116 @@ async function ensureImageTarget(args = {}) {
   if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
 }
 
-function structuredToolText(value) {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+function structuredToolText(value, { includeStructured = false } = {}) {
+  const result = { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return includeStructured ? { ...result, structuredContent: value } : result;
+}
+
+const SHELL_TOOL_RESULT_BUDGET_BYTES = DEFAULT_SHELL_RESPONSE_BUDGET_BYTES - (8 * 1024);
+
+function utf8Head(text, maxBytes) {
+  let result = '';
+  let bytes = 0;
+  for (const char of String(text ?? '')) {
+    const charBytes = Buffer.byteLength(char);
+    if (bytes + charBytes > maxBytes) break;
+    result += char;
+    bytes += charBytes;
+  }
+  return result;
+}
+
+function utf8Tail(text, maxBytes) {
+  const chars = Array.from(String(text ?? ''));
+  let result = '';
+  let bytes = 0;
+  for (let index = chars.length - 1; index >= 0; index -= 1) {
+    const char = chars[index];
+    const charBytes = Buffer.byteLength(char);
+    if (bytes + charBytes > maxBytes) break;
+    result = char + result;
+    bytes += charBytes;
+  }
+  return result;
+}
+
+function previewReturnedText(value, maxBytes, label, totalBytes = Buffer.byteLength(String(value ?? ''))) {
+  if (value === null || value === undefined) return { text: value, returnedBytes: 0, truncated: false };
+  const text = String(value);
+  if (Buffer.byteLength(text) <= maxBytes) return { text, returnedBytes: Buffer.byteLength(text), truncated: false };
+  const marker = `\n... [${label} truncated; ${totalBytes} bytes total] ...\n`;
+  const remaining = Math.max(0, maxBytes - Buffer.byteLength(marker));
+  const head = utf8Head(text, Math.ceil(remaining / 2));
+  const tail = utf8Tail(text, Math.floor(remaining / 2));
+  const preview = `${head}${marker}${tail}`;
+  return { text: preview, returnedBytes: Buffer.byteLength(preview), truncated: true };
+}
+
+function shrinkStreamPreview(value, streamName, maxPreviewBytes) {
+  const spillPath = value[`${streamName}SpillPath`];
+  if (!spillPath) return value;
+  const marker = `\n... [truncated; see ${streamName}SpillPath] ...\n`;
+  const current = String(value[streamName] ?? '');
+  const markerIndex = current.indexOf(marker);
+  const headText = markerIndex >= 0 ? current.slice(0, markerIndex) : current;
+  const tailText = markerIndex >= 0 ? current.slice(markerIndex + marker.length) : '';
+  const head = utf8Head(headText, Math.ceil(maxPreviewBytes / 2));
+  const tail = utf8Tail(tailText, Math.floor(maxPreviewBytes / 2));
+  return {
+    ...value,
+    [streamName]: `${head}${marker}${tail}`,
+    [`returned${streamName[0].toUpperCase()}${streamName.slice(1)}Bytes`]: Buffer.byteLength(head) + Buffer.byteLength(tail),
+    [`${streamName}HeadBytes`]: Buffer.byteLength(head),
+    [`${streamName}TailBytes`]: Buffer.byteLength(tail),
+    [`${streamName}Truncated`]: true
+  };
+}
+
+function boundedShellToolText(value) {
+  const requested = String(value.workingDirectoryRequested ?? '');
+  const resolved = String(value.workingDirectoryResolved ?? '');
+  const base = {
+    ...value,
+    workingDirectoryRequestedBytes: Buffer.byteLength(requested),
+    returnedWorkingDirectoryRequestedBytes: Buffer.byteLength(requested),
+    workingDirectoryRequestedTruncated: false,
+    workingDirectoryResolvedBytes: Buffer.byteLength(resolved),
+    returnedWorkingDirectoryResolvedBytes: Buffer.byteLength(resolved),
+    workingDirectoryResolvedTruncated: false
+  };
+  const build = candidate => structuredToolText(candidate, { includeStructured: true });
+  let response = build(base);
+  if (Buffer.byteLength(JSON.stringify(response)) <= SHELL_TOOL_RESULT_BUDGET_BYTES) return response;
+
+  for (const limits of [
+    { stream: 2048, command: 512, path: 1024 },
+    { stream: 1024, command: 256, path: 512 },
+    { stream: 256, command: 128, path: 256 },
+    { stream: 0, command: 64, path: 128 }
+  ]) {
+    let candidate = { ...base };
+    const command = previewReturnedText(base.command, limits.command, 'command', base.commandBytes);
+    candidate.command = command.text;
+    candidate.returnedCommandBytes = command.returnedBytes;
+    candidate.commandTruncated = base.commandTruncated || command.truncated;
+
+    const requestedPreview = previewReturnedText(base.workingDirectoryRequested, limits.path, 'working directory', base.workingDirectoryRequestedBytes);
+    candidate.workingDirectoryRequested = requestedPreview.text;
+    candidate.returnedWorkingDirectoryRequestedBytes = requestedPreview.returnedBytes;
+    candidate.workingDirectoryRequestedTruncated = requestedPreview.truncated;
+
+    const resolvedPreview = previewReturnedText(base.workingDirectoryResolved, limits.path, 'working directory', base.workingDirectoryResolvedBytes);
+    candidate.workingDirectoryResolved = resolvedPreview.text;
+    candidate.returnedWorkingDirectoryResolvedBytes = resolvedPreview.returnedBytes;
+    candidate.workingDirectoryResolvedTruncated = resolvedPreview.truncated;
+
+    candidate = shrinkStreamPreview(candidate, 'stdout', limits.stream);
+    candidate = shrinkStreamPreview(candidate, 'stderr', limits.stream);
+    response = build(candidate);
+    if (Buffer.byteLength(JSON.stringify(response)) <= SHELL_TOOL_RESULT_BUDGET_BYTES) return response;
+  }
+
+  throw new Error(`shell_execute response exceeds ${DEFAULT_SHELL_RESPONSE_BUDGET_BYTES} byte budget after preview reduction`);
 }
 
 function structuredToolError(toolName, error) {
@@ -330,10 +483,14 @@ async function routeToolCall(request, { callerKey } = {}) {
     const result = await executeDirectShell(validated.command, {
       cwd: validated.cwd || roots[0],
       timeout: 300000,
-      env: process.env
+      env: process.env,
+      spillDirectory: path.join(runtimeDirectory, 'shell-output')
     });
-    return structuredToolText({
-      command: validated.command,
+    return boundedShellToolText({
+      command: result.command,
+      commandBytes: result.commandBytes,
+      returnedCommandBytes: result.returnedCommandBytes,
+      commandTruncated: result.commandTruncated,
       workingDirectoryRequested: args.working_directory ?? null,
       workingDirectoryResolved: validated.cwd || roots[0],
       exitCode: result.exitCode,
@@ -348,6 +505,12 @@ async function routeToolCall(request, { callerKey } = {}) {
       stderrBytes: result.stderrBytes,
       returnedStdoutBytes: result.returnedStdoutBytes,
       returnedStderrBytes: result.returnedStderrBytes,
+      stdoutHeadBytes: result.stdoutHeadBytes,
+      stdoutTailBytes: result.stdoutTailBytes,
+      stderrHeadBytes: result.stderrHeadBytes,
+      stderrTailBytes: result.stderrTailBytes,
+      stdoutSpillPath: result.stdoutSpillPath,
+      stderrSpillPath: result.stderrSpillPath,
       encoding: result.encoding
     });
   }
@@ -381,9 +544,26 @@ async function routeObservedToolCall(request, context) {
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
     if (durationMs > slowToolThresholdMs) console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
+    toolMetrics.record(buildToolMetric({
+      toolName,
+      args: request.params?.arguments || {},
+      result,
+      durationMs,
+      callerCategory: context?.callerCategory,
+      upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null
+    }));
     return result;
   } catch (error) {
-    console.log(`[tool-call:error] ${toolName} durationMs=${Date.now() - startedAt}`);
+    const durationMs = Date.now() - startedAt;
+    console.log(`[tool-call:error] ${toolName} durationMs=${durationMs}`);
+    toolMetrics.record(buildToolMetric({
+      toolName,
+      args: request.params?.arguments || {},
+      durationMs,
+      callerCategory: context?.callerCategory,
+      upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null,
+      error
+    }));
     throw error;
   }
 }
@@ -400,7 +580,7 @@ function currentResourceContext() {
   };
 }
 
-function createProxyServer(callerKey) {
+function createProxyServer({ callerKey, callerCategory }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -420,7 +600,7 @@ function createProxyServer(callerKey) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey }));
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey, callerCategory }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const context = currentResourceContext();
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
@@ -485,6 +665,12 @@ function skillCallerKeyFromRequest(req) {
     staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
     sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
   });
+}
+
+function callerCategoryFromRequest(req) {
+  if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) return 'static-bearer';
+  if (req.auth?.clientId) return 'oauth';
+  return 'anonymous';
 }
 
 function getProvidedAuthorizationToken(authorizationHeader) {
@@ -657,7 +843,10 @@ const transports = {};
 
 async function createTransport(req) {
   let transport;
-  const server = createProxyServer(skillCallerKeyFromRequest(req));
+  const server = createProxyServer({
+    callerKey: skillCallerKeyFromRequest(req),
+    callerCategory: callerCategoryFromRequest(req)
+  });
 
   if (!useStatefulMcpSessions) {
     transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -779,6 +968,7 @@ async function shutdown() {
   serverInstance.close();
   stopSkillCatalogWatcher();
   workspaceRegistry.close();
+  toolMetrics.close();
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

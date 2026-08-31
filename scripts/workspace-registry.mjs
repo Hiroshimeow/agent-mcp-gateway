@@ -320,6 +320,7 @@ async function atomicReplace(targetPath, content, options = {}) {
 }
 
 export async function persistTrustedRoot(configPath, rootPath, options = {}) {
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
   const platform = options.platform || process.platform;
   const repoRoot = options.repoRoot || process.cwd();
   const env = options.env || process.env;
@@ -349,6 +350,7 @@ export async function persistTrustedRoot(configPath, rootPath, options = {}) {
 export function createWorkspaceRegistry(options = {}) {
   const configPath = path.resolve(options.configPath);
   const repoRoot = path.resolve(options.repoRoot || process.cwd());
+  const runtimeRootsPath = path.resolve(options.runtimeRootsPath || path.join(repoRoot, '.runtime', 'trusted-roots.toml'));
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
   const watchIntervalMs = options.watchIntervalMs ?? DEFAULT_WATCH_INTERVAL_MS;
@@ -358,12 +360,21 @@ export function createWorkspaceRegistry(options = {}) {
   let reloadInFlight = null;
   let grantQueue = Promise.resolve();
 
-  function buildState(content) {
+  function buildState(content, runtimeContent = '') {
     const rawConfig = toml.parse(content || '');
-    const roots = rootsFromRawConfig(rawConfig, { repoRoot, env, platform })
+    const runtimeRawConfig = toml.parse(runtimeContent || '');
+    const staticRoots = rootsFromRawConfig(rawConfig, { repoRoot, env, platform })
       .map(item => item.path)
       .filter(root => fs.existsSync(root));
-    const rawRoots = trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot });
+    const runtimeRoots = rootsFromRawConfig(runtimeRawConfig, { repoRoot, env, platform })
+      .map(item => item.path)
+      .filter(root => fs.existsSync(root))
+      .filter(root => !staticRoots.some(existing => isPathInsideWorkspace(existing, root, { platform })));
+    const roots = [...staticRoots, ...runtimeRoots.filter(root => !staticRoots.some(existing => workspacePathKey(existing, { platform, realpath: false }) === workspacePathKey(root, { platform, realpath: false })))];
+    const rawRoots = [
+      trustedRootsTomlToRaw(rawConfig.trusted_roots, { repoRoot }),
+      trustedRootsTomlToRaw(runtimeRawConfig.trusted_roots, { repoRoot })
+    ].filter(Boolean).join('\n');
     const projectRegistry = buildTrustedRootsProjectRegistryFromRaw(rawRoots, {
       defaultProjectId: env.MCP_DEFAULT_PROJECT_ID,
       requireProjectId: false,
@@ -373,10 +384,15 @@ export function createWorkspaceRegistry(options = {}) {
     });
     return {
       configPath,
+      runtimeRootsPath,
       content,
       hash: hashText(content),
+      runtimeHash: hashText(runtimeContent),
+      stateSignature: stableSignature({ base: hashText(content), runtime: hashText(runtimeContent) }),
       rawConfig,
       roots,
+      staticRoots,
+      runtimeRoots,
       rootsSignature: stableSignature(roots.map(root => workspacePathKey(root, { platform, realpath: false })).sort()),
       upstreamSignature: stableSignature({
         external_mcp: rawConfig.external_mcp || {},
@@ -412,14 +428,21 @@ export function createWorkspaceRegistry(options = {}) {
   }
 
   async function reloadFromDisk(reason = 'manual') {
-    if (reloadInFlight) return await reloadInFlight;
+    if (reloadInFlight) {
+      await reloadInFlight;
+      return await reloadFromDisk(reason);
+    }
     reloadInFlight = (async () => {
       const previousState = state;
       let candidatePublished = false;
       try {
         const content = await fs.promises.readFile(configPath, 'utf8');
-        const next = buildState(content);
-        if (state?.hash === next.hash) return { changed: false, snapshot: publicSnapshot() };
+        const runtimeContent = await fs.promises.readFile(runtimeRootsPath, 'utf8').catch(error => {
+          if (error.code === 'ENOENT') return '';
+          throw error;
+        });
+        const next = buildState(content, runtimeContent);
+        if (state?.stateSignature === next.stateSignature) return { changed: false, snapshot: publicSnapshot() };
         const previous = state ? publicSnapshot() : null;
         state = next;
         candidatePublished = true;
@@ -458,12 +481,14 @@ export function createWorkspaceRegistry(options = {}) {
   }
 
   const initialContent = fs.readFileSync(configPath, 'utf8');
-  state = buildState(initialContent);
+  const initialRuntimeContent = fs.existsSync(runtimeRootsPath) ? fs.readFileSync(runtimeRootsPath, 'utf8') : '';
+  state = buildState(initialContent, initialRuntimeContent);
 
   const watchListener = () => {
     if (!closed) reloadFromDisk('watch').catch(error => console.error(`[workspace-registry] reload failed: ${error.message}`));
   };
   fs.watchFile(configPath, { interval: watchIntervalMs, persistent: false }, watchListener);
+  fs.watchFile(runtimeRootsPath, { interval: watchIntervalMs, persistent: false }, watchListener);
 
   return {
     snapshot: publicSnapshot,
@@ -493,7 +518,7 @@ export function createWorkspaceRegistry(options = {}) {
           error.details = { root };
           throw error;
         }
-        const result = await persistTrustedRoot(configPath, root, { ...options, repoRoot, env, platform });
+        const result = await persistTrustedRoot(runtimeRootsPath, root, { ...options, repoRoot, env, platform });
         await reloadAfterSelfWrite();
         if (!state.roots.some(existing => isPathInsideWorkspace(existing, root, { platform }))) {
           throw new Error(`Trusted root synchronization failed: ${root}`);
@@ -509,6 +534,7 @@ export function createWorkspaceRegistry(options = {}) {
     close() {
       closed = true;
       fs.unwatchFile(configPath, watchListener);
+      fs.unwatchFile(runtimeRootsPath, watchListener);
       listeners.clear();
     }
   };
