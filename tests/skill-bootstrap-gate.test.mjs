@@ -31,10 +31,11 @@ test('read advisory is emitted once per caller until TTL expiry', () => {
   assert.equal(gate.takeReadAdvisory('caller-a', 'read_text_file'), SKILL_CHECK_ADVISORY);
 });
 
-test('local changing tool descriptions expose the bootstrap precondition before use', () => {
-  assert.match(SKILL_TOOL_BOOTSTRAP_NOTICE, /call get_skill without arguments/i);
+test('local changing tool descriptions allow direct known-skill bootstrap or discovery', () => {
+  assert.match(SKILL_TOOL_BOOTSTRAP_NOTICE, /get_skill\(name\)/i);
+  assert.match(SKILL_TOOL_BOOTSTRAP_NOTICE, /discovery is needed/i);
   assert.match(decorateSkillBootstrapDescription('write_file', 'Write a file.'), /^Before first use of this local changing tool/);
-  assert.match(decorateSkillBootstrapDescription('shell_execute', 'Run a command.'), /inspect its routingPolicy and skillCatalog/i);
+  assert.match(decorateSkillBootstrapDescription('shell_execute', 'Run a command.'), /get_skill\(name\)/i);
   assert.equal(decorateSkillBootstrapDescription('read_text_file', 'Read a file.'), 'Read a file.');
   assert.equal(decorateSkillBootstrapDescription('external_create_file', 'Create remotely.'), 'Create remotely.');
 });

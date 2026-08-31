@@ -10,14 +10,24 @@ function schema(properties = {}, required = []) {
 const TOOL_DEFINITIONS = [
   {
     name: 'get_skill',
-    description: 'Call without arguments at the start of substantial coding, debugging, review, refactor, automation, or project work to discover the live skill catalog; then call again with the smallest relevant skill name or alias.',
+    description: 'Load a known skill directly by name or alias. Omit name only when discovery is needed; discovery returns the compact live routing catalog without a skill body.',
     inputSchema: schema({
       name: {
         type: 'string',
-        description: 'Registered skill name or alias. Omit to load using_superpowers plus the current skill catalog.',
-        default: 'using_superpowers'
+        description: 'Registered skill name or alias. Omit only to discover the compact live skill catalog.'
       }
     }),
+    outputSchema: {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean' },
+        tool: { type: 'string' },
+        summary: { type: 'string' },
+        data: { type: 'object' }
+      },
+      required: ['ok', 'tool', 'summary', 'data'],
+      additionalProperties: false
+    },
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: args => ok('get_skill', 'Loaded skill definition', getSkillTool(args))
   },
@@ -54,6 +64,7 @@ export function listCustomTools(context = {}) {
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
+    ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
     annotations: { ...tool.annotations },
     _meta: meta
   }));

@@ -40,6 +40,7 @@ import {
 } from './auth-session.mjs';
 import { validateShellCommand } from './shell-policy.mjs';
 import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
+import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -51,6 +52,7 @@ import {
 } from './workspace-registry.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(packageRoot, '.runtime'));
 const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
 const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() || '127.0.0.1';
@@ -67,6 +69,10 @@ const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLower
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
 const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
+const toolMetrics = createToolMetricsRecorder({
+  metricsPath: path.resolve(process.env.MCP_METRICS_PATH || path.join(runtimeDirectory, 'mcp-calls.ndjson')),
+  enabled: envFlag(process.env.MCP_METRICS_ENABLED, true)
+});
 const skillBootstrapGate = createSkillBootstrapGate({
   ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
 });
@@ -98,6 +104,7 @@ const configPath = findUnifiedMcpConfigPath(process.env, packageRoot);
 if (!configPath) throw new Error('config/mcp-servers.toml is required');
 const workspaceRegistry = createWorkspaceRegistry({
   configPath,
+  runtimeRootsPath: path.join(runtimeDirectory, 'trusted-roots.toml'),
   repoRoot: packageRoot,
   env: process.env
 });
@@ -236,6 +243,34 @@ const shellExecuteSchema = {
   additionalProperties: false
 };
 
+const shellExecuteOutputSchema = {
+  type: 'object',
+  properties: {
+    command: { type: 'string' },
+    workingDirectoryRequested: {},
+    workingDirectoryResolved: { type: 'string' },
+    exitCode: { type: 'number' },
+    stdout: { type: 'string' },
+    stderr: { type: 'string' },
+    stderrClassification: { type: 'string' },
+    durationMs: { type: 'number' },
+    timedOut: { type: 'boolean' },
+    stdoutTruncated: { type: 'boolean' },
+    stderrTruncated: { type: 'boolean' },
+    stdoutBytes: { type: 'number' },
+    stderrBytes: { type: 'number' },
+    returnedStdoutBytes: { type: 'number' },
+    returnedStderrBytes: { type: 'number' },
+    stdoutHeadBytes: { type: 'number' },
+    stdoutTailBytes: { type: 'number' },
+    stderrHeadBytes: { type: 'number' },
+    stderrTailBytes: { type: 'number' },
+    stdoutSpillPath: {},
+    stderrSpillPath: {},
+    encoding: { type: 'string' }
+  }
+};
+
 function customToolContext() {
   const snapshot = workspaceSnapshot();
   return {
@@ -274,8 +309,9 @@ async function listMergedTools() {
     const roots = currentRoots();
     tools.push(applyToolRisk({
       name: 'shell_execute',
-      description: buildShellExecuteDescription(`Trusted roots: ${roots.join('; ')}`),
+      description: buildShellExecuteDescription(`Trusted roots: ${roots.join('; ')}. Oversized stdout/stderr return a bounded head/tail preview plus a full raw spill path readable with existing file/shell tools.`),
       inputSchema: shellExecuteSchema,
+      outputSchema: shellExecuteOutputSchema,
       _meta: { trusted_roots: roots, root_repo: roots[0], repo_root: roots[0] },
       annotations: buildShellExecuteAnnotations()
     }));
@@ -294,8 +330,9 @@ async function ensureImageTarget(args = {}) {
   if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
 }
 
-function structuredToolText(value) {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+function structuredToolText(value, { includeStructured = false } = {}) {
+  const result = { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return includeStructured ? { ...result, structuredContent: value } : result;
 }
 
 function structuredToolError(toolName, error) {
@@ -330,7 +367,8 @@ async function routeToolCall(request, { callerKey } = {}) {
     const result = await executeDirectShell(validated.command, {
       cwd: validated.cwd || roots[0],
       timeout: 300000,
-      env: process.env
+      env: process.env,
+      spillDirectory: path.join(runtimeDirectory, 'shell-output')
     });
     return structuredToolText({
       command: validated.command,
@@ -348,8 +386,14 @@ async function routeToolCall(request, { callerKey } = {}) {
       stderrBytes: result.stderrBytes,
       returnedStdoutBytes: result.returnedStdoutBytes,
       returnedStderrBytes: result.returnedStderrBytes,
+      stdoutHeadBytes: result.stdoutHeadBytes,
+      stdoutTailBytes: result.stdoutTailBytes,
+      stderrHeadBytes: result.stderrHeadBytes,
+      stderrTailBytes: result.stderrTailBytes,
+      stdoutSpillPath: result.stdoutSpillPath,
+      stderrSpillPath: result.stderrSpillPath,
       encoding: result.encoding
-    });
+    }, { includeStructured: true });
   }
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
@@ -381,9 +425,26 @@ async function routeObservedToolCall(request, context) {
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
     if (durationMs > slowToolThresholdMs) console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
+    toolMetrics.record(buildToolMetric({
+      toolName,
+      args: request.params?.arguments || {},
+      result,
+      durationMs,
+      callerCategory: context?.callerCategory,
+      upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null
+    }));
     return result;
   } catch (error) {
-    console.log(`[tool-call:error] ${toolName} durationMs=${Date.now() - startedAt}`);
+    const durationMs = Date.now() - startedAt;
+    console.log(`[tool-call:error] ${toolName} durationMs=${durationMs}`);
+    toolMetrics.record(buildToolMetric({
+      toolName,
+      args: request.params?.arguments || {},
+      durationMs,
+      callerCategory: context?.callerCategory,
+      upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null,
+      error
+    }));
     throw error;
   }
 }
@@ -400,7 +461,7 @@ function currentResourceContext() {
   };
 }
 
-function createProxyServer(callerKey) {
+function createProxyServer({ callerKey, callerCategory }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -420,7 +481,7 @@ function createProxyServer(callerKey) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey }));
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey, callerCategory }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const context = currentResourceContext();
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
@@ -485,6 +546,12 @@ function skillCallerKeyFromRequest(req) {
     staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
     sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
   });
+}
+
+function callerCategoryFromRequest(req) {
+  if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) return 'static-bearer';
+  if (req.auth?.clientId) return 'oauth';
+  return 'anonymous';
 }
 
 function getProvidedAuthorizationToken(authorizationHeader) {
@@ -657,7 +724,10 @@ const transports = {};
 
 async function createTransport(req) {
   let transport;
-  const server = createProxyServer(skillCallerKeyFromRequest(req));
+  const server = createProxyServer({
+    callerKey: skillCallerKeyFromRequest(req),
+    callerCategory: callerCategoryFromRequest(req)
+  });
 
   if (!useStatefulMcpSessions) {
     transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -779,6 +849,7 @@ async function shutdown() {
   serverInstance.close();
   stopSkillCatalogWatcher();
   workspaceRegistry.close();
+  toolMetrics.close();
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

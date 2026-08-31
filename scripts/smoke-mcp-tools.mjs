@@ -51,6 +51,7 @@ async function withServer(profile, fn) {
   const port = await findFreePort();
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `mcp-smoke-${profile}-`));
   const configPath = path.join(workspace, 'mcp-servers.toml');
+  const runtimeDirectory = path.join(workspace, '.runtime');
   fs.writeFileSync(configPath, `
 [server]
 name = "smoke-local-coding"
@@ -78,7 +79,8 @@ default_enabled = false
     MCP_RUNTIME_PROFILE: profile,
     ENABLE_FILESYSTEM: 'true',
     ENABLE_SHELL: 'true',
-    MCP_STATEFUL_SESSIONS: 'false'
+    MCP_STATEFUL_SESSIONS: 'false',
+    MCP_RUNTIME_DIR: runtimeDirectory
   };
 
   const child = spawn(process.execPath, ['scripts/authenticated-mcp-wrapper.mjs'], {
@@ -94,7 +96,7 @@ default_enabled = false
 
   try {
     await waitForHealth(baseUrl, child, profile);
-    return await fn({ baseUrl, profile, workspace, configPath });
+    return await fn({ baseUrl, profile, workspace, configPath, runtimeDirectory });
   } catch (error) {
     error.message += `\n--- wrapper logs (${profile}) ---\n${logs.slice(-6000)}`;
     throw error;
@@ -149,7 +151,14 @@ function portablePath(value) {
   return path.resolve(value).replaceAll('\\', '/');
 }
 
-await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
+function nodeOutputCommand(bytes) {
+  const executable = `'${process.execPath.replaceAll("'", "''")}'`;
+  const script = `'process.stdout.write(Buffer.alloc(${bytes}, 120))'`;
+  return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
+}
+
+await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirectory }) => {
+  const baseConfig = fs.readFileSync(configPath, 'utf8');
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
   assert.deepEqual(names(tools), [
@@ -161,9 +170,11 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
     'write_file'
   ]);
   for (const name of ['edit_file', 'shell_execute', 'write_file']) {
-    assert.match(tools.find(tool => tool.name === name)?.description || '', /call get_skill without arguments/i);
+    assert.match(tools.find(tool => tool.name === name)?.description || '', /get_skill\(name\)/i);
   }
-  assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /call get_skill without arguments/i);
+  assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /get_skill\(name\)/i);
+  assert.equal(tools.find(tool => tool.name === 'get_skill')?.outputSchema?.type, 'object');
+  assert.equal(tools.find(tool => tool.name === 'shell_execute')?.outputSchema?.type, 'object');
 
   const target = path.join(workspace, 'smoke.txt');
   fs.writeFileSync(target, 'context', 'utf8');
@@ -192,9 +203,12 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   assert.equal(repeatedBlocked.result.isError, true);
   assert.equal(JSON.parse(repeatedBlocked.result.content[0].text).error.message, 'Call get_skill().');
 
-  const bootstrap = await callTool(baseUrl, 8, 'get_skill', {});
+  const bootstrap = await callTool(baseUrl, 8, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);
-  assert.equal(JSON.parse(bootstrap.result.content[0].text).data.name, 'using_superpowers');
+  const bootstrapPayload = JSON.parse(bootstrap.result.content[0].text);
+  assert.equal(bootstrapPayload.data.name, 'local_coding');
+  assert.equal(bootstrapPayload.data.skillCatalog, undefined);
+  assert.deepEqual(bootstrap.result.structuredContent, bootstrapPayload);
 
   await callTool(baseUrl, 9, 'write_file', { path: target, content: 'first' });
   await callTool(baseUrl, 10, 'edit_file', {
@@ -205,6 +219,12 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   const read = await callTool(baseUrl, 11, 'read_text_file', { path: target });
   assert.equal(read.result.content[0].text, 'second');
   assert.equal(read.result.content.length, 1);
+
+  const discovery = await callTool(baseUrl, 12, 'get_skill', {});
+  const discoveryPayload = JSON.parse(discovery.result.content[0].text);
+  assert.equal(discoveryPayload.data.mode, 'discovery');
+  assert.equal(discoveryPayload.data.body, undefined);
+  assert.deepEqual(discovery.result.structuredContent, discoveryPayload);
 
   const concurrentRoots = [
     fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-a-')),
@@ -218,7 +238,9 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
     assert.equal(dynamicRead.result.content[0].text, `auto-trusted-${index}`);
   }));
   const persistedConfig = fs.readFileSync(configPath, 'utf8');
-  for (const dynamicRoot of concurrentRoots) assert.ok(persistedConfig.includes(portablePath(dynamicRoot)));
+  assert.equal(persistedConfig, baseConfig);
+  const runtimeRoots = fs.readFileSync(path.join(runtimeDirectory, 'trusted-roots.toml'), 'utf8');
+  for (const dynamicRoot of concurrentRoots) assert.ok(runtimeRoots.includes(portablePath(dynamicRoot)));
 
   const shellDynamicRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-shell-root-'));
   const shellPathCommand = process.platform === 'win32' ? '(Get-Location).Path' : 'pwd';
@@ -229,7 +251,9 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   const shellPathData = JSON.parse(shellPath.result.content[0].text);
   assert.equal(shellPathData.exitCode, 0);
   assert.equal(path.resolve(shellPathData.workingDirectoryResolved), path.resolve(shellDynamicRoot));
-  assert.ok(fs.readFileSync(configPath, 'utf8').includes(portablePath(shellDynamicRoot)));
+  assert.deepEqual(shellPath.result.structuredContent, shellPathData);
+  assert.equal(fs.readFileSync(configPath, 'utf8'), baseConfig);
+  assert.ok(fs.readFileSync(path.join(runtimeDirectory, 'trusted-roots.toml'), 'utf8').includes(portablePath(shellDynamicRoot)));
 
   const command = process.platform === 'win32'
     ? "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); Write-Output 'Tiếng Việt 日本語'; [Console]::Error.WriteLine('warning')"
@@ -243,6 +267,26 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath }) => {
   assert.equal(shellData.encoding, 'utf-8');
   assert.equal(shellData.returnedStdoutBytes <= shellData.stdoutBytes, true);
   assert.equal(shellData.returnedStderrBytes <= shellData.stderrBytes, true);
+  assert.deepEqual(shell.result.structuredContent, shellData);
+
+  const largeShell = await callTool(baseUrl, 32, 'shell_execute', {
+    command: nodeOutputCommand(256 * 1024),
+    working_directory: workspace
+  });
+  const largeShellData = JSON.parse(largeShell.result.content[0].text);
+  assert.equal(largeShellData.stdoutBytes, 256 * 1024);
+  assert.equal(largeShellData.stdoutTruncated, true);
+  assert.ok(largeShellData.stdoutSpillPath.startsWith(runtimeDirectory));
+  assert.deepEqual(largeShell.result.structuredContent, largeShellData);
+  const spillRead = await callTool(baseUrl, 33, 'read_text_file', { path: largeShellData.stdoutSpillPath });
+  assert.equal(spillRead.result.content[0].text.length, 256 * 1024);
+  assert.match(spillRead.result.content[0].text, /^x+$/);
+
+  const metricsText = fs.readFileSync(path.join(runtimeDirectory, 'mcp-calls.ndjson'), 'utf8');
+  const metrics = metricsText.trim().split('\n').map(JSON.parse);
+  assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.truncated && metric.spill));
+  assert.ok(metrics.every(metric => metric.callerCategory === 'static-bearer'));
+  assert.doesNotMatch(metricsText, /process\.stdout\.write|Tiếng Việt|warning/);
   observedProfiles.yolo = names(tools);
 });
 

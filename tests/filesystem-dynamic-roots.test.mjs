@@ -44,7 +44,8 @@ test('official filesystem hot-activates a persisted path before the same operati
   const configPath = path.join(temp, 'mcp-servers.toml');
   fs.mkdirSync(initialRoot);
   fs.mkdirSync(addedRoot);
-  fs.writeFileSync(configPath, `[trusted_roots]\nroots = ["${initialRoot.replaceAll('\\', '/')}"]\n`, 'utf8');
+  const baseConfig = `[trusted_roots]\nroots = ["${initialRoot.replaceAll('\\', '/')}"]\n`;
+  fs.writeFileSync(configPath, baseConfig, 'utf8');
 
   const registry = createWorkspaceRegistry({ configPath, repoRoot: initialRoot, watchIntervalMs: 25 });
   const transport = new StdioClientTransport({ command: process.execPath, args: [filesystemEntrypoint], stderr: 'pipe' });
@@ -73,10 +74,12 @@ test('official filesystem hot-activates a persisted path before the same operati
     const read = await client.callTool({ name: 'read_text_file', arguments: { path: target } });
     assert.equal(read.content[0].text, 'second');
 
-    const persisted = fs.readFileSync(configPath, 'utf8');
-    assert.equal((persisted.match(new RegExp(addedRoot.replaceAll('\\', '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), baseConfig);
+    const runtimeRootsPath = registry.snapshot().runtimeRootsPath;
+    const persisted = fs.readFileSync(runtimeRootsPath, 'utf8');
+    assert.equal(persisted.includes(addedRoot.replaceAll('\\', '/')), true);
 
-    fs.writeFileSync(configPath, `[trusted_roots]\nroots = ["${initialRoot.replaceAll('\\', '/')}"]\n`, 'utf8');
+    fs.rmSync(runtimeRootsPath, { force: true });
     await registry.reloadFromDisk('revoke-test');
     const denied = await client.callTool({ name: 'read_text_file', arguments: { path: target } });
     assert.equal(denied.isError, true);
