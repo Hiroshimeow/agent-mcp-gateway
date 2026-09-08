@@ -184,7 +184,28 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   }
   assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /get_skill\(name\)/i);
   assert.equal(tools.find(tool => tool.name === 'get_skill')?.outputSchema?.type, 'object');
-  assert.equal(tools.find(tool => tool.name === 'shell_execute')?.outputSchema?.type, 'object');
+  const shellOutputSchema = tools.find(tool => tool.name === 'shell_execute')?.outputSchema;
+  assert.equal(shellOutputSchema?.type, 'object');
+  for (const redundantField of [
+    'command',
+    'commandBytes',
+    'returnedCommandBytes',
+    'commandTruncated',
+    'workingDirectoryRequested',
+    'workingDirectoryRequestedBytes',
+    'returnedWorkingDirectoryRequestedBytes',
+    'workingDirectoryRequestedTruncated',
+    'workingDirectoryResolvedBytes',
+    'returnedWorkingDirectoryResolvedBytes',
+    'workingDirectoryResolvedTruncated',
+    'returnedStdoutBytes',
+    'returnedStderrBytes',
+    'stdoutHeadBytes',
+    'stdoutTailBytes',
+    'stderrHeadBytes',
+    'stderrTailBytes',
+    'encoding'
+  ]) assert.equal(shellOutputSchema?.properties?.[redundantField], undefined);
 
   const target = path.join(workspace, 'smoke.txt');
   fs.writeFileSync(target, 'context', 'utf8');
@@ -274,9 +295,12 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.match(shellData.stdout, /Tiếng Việt 日本語/);
   assert.match(shellData.stderr, /warning/);
   assert.equal(shellData.stderrClassification, 'warning');
-  assert.equal(shellData.encoding, 'utf-8');
-  assert.equal(shellData.returnedStdoutBytes <= shellData.stdoutBytes, true);
-  assert.equal(shellData.returnedStderrBytes <= shellData.stderrBytes, true);
+  assert.equal(shellData.stdoutTruncated, false);
+  assert.equal(shellData.stderrTruncated, false);
+  assert.equal('command' in shellData, false);
+  assert.equal('encoding' in shellData, false);
+  assert.equal('returnedStdoutBytes' in shellData, false);
+  assert.equal('returnedStderrBytes' in shellData, false);
   assert.deepEqual(shell.result.structuredContent, shellData);
 
   const largeShell = await callTool(baseUrl, 32, 'shell_execute', {
@@ -301,8 +325,9 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const longShellData = JSON.parse(longShell.parsed.result.content[0].text);
   assert.equal(longShellData.exitCode, 0);
   assert.equal(longShellData.stdout, 'xx');
-  assert.equal(longShellData.commandBytes, Buffer.byteLength(longCommand));
-  assert.equal(longShellData.commandTruncated, true);
+  assert.equal('command' in longShellData, false);
+  assert.equal('commandBytes' in longShellData, false);
+  assert.equal('commandTruncated' in longShellData, false);
   assert.ok(longShell.wireBytes <= 128 * 1024);
   observedResponseBudgets.longCommandWireBytes = longShell.wireBytes;
   assert.deepEqual(longShell.parsed.result.structuredContent, longShellData);

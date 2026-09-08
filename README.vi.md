@@ -52,9 +52,11 @@ Codegraph và ripgrep là CLI workflow, không phải MCP upstream. Skill `local
 
 ## Kết quả shell
 
-`shell_execute` trả JSON có cấu trúc: command, working directory yêu cầu/thực tế, exit code, stdout, stderr, phân loại stderr, duration, timeout, truncation metadata, original byte counts, returned byte counts và encoding UTF-8. Với `rg`, exit code `1` nghĩa là không có match, không phải gateway failure.
+`shell_execute` giữ model-facing result gọn: working directory thực tế, exit code, stdout, stderr, phân loại stderr, duration, timeout, trạng thái truncation và spill path. Original byte count chỉ xuất hiện cho stream bị truncate để agent biết kích thước dữ liệu cần recover; command echo, requested cwd, fixed encoding và các head/tail/returned-byte counter không còn lặp lại trong mỗi response. Full output quá lớn vẫn được spill ra file và có thể đọc lại. Với `rg`, exit code `1` nghĩa là không có match, không phải gateway failure.
 
 Runtime profile vẫn là `safe`, `assisted`, `yolo`. `safe` ẩn file mutation và shell; `assisted` cho phép file write nhưng ẩn shell; `yolo` expose đủ sáu core tool.
+
+Nguyên tắc và roadmap tối ưu harness được khóa tại `docs/mcp-harness-efficiency-design.md` và `docs/superpowers/plans/2026-09-09-mcp-harness-efficiency.md`; agent sau phải kiểm tra task ledger ở đó trước khi triển khai để tránh làm trùng.
 
 ## Phát triển
 

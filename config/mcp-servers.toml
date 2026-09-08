@@ -16,21 +16,17 @@ instructions = "Use read_text_file, write_file, and edit_file for file content; 
 # Forward slashes avoid TOML escaping for Windows paths.
 roots = [
   { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" },
-  { path = "E:/python_project/multi-run-apps", project_id = "multi-run-apps", display_name = "multi-run-apps" },
-  { path = "E:/python_project/Screens-Trans-Chatbot", project_id = "screens-trans-chatbot", display_name = "Screens-Trans-Chatbot" },
-  { path = "E:/python_project/free-tunnel", project_id = "hport", display_name = "hport" },
-  { path = "E:/python_project/local-live-caption-engine", project_id = "local-live-caption-engine", display_name = "local-live-caption-engine" },
-  { path = "E:/git-project/OpenClaw-bot-review", project_id = "openclaw-bot-review", display_name = "OpenClaw Bot Review" },
-  { path = "E:/git-project/paperclip", project_id = "paperclip", display_name = "Paperclip" },
-  { path = "E:/git-project", project_id = "git-project-workspace", display_name = "Git Project Workspace Can access all repo" },
-  { path = "E:/FPT", project_id = "fpt", display_name = "FPT" },
-  { path = "E:/python_project/tampermonkey_auto", project_id = "tampermonkey_auto", display_name = "tampermonkey_auto" },
-  { path = "C:/Users/admin/personal-mcp-launcher", project_id = "personal-mcp-launcher", display_name = "Personal MCP Launcher" },
+  { path = "/home/ayumi/Workspace/git_project/Screens-Trans-Chatbot", project_id = "screens-trans-chatbot", display_name = "Screens-Trans-Chatbot" },
+  { path = "/home/ayumi/Workspace/git_project/hport", project_id = "hport", display_name = "hport" },
+  { path = "/home/ayumi/Workspace/OpenClaw-bot-review", project_id = "openclaw-bot-review", display_name = "OpenClaw Bot Review" },
+  { path = "/home/ayumi/Workspace/git_project", project_id = "git-project-workspace", display_name = "Git Project Workspace Can access all repo" },
+  { path = "/home/ayumi/Workspace/fpt", project_id = "fpt", display_name = "FPT" },
+  { path = "/home/ayumi/.openclaw/workspace/skills/", project_id = "openclaw-skills", display_name = "OpenClaw Skills" },
 ]
 
 [openai_tunnel]
 enabled = false
-command = "C:/Users/admin/personal-mcp-launcher/tools/tunnel-client-dist/tunnel-client.exe"
+command = "tunnel-client"
 profile = "local-gpt"
 
 [external_mcp]

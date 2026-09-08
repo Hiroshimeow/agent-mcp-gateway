@@ -184,7 +184,8 @@ try {
       arguments: { command: buildNodeOutputCommand(bytes), working_directory: workspace }
     });
     const payload = JSON.parse(sample.parsed.result.content[0].text);
-    assert.equal(payload.stdoutBytes, bytes);
+    const observedStdoutBytes = payload.stdoutTruncated ? payload.stdoutBytes : Buffer.byteLength(payload.stdout || '', 'utf8');
+    assert.equal(observedStdoutBytes, bytes);
     assert.equal(payload.exitCode, 0);
     if (payload.stdoutSpillPath) {
       const raw = fs.readFileSync(payload.stdoutSpillPath);

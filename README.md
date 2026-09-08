@@ -52,9 +52,11 @@ Codegraph and ripgrep are CLI workflows, not MCP upstreams. The `local_coding` s
 
 ## Shell result
 
-`shell_execute` returns structured JSON containing the command, requested/resolved working directory, exit code, stdout, stderr, stderr classification, duration, timeout state, truncation metadata, original byte counts, returned byte counts, and UTF-8 encoding. Exit code `1` from `rg` means no matches, not a gateway failure.
+`shell_execute` keeps its model-facing JSON compact: resolved working directory, exit code, stdout, stderr, stderr classification, duration, timeout state, truncation flags, and spill paths. Original byte counts are included only for truncated streams; command echo, requested cwd, fixed encoding, and detailed returned/head/tail byte counters stay out of normal model results. Oversized raw output remains recoverable from spill files. Exit code `1` from `rg` means no matches, not a gateway failure.
 
 Runtime profiles remain `safe`, `assisted`, and `yolo`. `safe` hides mutating filesystem tools and shell; `assisted` permits file writes but hides shell; `yolo` exposes all six core tools.
+
+Harness-efficiency principles and the durable task ledger live in `docs/mcp-harness-efficiency-design.md` and `docs/superpowers/plans/2026-09-09-mcp-harness-efficiency.md`; future agents should check the ledger before implementing overlapping optimization work.
 
 ## Development
 

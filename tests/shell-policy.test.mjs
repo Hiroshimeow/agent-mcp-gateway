@@ -27,14 +27,18 @@ test('validateShellCommand rejects a working directory outside current roots', (
   );
 });
 
-test('shell descriptor directs content operations to filesystem tools and preserves profile annotations', () => {
-  const description = buildShellExecuteDescription('Trusted roots: C:/repo');
+test('shell descriptor stays static while directing content operations to filesystem tools', () => {
+  const description = buildShellExecuteDescription();
   assert.match(description, /get_skill\(name\)/i);
   assert.match(description, /terminal access/);
   assert.match(description, /content search/);
   assert.match(description, /git, tests, builds/);
   assert.match(description, /read_text_file, write_file, or edit_file/);
   assert.match(description, /working_directory/);
+  assert.match(description, /bounded head\/tail preview/i);
+  assert.match(description, /spill path/i);
+  assert.doesNotMatch(description, /Trusted roots:/i);
+  assert.doesNotMatch(description, /C:\/repo/i);
   assert.deepEqual(buildShellExecuteAnnotations(), {
     readOnlyHint: false,
     idempotentHint: false,
