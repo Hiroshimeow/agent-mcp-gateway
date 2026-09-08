@@ -19,7 +19,7 @@ Dùng official filesystem cho nội dung file. Dùng `shell_execute` cho `rg`, G
 
 Copy một folder chuẩn `<name>/SKILL.md` vào `scripts/skills/`. Gateway tự nhận add/edit/remove mà không restart, phát prompt/resource list-changed notification, và trả catalog hiện tại gồm name, alias, description trong `get_skill()` qua field `skillCatalog`.
 
-Lần gọi `read_text_file` hoặc `image_preview` đầu tiên của một caller đã xác thực sẽ nhận một advisory ngắn. Trước lần đầu gọi local `write_file`, `edit_file` hoặc `shell_execute`, gateway yêu cầu caller đó load thành công một `get_skill(...)`. Lần block đầu giải thích đầy đủ; các lần lặp chỉ trả `Call get_skill().`. Sau khi load skill thành công, đúng ba local tool này được mở trong mặc định bốn giờ (`MCP_SKILL_BOOTSTRAP_TTL_MS`). Tool đọc và external MCP tool nằm ngoài local bootstrap gate này.
+Lần gọi `read_text_file` hoặc `image_preview` đầu tiên của một caller đã xác thực sẽ nhận một advisory ngắn. Các thao tác local `write_file`, `edit_file` và `shell_execute` không yêu cầu load skill; chỉ gọi `get_skill(name)` khi skill đó thay đổi đáng kể workflow. Load thành công sẽ ẩn advisory tiếp theo trong mặc định bốn giờ (`MCP_SKILL_BOOTSTRAP_TTL_MS`).
 
 `SKILL.md` cần YAML frontmatter có `name` và `description` đủ rõ để agent chọn. `user-invocable: false` sẽ ẩn skill khỏi MCP prompts; `disable-model-invocation: true` vẫn cho load rõ ràng nhưng loại khỏi auto-selection. Thay đổi lỗi sẽ giữ catalog hợp lệ gần nhất.
 

@@ -78,9 +78,16 @@ test('vendored catalog excludes non-redistributable and font-bearing Anthropic s
 });
 
 test('all managed skill folders are accepted by the live registry', () => {
-  const expected = lock.sources.reduce((total, source) => total + source.skills.length, 0);
   const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
-  assert.equal(registry.listSkills().length, expected);
+  const registeredTargets = new Set(registry.listSkills().map(skill => {
+    const sourcePath = registry.getSkillDefinition(skill.name)?.sourcePath;
+    return sourcePath ? path.basename(path.dirname(sourcePath)) : null;
+  }).filter(Boolean));
+  for (const source of lock.sources) {
+    for (const skill of source.skills) {
+      assert.ok(registeredTargets.has(skill.target), `managed skill rejected: ${skill.target}`);
+    }
+  }
 });
 
 test('design skills expose non-overlapping selection triggers in the live catalog', () => {

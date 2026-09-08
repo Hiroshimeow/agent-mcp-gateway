@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 
-export const SKILL_BOOTSTRAP_CODE = 'SKILL_BOOTSTRAP_REQUIRED';
 export const SKILL_CHECK_ADVISORY = 'Skill hint: for specialized workflows, load a matching skill with get_skill(name). Routine filesystem and shell operations do not require skill loading.';
 export const SKILL_TOOL_BOOTSTRAP_NOTICE = 'For specialized workflows, load a matching skill with get_skill(name) when it materially changes the task approach.';
 
@@ -32,7 +31,7 @@ export function createSkillBootstrapGate({ ttlMs = 4 * 60 * 60 * 1_000, now = Da
     const existing = states.get(key);
     if (existing && existing.expiresAt > currentTime) return existing;
     if (existing) states.delete(key);
-    const state = { advisoryShown: false, blockedCount: 0, bootstrapped: false, expiresAt: currentTime + ttlMs };
+    const state = { advisoryShown: false, skillLoaded: false, expiresAt: currentTime + ttlMs };
     states.set(key, state);
     if (states.size > maxEntries) states.delete(states.keys().next().value);
     return state;
@@ -46,27 +45,15 @@ export function createSkillBootstrapGate({ ttlMs = 4 * 60 * 60 * 1_000, now = Da
     takeReadAdvisory(callerKey, toolName) {
       if (!READ_TOOLS.has(String(toolName || ''))) return null;
       const state = activeState(callerKey);
-      if (state.bootstrapped || state.advisoryShown) return null;
+      if (state.skillLoaded || state.advisoryShown) return null;
       state.advisoryShown = true;
       refreshExpiry(state);
       return SKILL_CHECK_ADVISORY;
     },
 
-    checkTool(callerKey, toolName) {
-      if (!CHANGING_TOOLS.has(String(toolName || ''))) return null;
+    markSkillLoaded(callerKey) {
       const state = activeState(callerKey);
-      // Skill loading is progressive disclosure, not a safety gate.
-      // Runtime permissions, trusted roots, and tool profiles remain the enforcement boundary.
-      if (!state.bootstrapped) {
-        state.advisoryShown = true;
-        refreshExpiry(state);
-      }
-      return null;
-    },
-
-    markBootstrapped(callerKey) {
-      const state = activeState(callerKey);
-      state.bootstrapped = true;
+      state.skillLoaded = true;
       refreshExpiry(state);
     }
   };

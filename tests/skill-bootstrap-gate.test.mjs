@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  SKILL_BOOTSTRAP_CODE,
   SKILL_CHECK_ADVISORY,
   SKILL_TOOL_BOOTSTRAP_NOTICE,
   buildSkillCallerKey,
   createSkillBootstrapGate,
   decorateSkillBootstrapDescription
 } from '../scripts/skill-bootstrap-gate.mjs';
+import { SKILL_AGENT_INSTRUCTIONS } from '../scripts/skills/index.mjs';
 
 function clock(start = 1_000) {
   let now = start;
@@ -31,7 +31,7 @@ test('read advisory is emitted once per caller until TTL expiry', () => {
   assert.equal(gate.takeReadAdvisory('caller-a', 'read_text_file'), SKILL_CHECK_ADVISORY);
 });
 
-test('local changing tool descriptions allow direct known-skill bootstrap or discovery', () => {
+test('local changing tool descriptions describe optional skill disclosure', () => {
   assert.match(SKILL_TOOL_BOOTSTRAP_NOTICE, /get_skill\(name\)/i);
   assert.match(SKILL_TOOL_BOOTSTRAP_NOTICE, /materially changes the task approach/i);
   assert.match(decorateSkillBootstrapDescription('write_file', 'Write a file.'), /^For specialized workflows/);
@@ -40,35 +40,28 @@ test('local changing tool descriptions allow direct known-skill bootstrap or dis
   assert.equal(decorateSkillBootstrapDescription('external_create_file', 'Create remotely.'), 'Create remotely.');
 });
 
-test('local changing tools no longer require bootstrap and remain allowed', () => {
-  const gate = createSkillBootstrapGate({ ttlMs: 1_000, now: () => 1_000 });
-
-  assert.equal(gate.checkTool('caller-a', 'edit_file'), null);
-  assert.equal(gate.checkTool('caller-a', 'shell_execute'), null);
-  assert.equal(gate.checkTool('caller-a', 'write_file'), null);
+test('server instructions make skill loading task-relevant rather than a mutation prerequisite', () => {
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /materially change the work/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /Before first use of local write_file/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /satisfies bootstrap/i);
 });
 
-test('a successful skill load unlocks the caller without repeated prompting', () => {
+test('a successful skill load suppresses further read advice for the caller', () => {
   const gate = createSkillBootstrapGate({ ttlMs: 1_000, now: () => 1_000 });
 
-  assert.equal(gate.checkTool('caller-a', 'shell_execute'), null);
-  gate.markBootstrapped('caller-a');
+  gate.markSkillLoaded('caller-a');
 
-  assert.equal(gate.checkTool('caller-a', 'shell_execute'), null);
-  assert.equal(gate.checkTool('caller-a', 'edit_file'), null);
   assert.equal(gate.takeReadAdvisory('caller-a', 'read_text_file'), null);
 });
 
-test('bootstrap state expires and starts a fresh advisory/block cycle', () => {
+test('skill disclosure state expires and starts a fresh advisory cycle', () => {
   const time = clock();
   const gate = createSkillBootstrapGate({ ttlMs: 100, now: time.now });
 
-  gate.markBootstrapped('caller-a');
-  assert.equal(gate.checkTool('caller-a', 'write_file'), null);
+  gate.markSkillLoaded('caller-a');
 
   time.advance(101);
   assert.equal(gate.takeReadAdvisory('caller-a', 'read_text_file'), SKILL_CHECK_ADVISORY);
-  assert.equal(gate.checkTool('caller-a', 'write_file'), null);
 });
 
 test('caller key follows verified client identity instead of rotating access tokens', () => {
