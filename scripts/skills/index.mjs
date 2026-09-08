@@ -237,8 +237,8 @@ const BUILTIN_SKILLS = new Map([
       '',
       '## Load Protocol',
       '',
-      '1. If the relevant skill name is already known, call get_skill with that name or alias directly; a successful direct load satisfies bootstrap.',
-      '2. If the relevant skill is not known, call get_skill() once for compact discovery, compare the returned catalog with the task, then load the smallest relevant skill.',
+      '1. Load a skill only when it materially changes the task. If its name is already known, call get_skill with that name or alias directly.',
+      '2. If a task-relevant skill is not known, call get_skill() once for compact discovery, compare the returned catalog with the task, then load the smallest relevant skill.',
       '3. Read the returned named skill body once, keep it in task context, and do not call get_skill again for that same skill in the same task unless the user asks to refresh.',
       '4. Prefer one skill at a time. Load multiple skills only when each one changes the work materially.',
       '5. Apply the loaded skill as operating guidance, while system, developer, and explicit user instructions remain higher priority.',
@@ -535,7 +535,7 @@ export const SKILL_ROUTING_POLICY = Object.freeze([
 ]);
 
 export const SKILL_AGENT_INSTRUCTIONS = [
-  'Before first use of local write_file, edit_file, or shell_execute, call get_skill with a known skill name directly, or call get_skill without arguments only when discovery is needed; any successful skill load satisfies bootstrap.',
+  'For specialized workflows, load a matching skill with get_skill(name) when it materially changes the work. Routine filesystem and shell operations do not require skill loading.',
   'Do not probe shell_execute first.',
   `Routing policy: ${SKILL_ROUTING_POLICY.join(' ')}`
 ].join(' ');

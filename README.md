@@ -19,7 +19,7 @@ Use the official filesystem tools for file content. Use `shell_execute` for `rg`
 
 Copy a standard `<name>/SKILL.md` folder into `scripts/skills/`. The gateway discovers additions, edits, and removals without restart, emits prompt/resource list-changed notifications, and returns the current names, aliases, and descriptions through `get_skill()` as `skillCatalog`.
 
-The first `read_text_file` or `image_preview` call for an authenticated caller adds one short skill advisory. Before that caller's first local `write_file`, `edit_file`, or `shell_execute`, the gateway requires one successful `get_skill(...)` call. The first block explains what to do; repeated blocks use only `Call get_skill().` Successful skill loading unlocks those three local tools for four hours by default (`MCP_SKILL_BOOTSTRAP_TTL_MS`). Read operations and external MCP tools remain outside this local bootstrap gate.
+The first `read_text_file` or `image_preview` call for an authenticated caller adds one short skill advisory. Local `write_file`, `edit_file`, and `shell_execute` operations do not require skill loading; load a matching skill with `get_skill(name)` only when it materially changes the workflow. A successful load suppresses further advisory for four hours by default (`MCP_SKILL_BOOTSTRAP_TTL_MS`).
 
 `SKILL.md` requires YAML frontmatter with `name` and a selection-quality `description`. Optional `user-invocable: false` hides it from MCP prompts; `disable-model-invocation: true` keeps explicit loading but removes it from automatic agent selection. Invalid changes keep the last valid catalog.
 

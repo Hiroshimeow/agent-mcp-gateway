@@ -231,24 +231,31 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   });
   assert.notEqual(directEdit.result.isError, true);
 
-  const bootstrap = await callTool(baseUrl, 8, 'get_skill', { name: 'local_coding' });
+  const directShell = await callTool(baseUrl, 8, 'shell_execute', {
+    command: nodeOutputCommand(2),
+    working_directory: workspace
+  });
+  assert.notEqual(directShell.result.isError, true);
+  assert.equal(JSON.parse(directShell.result.content[0].text).stdout, 'xx');
+
+  const bootstrap = await callTool(baseUrl, 9, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);
   const bootstrapPayload = JSON.parse(bootstrap.result.content[0].text);
   assert.equal(bootstrapPayload.data.name, 'local_coding');
   assert.equal(bootstrapPayload.data.skillCatalog, undefined);
   assert.deepEqual(bootstrap.result.structuredContent, bootstrapPayload);
 
-  await callTool(baseUrl, 9, 'write_file', { path: target, content: 'first' });
-  await callTool(baseUrl, 10, 'edit_file', {
+  await callTool(baseUrl, 10, 'write_file', { path: target, content: 'first' });
+  await callTool(baseUrl, 11, 'edit_file', {
     path: target,
     edits: [{ oldText: 'first', newText: 'second' }],
     dryRun: false
   });
-  const read = await callTool(baseUrl, 11, 'read_text_file', { path: target });
+  const read = await callTool(baseUrl, 12, 'read_text_file', { path: target });
   assert.equal(read.result.content[0].text, 'second');
   assert.equal(read.result.content.length, 1);
 
-  const discovery = await callTool(baseUrl, 12, 'get_skill', {});
+  const discovery = await callTool(baseUrl, 13, 'get_skill', {});
   const discoveryPayload = JSON.parse(discovery.result.content[0].text);
   assert.equal(discoveryPayload.data.mode, 'discovery');
   assert.equal(discoveryPayload.data.body, undefined);
@@ -377,7 +384,7 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, one-time skill advisory, bootstrap gate, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and final serialized shell response budgets',
+  checked: 'exact core catalog, progressive skill advisory, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and final serialized shell response budgets',
   observedProfiles,
   observedResponseBudgets
 }, null, 2));

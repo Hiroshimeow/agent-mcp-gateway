@@ -74,7 +74,7 @@ test('get_skill discovery returns compact routing metadata without a skill body'
   }
 });
 
-test('get_skill named load returns only the requested skill and supports direct bootstrap wording', () => {
+test('get_skill named load returns only the requested skill with optional workflow guidance', () => {
   const payload = getSkillTool({ name: 'local-coding' });
   assert.equal(payload.mode, 'skill');
   assert.equal(payload.name, 'local_coding');
@@ -83,8 +83,9 @@ test('get_skill named load returns only the requested skill and supports direct 
   assert.equal(payload.skillCatalog, undefined);
   assert.equal(payload.routingPolicy, undefined);
   assert.equal(payload.availableSkills, undefined);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /call get_skill with a known skill name directly/i);
-  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /call get_skill without arguments.*then load/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /load a matching skill with get_skill\(name\).*materially changes the work/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /routine filesystem and shell operations do not require skill loading/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /satisfies bootstrap/i);
   assert.match(SKILL_AGENT_INSTRUCTIONS, /do not probe shell_execute first/i);
 });
 

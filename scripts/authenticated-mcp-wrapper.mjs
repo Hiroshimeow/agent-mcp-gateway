@@ -334,13 +334,6 @@ function boundedShellToolText(value) {
   throw new Error(`shell_execute response exceeds ${DEFAULT_SHELL_RESPONSE_BUDGET_BYTES} byte budget`);
 }
 
-function structuredToolError(toolName, error) {
-  return {
-    ...structuredToolText({ ok: false, tool: toolName, error }),
-    isError: true
-  };
-}
-
 function appendSkillAdvisory(result, advisory) {
   if (!advisory || result?.isError) return result;
   return {
@@ -352,9 +345,6 @@ function appendSkillAdvisory(result, advisory) {
 async function routeToolCall(request, { callerKey } = {}) {
   const toolName = request.params.name;
   assertToolAllowedForProfile(toolName, runtimeProfile);
-
-  const bootstrapError = skillBootstrapGate.checkTool(callerKey, toolName);
-  if (bootstrapError) return structuredToolError(toolName, bootstrapError);
 
   if (toolName === 'shell_execute' && enableShell) {
     const args = request.params.arguments || {};
@@ -395,7 +385,7 @@ async function routeToolCall(request, { callerKey } = {}) {
   if (toolName === 'image_preview') await ensureImageTarget(request.params.arguments || {});
   if (isLocalCustomTool(toolName)) {
     const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext());
-    if (toolName === 'get_skill') skillBootstrapGate.markBootstrapped(callerKey);
+    if (toolName === 'get_skill') skillBootstrapGate.markSkillLoaded(callerKey);
     return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
