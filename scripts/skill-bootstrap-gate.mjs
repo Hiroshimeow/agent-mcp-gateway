@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 
 export const SKILL_BOOTSTRAP_CODE = 'SKILL_BOOTSTRAP_REQUIRED';
-export const SKILL_CHECK_ADVISORY = 'Skill check: before using local write_file, edit_file, or shell_execute, load a known workflow with get_skill(name), or call get_skill() only when discovery is needed.';
-export const SKILL_TOOL_BOOTSTRAP_NOTICE = 'Before first use of this local changing tool, load a known workflow with get_skill(name), or call get_skill() only when discovery is needed.';
+export const SKILL_CHECK_ADVISORY = 'Skill hint: for specialized workflows, load a matching skill with get_skill(name). Routine filesystem and shell operations do not require skill loading.';
+export const SKILL_TOOL_BOOTSTRAP_NOTICE = 'For specialized workflows, load a matching skill with get_skill(name) when it materially changes the task approach.';
 
 const CHANGING_TOOLS = new Set(['write_file', 'edit_file', 'shell_execute']);
 const READ_TOOLS = new Set(['read_text_file', 'image_preview']);
@@ -55,15 +55,13 @@ export function createSkillBootstrapGate({ ttlMs = 4 * 60 * 60 * 1_000, now = Da
     checkTool(callerKey, toolName) {
       if (!CHANGING_TOOLS.has(String(toolName || ''))) return null;
       const state = activeState(callerKey);
-      if (state.bootstrapped) return null;
-      state.blockedCount += 1;
-      refreshExpiry(state);
-      return {
-        code: SKILL_BOOTSTRAP_CODE,
-        message: state.blockedCount === 1
-          ? 'Before the first local write_file, edit_file, or shell_execute operation, load a known workflow with get_skill(name), or call get_skill() when discovery is needed.'
-          : 'Call get_skill().'
-      };
+      // Skill loading is progressive disclosure, not a safety gate.
+      // Runtime permissions, trusted roots, and tool profiles remain the enforcement boundary.
+      if (!state.bootstrapped) {
+        state.advisoryShown = true;
+        refreshExpiry(state);
+      }
+      return null;
     },
 
     markBootstrapped(callerKey) {

@@ -212,27 +212,24 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
 
   const firstRead = await callTool(baseUrl, 3, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-a' });
   assert.equal(firstRead.result.content[0].text, 'context');
-  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /before using local write_file, edit_file, or shell_execute.*get_skill/i.test(item.text)));
+  assert.equal(firstRead.result.content[0].text, 'context');
+  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /Skill hint.*get_skill/i.test(item.text)));
 
   const secondRead = await callTool(baseUrl, 4, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-b' });
   assert.equal(secondRead.result.content.length, 1);
 
-  const firstBlocked = await callTool(baseUrl, 5, 'write_file', { path: target, content: 'first' });
-  assert.equal(firstBlocked.result.isError, true);
-  const firstBlockedPayload = JSON.parse(firstBlocked.result.content[0].text);
-  assert.equal(firstBlockedPayload.error.code, 'SKILL_BOOTSTRAP_REQUIRED');
-  assert.match(firstBlockedPayload.error.message, /before the first local write_file, edit_file, or shell_execute operation/i);
+  const firstWrite = await callTool(baseUrl, 5, 'write_file', { path: target, content: 'first' });
+  assert.notEqual(firstWrite.result.isError, true);
 
   const invalidSkill = await callTool(baseUrl, 6, 'get_skill', { name: 'missing-smoke-skill' });
   assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
 
-  const repeatedBlocked = await callTool(baseUrl, 7, 'edit_file', {
+  const directEdit = await callTool(baseUrl, 7, 'edit_file', {
     path: target,
-    edits: [{ oldText: 'context', newText: 'blocked' }],
+    edits: [{ oldText: 'first', newText: 'edited' }],
     dryRun: false
   });
-  assert.equal(repeatedBlocked.result.isError, true);
-  assert.equal(JSON.parse(repeatedBlocked.result.content[0].text).error.message, 'Call get_skill().');
+  assert.notEqual(directEdit.result.isError, true);
 
   const bootstrap = await callTool(baseUrl, 8, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);

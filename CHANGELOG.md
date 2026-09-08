@@ -15,6 +15,7 @@ Notable changes are recorded here. Add the newest entry first and keep each item
 
 - Made the `shell_execute` model-facing description independent of dynamic trusted-root values while preserving runtime enforcement metadata.
 - Compacted `shell_execute` results to decision/recovery fields and emit original byte counts only for truncated streams.
+- Changed skill bootstrap from a mandatory mutation gate to progressive disclosure; runtime permissions remain the enforcement boundary.
 - Updated the MCP benchmark path for the compact shell-result contract while preserving exact spill validation.
 - Added concise skill routing guidance to MCP instructions, `get_skill` responses, and local changing-tool descriptions.
 - Hardened managed skill sync so every upstream file read or copy is realpath-contained and symlink-free.

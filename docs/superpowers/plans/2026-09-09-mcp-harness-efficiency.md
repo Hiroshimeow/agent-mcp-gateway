@@ -28,7 +28,7 @@
 | HARN-P0-001 | DONE | Remove dynamic trusted-root prose from `shell_execute` description | Low | Stable/smaller schema, less cache churn |
 | HARN-P0-002 | DONE | Compact normal model-facing shell result while retaining recovery fields and telemetry | Low-Medium | Removes repeated diagnostic tokens on the highest-volume tool |
 | HARN-P0-003 | PLANNED | Add schema/result byte benchmark report to smoke/benchmark tooling | Low | Prevents speculative token tuning |
-| HARN-P1-001 | PLANNED | Replace mandatory skill bootstrap with measured progressive-disclosure mode | Medium | Removes avoidable `get_skill` round trips |
+| HARN-P1-001 | IN PROGRESS | Replace mandatory skill bootstrap with measured progressive-disclosure mode | Medium | Removes avoidable `get_skill` round trips |
 | HARN-P1-002 | PLANNED | Reduce duplicate skill prompt/resource exposure for clients that only need `get_skill` | Medium | Smaller catalogs/context |
 | HARN-P1-003 | PLANNED | Add bounded/paged text-read policy above official filesystem tool | Medium | Prevents accidental large file reads |
 | HARN-P1-004 | PLANNED | Simplify `image_preview` aliases after compatibility inventory | Medium | Smaller schema, clearer selection |
@@ -365,3 +365,8 @@ The user authorized immediate inline execution of simple, low-risk, high-value i
 - `MCP_BENCH_WARMUP=0 MCP_BENCH_ITERATIONS=1 MCP_BENCH_SHELL_SIZES=1024,65536 node scripts/benchmark-mcp-p0p1.mjs`: PASS; spill validation exact for 64 KiB raw output.
 - `git diff --check`: PASS.
 - `npm run skills:check`: external-drift gate currently FAILS because pinned Ponytail, Superpowers, Anthropic, Stitch and Hallmark sources have newer upstream commits; no skill sync was performed because it is unrelated to HARN-P0-001/002.
+
+
+## HARN-P1-001 implementation note
+
+2026-09-09: converted bootstrap from a hard execution gate to a progressive disclosure hint. Changing tools remain protected by runtime profile, trusted roots, and path validation. Verification pending full regression and post-restart telemetry comparison.
