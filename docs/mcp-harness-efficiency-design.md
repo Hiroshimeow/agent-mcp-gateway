@@ -125,7 +125,7 @@ Deferred loading is for optional/external catalogs whose schema cost is material
 
 Skills should be loaded when they materially change the work. A skill mechanism should not exist merely to force a round trip.
 
-The current mandatory skill bootstrap predates this design and remains intentionally unchanged until measured migration work is completed. Its future replacement must preserve any useful workflow/safety behavior without requiring unrelated calls.
+The former mandatory skill bootstrap has been replaced by progressive disclosure. Runtime profile, trusted-root, path, and authentication checks remain the enforcement boundary; task-relevant skills should still be loaded when they materially govern the work, without blocking unrelated operations.
 
 ### P7. Dedicated tools need distinct semantics
 
@@ -226,7 +226,7 @@ Long-term direction:
 - discovery must remain compact;
 - skill content should be loaded once per task unless refresh is needed;
 - prompt/resource duplicates should be optional compatibility surfaces where clients do not need them;
-- mandatory bootstrap should be replaced only after measuring task quality and safety impact.
+- progressive disclosure remains the default; task-relevant skill routing should be preserved without restoring a mandatory bootstrap gate.
 
 ## 9. Change-control rule for future agents
 

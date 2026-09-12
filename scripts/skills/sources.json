@@ -21,23 +21,35 @@
       ],
       "overrides": {
         "ponytail": {
-          "aliases": ["lazy", "lazy_mode", "yagni"],
+          "aliases": [
+            "lazy",
+            "lazy_mode",
+            "yagni"
+          ],
           "uri": "skill://ponytail/ponytail/SKILL.md"
         },
         "ponytail-audit": {
-          "aliases": ["audit_over_engineering"],
+          "aliases": [
+            "audit_over_engineering"
+          ],
           "uri": "skill://ponytail/ponytail-audit/SKILL.md"
         },
         "ponytail-debt": {
-          "aliases": ["debt_ledger"],
+          "aliases": [
+            "debt_ledger"
+          ],
           "uri": "skill://ponytail/ponytail-debt/SKILL.md"
         },
         "ponytail-help": {
-          "aliases": ["ponytail_commands"],
+          "aliases": [
+            "ponytail_commands"
+          ],
           "uri": "skill://ponytail/ponytail-help/SKILL.md"
         },
         "ponytail-review": {
-          "aliases": ["review_for_over_engineering"],
+          "aliases": [
+            "review_for_over_engineering"
+          ],
           "uri": "skill://ponytail/ponytail-review/SKILL.md"
         }
       },
@@ -93,6 +105,20 @@
               "path": "SKILL.md",
               "search": "## Setup\n\nEnsure the work happens in an isolated workspace:",
               "replace": "## Setup\n\nIf the current task supplies its own orchestration or durable state, that task's orchestration and state are authoritative whenever they conflict with this skill.\n\nEnsure the work happens in an isolated workspace:"
+            }
+          ]
+        },
+        "using-superpowers": {
+          "replacements": [
+            {
+              "path": "SKILL.md",
+              "search": "description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions",
+              "replace": "description: Use when starting work - establishes how to find and use task-relevant skills without making skill loading a prerequisite for unrelated actions"
+            },
+            {
+              "path": "SKILL.md",
+              "search": "**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.",
+              "replace": "**Invoke relevant or requested skills before the work they govern.** If no skill materially applies, proceed directly. If a skill does apply, load it before performing that governed work."
             }
           ]
         }
@@ -209,22 +235,6 @@
             "stitch_prompt"
           ],
           "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
-        }
-      },
-      "compatibility": {
-        "enhance-prompt": {
-          "replacements": [
-            {
-              "path": "SKILL.md",
-              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill. This ensures all generated pages share the \nsame visual language.",
-              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill. This ensures all generated pages share the\nsame visual language."
-            },
-            {
-              "path": "SKILL.md",
-              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \nfile using the `design-md` skill.",
-              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\nfile using the `design-md` skill."
-            }
-          ]
         }
       },
       "excluded": {
@@ -386,11 +396,6 @@
               "path": "references/upstream/study-examples.md",
               "search": "](study.md)",
               "replace": "](../study.md)"
-            },
-            {
-              "path": "references/component-cookbook.md",
-              "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n\n\n",
-              "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n"
             }
           ]
         }

@@ -110,7 +110,7 @@ test('Hallmark is a pinned managed MIT skill with explicit aliases', () => {
   assert.deepEqual(source.include, ['hallmark']);
   assert.equal(source.license, 'MIT');
   assert.equal(source.compatibility.hallmark.files.length, 3);
-  assert.equal(source.compatibility.hallmark.replacements.length, 23);
+  assert.equal(source.compatibility.hallmark.replacements.length, 22);
 
   const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
   assert.equal(registry.getSkillDefinition('anti_ai_slop')?.name, 'hallmark');
@@ -144,6 +144,13 @@ test('managed SDD preserves host task orchestration precedence across syncs', ()
 
   const readme = fs.readFileSync(path.join(skillsDirectory, 'README.md'), 'utf8');
   assert.match(readme, /Local compatibility edits to managed skills belong in `sources\.json`/);
+});
+
+test('managed using-superpowers keeps skill routing task-relevant instead of globally mandatory', () => {
+  const skill = fs.readFileSync(path.join(skillsDirectory, 'using-superpowers', 'SKILL.md'), 'utf8');
+  assert.doesNotMatch(skill, /requiring skill invocation before ANY response/i);
+  assert.doesNotMatch(skill, /BEFORE any response or action/i);
+  assert.match(skill, /If no skill materially applies, proceed directly/i);
 });
 
 test('package exposes cross-platform skill sync commands', () => {

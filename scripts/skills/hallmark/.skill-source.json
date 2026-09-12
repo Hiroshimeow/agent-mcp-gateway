@@ -142,11 +142,6 @@
         "path": "references/upstream/study-examples.md",
         "search": "](study.md)",
         "replace": "](../study.md)"
-      },
-      {
-        "path": "references/component-cookbook.md",
-        "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n\n\n",
-        "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\n"
       }
     ]
   }

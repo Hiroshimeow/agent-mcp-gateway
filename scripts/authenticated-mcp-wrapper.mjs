@@ -41,6 +41,7 @@ import {
 import { validateShellCommand } from './shell-policy.mjs';
 import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
+import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -274,12 +275,35 @@ function customToolContext() {
   };
 }
 
+function buildEditFileInputSchema(inputSchema = {}) {
+  return {
+    ...inputSchema,
+    type: 'object',
+    properties: {
+      ...(inputSchema.properties || {}),
+      old_text: { type: 'string', minLength: 1, description: 'Exact text to replace. No fuzzy matching is applied.' },
+      new_text: { type: 'string', description: 'Replacement text.' },
+      expected_replacements: { type: 'integer', minimum: 1, default: 1, description: 'Required exact occurrence count before mutation.' },
+      dry_run: { type: 'boolean', default: false, description: 'Validate and preview without writing.' }
+    },
+    required: ['path'],
+    anyOf: [
+      { required: ['edits'] },
+      { required: ['old_text', 'new_text'] }
+    ],
+    additionalProperties: false
+  };
+}
+
 function filesystemToolMeta(tool) {
   const roots = currentRoots();
   return applyToolRisk({
     ...tool,
+    inputSchema: tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema,
     name: tool.name,
-    description: decorateSkillBootstrapDescription(tool.name, tool.description),
+    description: decorateSkillBootstrapDescription(tool.name, tool.name === 'edit_file'
+      ? `${tool.description} Prefer old_text/new_text with expected_replacements for guarded exact edits; legacy edits[]/dryRun remains supported for compatibility.`
+      : tool.description),
     _meta: {
       ...(tool._meta || {}),
       trusted_roots: roots,
@@ -334,6 +358,68 @@ function boundedShellToolText(value) {
   throw new Error(`shell_execute response exceeds ${DEFAULT_SHELL_RESPONSE_BUDGET_BYTES} byte budget`);
 }
 
+function isGuardedEditArguments(args = {}) {
+  return ['old_text', 'new_text', 'expected_replacements', 'dry_run'].some(key => Object.prototype.hasOwnProperty.call(args, key));
+}
+
+async function guardedEditFile(args = {}) {
+  if (Object.prototype.hasOwnProperty.call(args, 'edits')) {
+    throw new Error('Use either legacy edits/dryRun or guarded old_text/new_text fields, not both');
+  }
+  const pathValue = args.path;
+  const readResult = await filesystemClient.callTool({ name: 'read_text_file', arguments: { path: pathValue } });
+  if (readResult?.isError) throw new Error(textFromToolResult(readResult) || 'Unable to read edit target');
+  const originalContent = textFromToolResult(readResult);
+  const prepared = prepareGuardedEdit(originalContent, {
+    oldText: args.old_text,
+    newText: args.new_text,
+    expectedReplacements: args.expected_replacements ?? 1
+  });
+
+  if (!prepared.ok) {
+    return structuredToolText({
+      ok: false,
+      tool: 'edit_file',
+      changed: false,
+      code: 'EXPECTED_REPLACEMENTS_MISMATCH',
+      expectedReplacements: prepared.expectedReplacements,
+      actualCount: prepared.actualCount,
+      guidance: 'No file was changed. Resubmit with exact old_text and the intended expected_replacements.'
+    }, { includeStructured: true });
+  }
+
+  const dryRun = args.dry_run === true;
+  if (!dryRun) {
+    const confirmResult = await filesystemClient.callTool({ name: 'read_text_file', arguments: { path: pathValue } });
+    if (confirmResult?.isError) throw new Error(textFromToolResult(confirmResult) || 'Unable to re-read edit target');
+    if (textFromToolResult(confirmResult) !== originalContent) {
+      return structuredToolText({
+        ok: false,
+        tool: 'edit_file',
+        changed: false,
+        code: 'FILE_CHANGED_DURING_EDIT',
+        guidance: 'The file changed after validation. Read it again and resubmit the exact edit.'
+      }, { includeStructured: true });
+    }
+    const writeResult = await filesystemClient.callTool({
+      name: 'write_file',
+      arguments: { path: pathValue, content: prepared.modifiedContent }
+    });
+    if (writeResult?.isError) return writeResult;
+  }
+
+  return structuredToolText({
+    ok: true,
+    tool: 'edit_file',
+    changed: !dryRun,
+    dryRun,
+    expectedReplacements: prepared.expectedReplacements,
+    actualCount: prepared.actualCount,
+    preview: prepared.preview.text,
+    previewTruncated: prepared.preview.truncated
+  }, { includeStructured: true });
+}
+
 function appendSkillAdvisory(result, advisory) {
   if (!advisory || result?.isError) return result;
   return {
@@ -377,8 +463,11 @@ async function routeToolCall(request, { callerKey } = {}) {
   }
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
-    await ensureFileTarget(request.params.arguments || {});
-    const result = await filesystemClient.callTool(request.params);
+    const fileArgs = request.params.arguments || {};
+    await ensureFileTarget(fileArgs);
+    const result = toolName === 'edit_file' && isGuardedEditArguments(fileArgs)
+      ? await guardedEditFile(fileArgs)
+      : await filesystemClient.callTool(request.params);
     return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 

@@ -184,6 +184,11 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   }
   assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /get_skill\(name\)/i);
   assert.equal(tools.find(tool => tool.name === 'get_skill')?.outputSchema?.type, 'object');
+  const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
+  assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
+  assert.equal(editInputSchema?.properties?.old_text?.minLength, 1);
+  assert.ok(editInputSchema?.anyOf?.some(entry => entry.required?.includes('edits')));
+  assert.ok(editInputSchema?.anyOf?.some(entry => entry.required?.includes('old_text') && entry.required?.includes('new_text')));
   const shellOutputSchema = tools.find(tool => tool.name === 'shell_execute')?.outputSchema;
   assert.equal(shellOutputSchema?.type, 'object');
   for (const redundantField of [
@@ -254,6 +259,29 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const read = await callTool(baseUrl, 12, 'read_text_file', { path: target });
   assert.equal(read.result.content[0].text, 'second');
   assert.equal(read.result.content.length, 1);
+
+  await callTool(baseUrl, 14, 'write_file', { path: target, content: 'alpha\r\nbeta\r\n' });
+  const guardedMismatch = await callTool(baseUrl, 15, 'edit_file', {
+    path: target,
+    old_text: 'beta',
+    new_text: 'gamma',
+    expected_replacements: 2
+  });
+  const mismatchPayload = JSON.parse(guardedMismatch.result.content[0].text);
+  assert.equal(mismatchPayload.code, 'EXPECTED_REPLACEMENTS_MISMATCH');
+  assert.equal(mismatchPayload.actualCount, 1);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\r\nbeta\r\n');
+
+  const guardedEdit = await callTool(baseUrl, 16, 'edit_file', {
+    path: target,
+    old_text: 'beta',
+    new_text: 'gamma',
+    expected_replacements: 1
+  });
+  const guardedPayload = JSON.parse(guardedEdit.result.content[0].text);
+  assert.equal(guardedPayload.ok, true);
+  assert.equal(guardedPayload.actualCount, 1);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\r\ngamma\r\n');
 
   const discovery = await callTool(baseUrl, 13, 'get_skill', {});
   const discoveryPayload = JSON.parse(discovery.result.content[0].text);

@@ -1,6 +1,6 @@
 ---
 name: using-superpowers
-description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
+description: Use when starting work - establishes how to find and use task-relevant skills without making skill loading a prerequisite for unrelated actions
 ---
 
 <SUBAGENT-STOP>
@@ -17,7 +17,7 @@ This is not negotiable. You cannot rationalize your way out of this.
 
 ## The Rule
 
-**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
+**Invoke relevant or requested skills before the work they govern.** If no skill materially applies, proceed directly. If a skill does apply, load it before performing that governed work.
 
 **Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
 
