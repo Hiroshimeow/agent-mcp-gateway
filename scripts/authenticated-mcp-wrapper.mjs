@@ -44,6 +44,7 @@ import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
+import { createDeviceStore } from './device-store.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -118,7 +119,11 @@ function workspaceSnapshot() {
 }
 
 const processSessions = createProcessSessionManager({ env: process.env });
-const deviceBroker = createDeviceBroker({ enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN });
+const deviceStore = createDeviceStore({ dbPath: path.join(runtimeDirectory, 'devices.sqlite') });
+const deviceBroker = createDeviceBroker({
+  enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
+  deviceStore
+});
 
 function currentRoots() {
   return workspaceSnapshot().roots;
@@ -1034,6 +1039,7 @@ async function shutdown() {
   toolMetrics.close();
   await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
+  try { deviceStore.close(); } catch {}
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

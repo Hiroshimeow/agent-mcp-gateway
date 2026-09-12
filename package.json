@@ -13,7 +13,8 @@
     "smoke:mcp": "node scripts/smoke-mcp-endpoint.mjs",
     "smoke:mcp-schemas": "node scripts/smoke-mcp-schemas.mjs",
     "smoke:mcp:tools": "node scripts/smoke-mcp-tools.mjs",
-    "smoke:mcp:upstreams": "node scripts/smoke-mcp-upstreams.mjs"
+    "smoke:mcp:upstreams": "node scripts/smoke-mcp-upstreams.mjs",
+    "device:revoke": "node scripts/device-admin.mjs revoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
