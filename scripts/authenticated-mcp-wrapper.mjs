@@ -43,6 +43,7 @@ import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDe
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { createProcessSessionManager } from './process-session-manager.mjs';
+import { createDeviceBroker } from './device-broker.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -83,7 +84,7 @@ const filesystemEntrypointPath = fileURLToPath(
 );
 const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
 const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'interact_with_process', 'terminate_process']);
-const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill', ...PROCESS_TOOL_NAMES]);
+const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill', 'list_devices', ...PROCESS_TOOL_NAMES]);
 const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
@@ -117,6 +118,7 @@ function workspaceSnapshot() {
 }
 
 const processSessions = createProcessSessionManager({ env: process.env });
+const deviceBroker = createDeviceBroker({ enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN });
 
 function currentRoots() {
   return workspaceSnapshot().roots;
@@ -378,6 +380,11 @@ async function listMergedTools() {
     tools.push(...(result.tools || []).filter(tool => FILESYSTEM_TOOL_NAMES.has(tool.name)).map(filesystemToolMeta));
   }
   tools.push(...listCustomTools(customToolContext()));
+  tools.push(applyToolRisk({
+    name: 'list_devices',
+    description: 'List registered device identities and bounded capability/status metadata. Adding or removing devices does not change the MCP tool schema.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  }));
   if (enableShell) {
     const roots = currentRoots();
     tools.push(applyToolRisk({
@@ -519,6 +526,10 @@ async function routeToolCall(request, { callerKey } = {}) {
       stdoutSpillPath: result.stdoutSpillPath,
       stderrSpillPath: result.stderrSpillPath
     });
+  }
+
+  if (toolName === 'list_devices') {
+    return structuredToolText({ ok: true, devices: deviceBroker.listDevices() }, { includeStructured: true });
   }
 
   if (PROCESS_TOOL_NAMES.has(toolName) && enableShell) {
@@ -1014,12 +1025,15 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   console.log(`MCP transport mode: ${useStatefulMcpSessions ? 'stateful' : 'stateless'}`);
 });
 
+deviceBroker.attach(serverInstance);
+
 async function shutdown() {
   serverInstance.close();
   stopSkillCatalogWatcher();
   workspaceRegistry.close();
   toolMetrics.close();
   await processSessions.shutdown().catch(() => {});
+  await deviceBroker.shutdown().catch(() => {});
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

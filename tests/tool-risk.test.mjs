@@ -7,7 +7,7 @@ const safe = { name: 'safe', exposeShell: false, exposeDestructiveTools: false, 
 const yolo = { name: 'yolo', exposeShell: true, exposeDestructiveTools: true, exposeOpenWorldTools: true };
 
 test('retained read tools are read-only', () => {
-  for (const name of ['read_text_file', 'image_preview', 'get_skill']) {
+  for (const name of ['read_text_file', 'image_preview', 'get_skill', 'list_devices']) {
     const risk = getToolRisk(name);
     assert.equal(risk.readOnlyHint, true);
     assert.equal(risk.destructiveHint, false);

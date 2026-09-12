@@ -1,0 +1,132 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { WebSocket } from 'ws';
+
+import { createDeviceBroker } from '../scripts/device-broker.mjs';
+
+async function listen(server) {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  return server.address().port;
+}
+
+async function closeServer(server) {
+  await new Promise(resolve => server.close(resolve));
+}
+
+function connectDevice(port, token, hello = {}) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    ws.once('error', reject);
+    ws.once('open', () => {
+      ws.send(JSON.stringify({
+        protocol_version: 1,
+        type: 'hello',
+        device_id: hello.device_id || 'thinkbook-test',
+        timestamp: Date.now(),
+        payload: {
+          agent_version: 'test-1',
+          capabilities: ['ping', 'read_text_file'],
+          ...hello.payload
+        }
+      }));
+      resolve(ws);
+    });
+  });
+}
+
+async function waitUntil(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('Timed out waiting for condition');
+}
+
+test('device broker authenticates enrollment token, registers hello, and routes a ping call', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', requestTimeoutMs: 1000 });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+
+  const ws = await connectDevice(port, 'dev-secret');
+  t.after(() => ws.close());
+  ws.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type !== 'tool_call') return;
+    ws.send(JSON.stringify({
+      protocol_version: 1,
+      type: 'tool_result',
+      request_id: message.request_id,
+      device_id: 'thinkbook-test',
+      connection_epoch: message.connection_epoch,
+      timestamp: Date.now(),
+      payload: { ok: true, pong: true }
+    }));
+  });
+
+  await waitUntil(() => broker.listDevices().length === 1);
+  const [device] = broker.listDevices();
+  assert.equal(device.deviceId, 'thinkbook-test');
+  assert.equal(device.online, true);
+  assert.deepEqual(device.capabilities, ['ping', 'read_text_file']);
+  assert.equal(device.connectionEpoch, 1);
+
+  const result = await broker.callDevice({ deviceId: 'thinkbook-test', tool: 'ping', arguments: {} });
+  assert.deepEqual(result, { ok: true, pong: true });
+});
+
+test('device broker rejects an invalid enrollment token', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret' });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+
+  const outcome = await new Promise(resolve => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, {
+      headers: { authorization: 'Bearer wrong' }
+    });
+    ws.once('open', () => resolve('open'));
+    ws.once('error', () => resolve('error'));
+    ws.once('unexpected-response', (_req, res) => resolve(`http-${res.statusCode}`));
+  });
+  assert.notEqual(outcome, 'open');
+  assert.equal(broker.listDevices().length, 0);
+});
+
+test('reconnect increments connection epoch and stale socket close cannot mark new connection offline', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret' });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+
+  const first = await connectDevice(port, 'dev-secret', { device_id: 'same-device' });
+  await waitUntil(() => broker.listDevices()[0]?.connectionEpoch === 1);
+  const second = await connectDevice(port, 'dev-secret', { device_id: 'same-device' });
+  t.after(() => second.close());
+  await waitUntil(() => broker.listDevices()[0]?.connectionEpoch === 2);
+
+  first.close();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const [device] = broker.listDevices();
+  assert.equal(device.connectionEpoch, 2);
+  assert.equal(device.online, true);
+});

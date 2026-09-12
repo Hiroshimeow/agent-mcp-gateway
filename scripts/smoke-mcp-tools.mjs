@@ -183,6 +183,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
     'get_skill',
     'image_preview',
     'interact_with_process',
+    'list_devices',
     'read_process_output',
     'read_text_file',
     'shell_execute',
@@ -195,6 +196,10 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   }
   assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /get_skill\(name\)/i);
   assert.equal(tools.find(tool => tool.name === 'get_skill')?.outputSchema?.type, 'object');
+  const deviceList = await callTool(baseUrl, 38, 'list_devices', {});
+  const deviceListPayload = JSON.parse(deviceList.result.content[0].text);
+  assert.deepEqual(deviceListPayload.devices, []);
+
   const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
   assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
   assert.equal(editInputSchema?.properties?.old_text?.minLength, 1);
@@ -469,7 +474,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'read_text_file']);
+  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'list_devices', 'read_text_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
   observedProfiles.safe = names(tools);
@@ -478,7 +483,7 @@ await withServer('safe', async ({ baseUrl }) => {
 await withServer('assisted', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'read_text_file', 'write_file']);
+  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'list_devices', 'read_text_file', 'write_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);

@@ -56,6 +56,8 @@ Codegraph and ripgrep are CLI workflows, not MCP upstreams. The `local_coding` s
 
 Runtime profiles remain `safe`, `assisted`, and `yolo`. `safe` hides mutating filesystem tools and shell/process execution; `assisted` permits file writes but hides shell/process execution; `yolo` exposes the six core tools plus the four retained process-lifecycle tools (`start_process`, `read_process_output`, `interact_with_process`, `terminate_process`).
 
+DeviceBroker development enrollment uses `/device` WebSocket upgrades and is disabled unless `MCP_DEVICE_ENROLLMENT_TOKEN` is set. `list_devices` is always a stable read-only MCP tool; device inventory changes do not change the tool schema. Phase-4 enrollment tokens are development-only and are replaced by durable device identity in the next hardening phase.
+
 Harness-efficiency principles and the durable task ledger live in `docs/mcp-harness-efficiency-design.md` and `docs/superpowers/plans/2026-09-09-mcp-harness-efficiency.md`; future agents should check the ledger before implementing overlapping optimization work.
 
 ## Development
