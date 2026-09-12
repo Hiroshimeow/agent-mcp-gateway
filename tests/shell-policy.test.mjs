@@ -13,6 +13,20 @@ test('validateShellCommand keeps arbitrary shell commands in yolo mode', () => {
   assert.match(result.cwd, /repo$/i);
 });
 
+test('validateShellCommand accepts an explicit bounded timeout', () => {
+  const result = validateShellCommand({ command: 'echo ok', timeout_ms: 1250 });
+  assert.equal(result.timeoutMs, 1250);
+});
+
+test('validateShellCommand rejects invalid timeout values', () => {
+  for (const timeout_ms of [0, -1, 300001, 1.5, '1000']) {
+    assert.throws(
+      () => validateShellCommand({ command: 'echo ok', timeout_ms }),
+      /timeout_ms must be an integer between 1 and 300000/i
+    );
+  }
+});
+
 test('validateShellCommand rejects empty command', () => {
   assert.throws(() => validateShellCommand({ command: '   ' }), /non-empty command string/);
 });

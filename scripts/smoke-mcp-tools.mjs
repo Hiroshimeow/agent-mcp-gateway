@@ -167,6 +167,12 @@ function nodeOutputCommand(bytes) {
   return nodeByteOutputCommand(bytes);
 }
 
+function nodeSleepCommand(ms) {
+  const executable = `'${process.execPath.replaceAll("'", "''")}'`;
+  const script = `'setTimeout(() => {}, ${ms})'`;
+  return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
+}
+
 await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirectory }) => {
   const baseConfig = fs.readFileSync(configPath, 'utf8');
   await initialize(baseUrl);
@@ -191,6 +197,8 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.ok(editInputSchema?.anyOf?.some(entry => entry.required?.includes('old_text') && entry.required?.includes('new_text')));
   const shellOutputSchema = tools.find(tool => tool.name === 'shell_execute')?.outputSchema;
   assert.equal(shellOutputSchema?.type, 'object');
+  const shellInputSchema = tools.find(tool => tool.name === 'shell_execute')?.inputSchema;
+  assert.equal(shellInputSchema?.properties?.timeout_ms?.maximum, 300000);
   for (const redundantField of [
     'command',
     'commandBytes',
@@ -242,6 +250,15 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   });
   assert.notEqual(directShell.result.isError, true);
   assert.equal(JSON.parse(directShell.result.content[0].text).stdout, 'xx');
+
+  const timedShell = await callTool(baseUrl, 17, 'shell_execute', {
+    command: nodeSleepCommand(2000),
+    working_directory: workspace,
+    timeout_ms: 100
+  });
+  const timedPayload = JSON.parse(timedShell.result.content[0].text);
+  assert.equal(timedPayload.timedOut, true);
+  assert.equal(timedPayload.exitCode, 124);
 
   const bootstrap = await callTool(baseUrl, 9, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);

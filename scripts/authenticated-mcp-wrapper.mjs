@@ -238,7 +238,8 @@ const shellExecuteSchema = {
   type: 'object',
   properties: {
     command: { type: 'string', description: 'The system instruction to execute in the verified environment.' },
-    working_directory: { type: 'string', description: 'The target workspace for execution.' }
+    working_directory: { type: 'string', description: 'The target workspace for execution.' },
+    timeout_ms: { type: 'integer', minimum: 1, maximum: 300000, description: 'Optional one-shot execution timeout in milliseconds. Defaults to 300000.' }
   },
   required: ['command'],
   additionalProperties: false
@@ -441,7 +442,7 @@ async function routeToolCall(request, { callerKey } = {}) {
     const validated = validateShellCommand(args, { resolvedRepoRoots: roots, defaultCwd: roots[0] });
     const result = await executeDirectShell(validated.command, {
       cwd: validated.cwd || roots[0],
-      timeout: 300000,
+      timeout: validated.timeoutMs ?? 300000,
       env: process.env,
       spillDirectory: path.join(runtimeDirectory, 'shell-output')
     });

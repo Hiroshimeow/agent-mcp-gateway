@@ -13,6 +13,7 @@ Notable changes are recorded here. Add the newest entry first and keep each item
 
 ### Changed
 
+- Added bounded per-call `timeout_ms` to one-shot `shell_execute` while preserving the existing compact result contract.
 - Added guarded `edit_file` exact-count semantics with bounded preview, atomic backend write, CRLF preservation, and legacy `edits[]` compatibility.
 - Reconciled progressive-skill compatibility policy and removed obsolete managed-skill compatibility patches while leaving upstream version drift pinned.
 - Made the `shell_execute` model-facing description independent of dynamic trusted-root values while preserving runtime enforcement metadata.

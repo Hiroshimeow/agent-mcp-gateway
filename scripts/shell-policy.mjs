@@ -15,6 +15,14 @@ export function validateShellCommand(args, options = {}) {
     throw new Error('shell_execute requires a non-empty command string.');
   }
 
+  let timeoutMs;
+  if (args.timeout_ms !== undefined) {
+    if (!Number.isInteger(args.timeout_ms) || args.timeout_ms < 1 || args.timeout_ms > 300000) {
+      throw new Error('timeout_ms must be an integer between 1 and 300000.');
+    }
+    timeoutMs = args.timeout_ms;
+  }
+
   const resolvedRepoRoots = options.resolvedRepoRoots || (options.resolvedRepoRoot ? [options.resolvedRepoRoot] : []);
   let cwd = options.defaultCwd;
   if (args.working_directory !== undefined && resolvedRepoRoots.length > 0) {
@@ -29,7 +37,7 @@ export function validateShellCommand(args, options = {}) {
     cwd = resolvedDirectory;
   }
 
-  return { command, cwd };
+  return { command, cwd, timeoutMs };
 }
 
 export function toSuperShellArguments(commandText) {
