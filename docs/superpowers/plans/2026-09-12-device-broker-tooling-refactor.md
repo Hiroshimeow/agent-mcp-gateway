@@ -1,6 +1,6 @@
 # Agent MCP Gateway — Device Broker + Tooling Semantics Refactor Plan
 
-> Status: DESIGN / OPERATOR-SELECTION REQUIRED
+> Status: OPERATOR DECISIONS LOCKED / READY FOR IMPLEMENTATION
 > Date: 2026-09-12
 > Primary repo: E:\git-project\agent-mcp-gateway
 > Device runtime repo: E:\git-project\broker-mcp-gateway (fork of wonderwhy-er/DesktopCommanderMCP; preserve upstream attribution/license)
