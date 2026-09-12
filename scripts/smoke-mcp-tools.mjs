@@ -209,6 +209,12 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.equal(shellOutputSchema?.type, 'object');
   const shellInputSchema = tools.find(tool => tool.name === 'shell_execute')?.inputSchema;
   assert.equal(shellInputSchema?.properties?.timeout_ms?.maximum, 300000);
+  assert.equal(shellInputSchema?.properties?.device_id?.minLength, 1);
+  assert.equal(tools.find(tool => tool.name === 'read_text_file')?.inputSchema?.properties?.device_id?.minLength, 1);
+  assert.equal(tools.find(tool => tool.name === 'write_file')?.inputSchema?.properties?.device_id?.minLength, 1);
+  assert.equal(editInputSchema?.properties?.device_id?.minLength, 1);
+  assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.device_id?.minLength, 1);
+  assert.equal(tools.find(tool => tool.name === 'read_process_output')?.inputSchema?.properties?.device_id, undefined);
   assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.default, 10000);
   assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.maximum, 30000);
   for (const redundantField of [

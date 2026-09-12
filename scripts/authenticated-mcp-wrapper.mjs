@@ -43,6 +43,7 @@ import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDe
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { createProcessSessionManager } from './process-session-manager.mjs';
+import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
 import { createDeviceStore } from './device-store.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
@@ -119,6 +120,7 @@ function workspaceSnapshot() {
 }
 
 const processSessions = createProcessSessionManager({ env: process.env });
+const remoteProcessSessions = createRemoteProcessSessionRegistry();
 const deviceStore = createDeviceStore({ dbPath: path.join(runtimeDirectory, 'devices.sqlite') });
 const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
@@ -250,7 +252,8 @@ const shellExecuteSchema = {
   properties: {
     command: { type: 'string', description: 'The system instruction to execute in the verified environment.' },
     working_directory: { type: 'string', description: 'The target workspace for execution.' },
-    timeout_ms: { type: 'integer', minimum: 1, maximum: 300000, description: 'Optional one-shot execution timeout in milliseconds. Defaults to 300000.' }
+    timeout_ms: { type: 'integer', minimum: 1, maximum: 300000, description: 'Optional one-shot execution timeout in milliseconds. Defaults to 300000.' },
+    device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Omit for local execution.' }
   },
   required: ['command'],
   additionalProperties: false
@@ -262,7 +265,8 @@ const processToolSchemas = {
     properties: {
       command: { type: 'string', minLength: 1, description: 'Command to execute in a retained process session.' },
       working_directory: { type: 'string', description: 'Trusted workspace directory for the process.' },
-      timeout_ms: { type: 'integer', minimum: 1, maximum: 30000, default: 10000, description: 'Foreground wait before yielding RUNNING. Does not kill the process.' }
+      timeout_ms: { type: 'integer', minimum: 1, maximum: 30000, default: 10000, description: 'Foreground wait before yielding RUNNING. Does not kill the process.' },
+      device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Follow-up process calls use the returned session_id without repeating device_id.' }
     },
     required: ['command'],
     additionalProperties: false
@@ -360,11 +364,23 @@ function buildEditFileInputSchema(inputSchema = {}) {
   };
 }
 
+function withOptionalDeviceId(inputSchema = {}) {
+  return {
+    ...inputSchema,
+    type: 'object',
+    properties: {
+      ...(inputSchema.properties || {}),
+      device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Omit for local execution.' }
+    }
+  };
+}
+
 function filesystemToolMeta(tool) {
   const roots = currentRoots();
+  const baseSchema = tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema;
   return applyToolRisk({
     ...tool,
-    inputSchema: tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema,
+    inputSchema: withOptionalDeviceId(baseSchema),
     name: tool.name,
     description: decorateSkillBootstrapDescription(tool.name, tool.name === 'edit_file'
       ? `${tool.description} Prefer old_text/new_text with expected_replacements for guarded exact edits; legacy edits[]/dryRun remains supported for compatibility.`
@@ -499,12 +515,35 @@ function appendSkillAdvisory(result, advisory) {
   };
 }
 
+function splitDeviceArguments(args = {}) {
+  const { device_id: deviceId, ...toolArguments } = args;
+  return { deviceId: String(deviceId || '').trim(), toolArguments };
+}
+
+function isRemoteProcessSession(sessionId) {
+  return String(sessionId || '').startsWith('remote-');
+}
+
 async function routeToolCall(request, { callerKey } = {}) {
   const toolName = request.params.name;
   assertToolAllowedForProfile(toolName, runtimeProfile);
 
   if (toolName === 'shell_execute' && enableShell) {
     const args = request.params.arguments || {};
+    const { deviceId, toolArguments } = splitDeviceArguments(args);
+    if (deviceId) {
+      const remoteTimeoutMs = Number(toolArguments.timeout_ms || 28000);
+      if (!Number.isInteger(remoteTimeoutMs) || remoteTimeoutMs < 1 || remoteTimeoutMs > 28000) {
+        throw new Error('Remote shell_execute timeout_ms must be between 1 and 28000; use start_process for longer commands.');
+      }
+      const result = await deviceBroker.callDevice({
+        deviceId,
+        tool: 'shell_execute',
+        arguments: { ...toolArguments, timeout_ms: remoteTimeoutMs },
+        timeoutMs: remoteTimeoutMs + 2000
+      });
+      return boundedShellToolText(result);
+    }
     if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
       await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
     }
@@ -541,6 +580,19 @@ async function routeToolCall(request, { callerKey } = {}) {
     const args = request.params.arguments || {};
     const ownerKey = callerKey || 'anonymous';
     if (toolName === 'start_process') {
+      const { deviceId, toolArguments } = splitDeviceArguments(args);
+      if (deviceId) {
+        const remote = await deviceBroker.callDevice({
+          deviceId,
+          tool: 'start_process',
+          arguments: toolArguments,
+          timeoutMs: Math.min(Number(toolArguments.timeout_ms || 10000) + 2000, 30000)
+        });
+        const remoteSessionId = remote?.sessionId ?? remote?.session_id;
+        if (!remoteSessionId) throw new Error('Remote start_process did not return a session identifier.');
+        const sessionId = remoteProcessSessions.register({ ownerKey, deviceId, remoteSessionId });
+        return structuredToolText({ ...remote, sessionId, session_id: sessionId }, { includeStructured: true });
+      }
       if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
         await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
       }
@@ -555,6 +607,23 @@ async function routeToolCall(request, { callerKey } = {}) {
         ownerKey,
         timeoutMs: args.timeout_ms
       }), { includeStructured: true });
+    }
+    if (isRemoteProcessSession(args.session_id)) {
+      const remoteSession = remoteProcessSessions.resolve({ sessionId: args.session_id, ownerKey });
+      const remoteArgs = { ...args, session_id: remoteSession.remoteSessionId };
+      const remoteTimeoutMs = toolName === 'read_process_output'
+        ? 12000
+        : Math.min(Number(args.timeout_ms || 10000) + 2000, 30000);
+      const remote = await deviceBroker.callDevice({
+        deviceId: remoteSession.deviceId,
+        tool: toolName,
+        arguments: remoteArgs,
+        timeoutMs: remoteTimeoutMs
+      });
+      if (toolName === 'terminate_process') {
+        remoteProcessSessions.remove({ sessionId: args.session_id, ownerKey });
+      }
+      return structuredToolText({ ...remote, sessionId: args.session_id, session_id: args.session_id }, { includeStructured: true });
     }
     if (toolName === 'read_process_output') {
       return structuredToolText(processSessions.read({
@@ -578,8 +647,23 @@ async function routeToolCall(request, { callerKey } = {}) {
     }), { includeStructured: true });
   }
 
-  if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
+  if (FILESYSTEM_TOOL_NAMES.has(toolName)) {
     const fileArgs = request.params.arguments || {};
+    const { deviceId, toolArguments } = splitDeviceArguments(fileArgs);
+    if (deviceId) {
+      const result = await deviceBroker.callDevice({
+        deviceId,
+        tool: toolName,
+        arguments: toolArguments
+      });
+      const rendered = result && Array.isArray(result.content)
+        ? result
+        : structuredToolText(result, { includeStructured: true });
+      return appendSkillAdvisory(
+        rendered,
+        skillBootstrapGate.takeReadAdvisory(callerKey, toolName)
+      );
+    }
     await ensureFileTarget(fileArgs);
     const result = toolName === 'edit_file' && isGuardedEditArguments(fileArgs)
       ? await guardedEditFile(fileArgs)

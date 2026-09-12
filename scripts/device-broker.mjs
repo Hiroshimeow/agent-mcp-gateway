@@ -246,7 +246,6 @@ export function createDeviceBroker(options = {}) {
 
   wss.on('connection', ws => {
     sockets.add(ws);
-    let firstMessageReceived = false;
     const helloTimer = setTimeout(() => {
       if (!ws.authenticated && ws.readyState === WebSocket.OPEN) ws.close(4000, 'authentication required');
     }, helloTimeoutMs);
@@ -256,7 +255,6 @@ export function createDeviceBroker(options = {}) {
       try {
         const message = parseMessage(raw);
         if (!ws.authenticated) {
-          firstMessageReceived = true;
           if (durableAuth) {
             if (ws.authState) handleAuthResponse(ws, message);
             else handleAuthHello(ws, message);
