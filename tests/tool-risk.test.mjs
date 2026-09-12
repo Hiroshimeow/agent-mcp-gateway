@@ -24,12 +24,21 @@ test('retained file writes are destructive but not open-world', () => {
   }
 });
 
-test('shell remains destructive open-world and profile semantics are unchanged', () => {
-  const risk = getToolRisk('shell_execute');
-  assert.equal(risk.destructiveHint, true);
-  assert.equal(risk.openWorldHint, true);
-  assert.equal(shouldExposeToolForProfile('shell_execute', safe), false);
-  assert.equal(shouldExposeToolForProfile('shell_execute', yolo), true);
+test('shell and process execution stay behind shell profile visibility', () => {
+  for (const name of ['shell_execute', 'start_process', 'read_process_output', 'interact_with_process', 'terminate_process']) {
+    assert.equal(shouldExposeToolForProfile(name, safe), false);
+    assert.equal(shouldExposeToolForProfile(name, yolo), true);
+  }
+
+  const shell = getToolRisk('shell_execute');
+  assert.equal(shell.destructiveHint, true);
+  assert.equal(shell.openWorldHint, true);
+  assert.equal(getToolRisk('read_process_output').readOnlyHint, true);
+  for (const name of ['start_process', 'interact_with_process', 'terminate_process']) {
+    const risk = getToolRisk(name);
+    assert.equal(risk.destructiveHint, true);
+    assert.equal(risk.openWorldHint, true);
+  }
 });
 
 test('applyToolRisk preserves description and applies core annotations', () => {

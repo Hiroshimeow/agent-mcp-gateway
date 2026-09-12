@@ -42,6 +42,7 @@ import { validateShellCommand } from './shell-policy.mjs';
 import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { prepareGuardedEdit } from './guarded-edit.mjs';
+import { createProcessSessionManager } from './process-session-manager.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -81,7 +82,8 @@ const filesystemEntrypointPath = fileURLToPath(
   new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
 );
 const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
-const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill']);
+const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'interact_with_process', 'terminate_process']);
+const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill', ...PROCESS_TOOL_NAMES]);
 const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
@@ -113,6 +115,8 @@ const workspaceRegistry = createWorkspaceRegistry({
 function workspaceSnapshot() {
   return workspaceRegistry.snapshot();
 }
+
+const processSessions = createProcessSessionManager({ env: process.env });
 
 function currentRoots() {
   return workspaceSnapshot().roots;
@@ -245,6 +249,59 @@ const shellExecuteSchema = {
   additionalProperties: false
 };
 
+const processToolSchemas = {
+  start_process: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', minLength: 1, description: 'Command to execute in a retained process session.' },
+      working_directory: { type: 'string', description: 'Trusted workspace directory for the process.' },
+      timeout_ms: { type: 'integer', minimum: 1, maximum: 30000, default: 10000, description: 'Foreground wait before yielding RUNNING. Does not kill the process.' }
+    },
+    required: ['command'],
+    additionalProperties: false
+  },
+  read_process_output: {
+    type: 'object',
+    properties: {
+      session_id: { type: 'string', minLength: 1 },
+      offset: { type: 'integer', minimum: 0 },
+      length: { type: 'integer', minimum: 1, maximum: 65536, default: 8192 }
+    },
+    required: ['session_id'],
+    additionalProperties: false
+  },
+  interact_with_process: {
+    type: 'object',
+    properties: {
+      session_id: { type: 'string', minLength: 1 },
+      input: { type: 'string', description: 'Raw stdin text; include a newline when the target program requires one.' },
+      timeout_ms: { type: 'integer', minimum: 0, maximum: 30000, default: 0, description: 'Optional wait after writing stdin. Does not kill the process.' }
+    },
+    required: ['session_id', 'input'],
+    additionalProperties: false
+  },
+  terminate_process: {
+    type: 'object',
+    properties: { session_id: { type: 'string', minLength: 1 } },
+    required: ['session_id'],
+    additionalProperties: false
+  }
+};
+
+function listProcessTools() {
+  const descriptions = {
+    start_process: 'Start a command with retained bounded output. Short commands may complete immediately; long commands return RUNNING plus sessionId after timeout_ms without being killed.',
+    read_process_output: 'Read a bounded page of retained process output using absolute offset/length. Completed output remains available for a bounded retention period.',
+    interact_with_process: 'Write raw stdin to a running process session and optionally wait briefly for progress.',
+    terminate_process: 'Terminate a caller-owned running process session and its process tree where supported.'
+  };
+  return [...PROCESS_TOOL_NAMES].map(name => applyToolRisk({
+    name,
+    description: descriptions[name],
+    inputSchema: processToolSchemas[name]
+  }));
+}
+
 const shellExecuteOutputSchema = {
   type: 'object',
   properties: {
@@ -331,6 +388,7 @@ async function listMergedTools() {
       _meta: { trusted_roots: roots, root_repo: roots[0], repo_root: roots[0] },
       annotations: buildShellExecuteAnnotations()
     }));
+    tools.push(...listProcessTools());
   }
   tools.push(...await externalMcpManager.listAllToolsUnfiltered());
   return tools.filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
@@ -461,6 +519,47 @@ async function routeToolCall(request, { callerKey } = {}) {
       stdoutSpillPath: result.stdoutSpillPath,
       stderrSpillPath: result.stderrSpillPath
     });
+  }
+
+  if (PROCESS_TOOL_NAMES.has(toolName) && enableShell) {
+    const args = request.params.arguments || {};
+    const ownerKey = callerKey || 'anonymous';
+    if (toolName === 'start_process') {
+      if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
+        await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
+      }
+      const roots = currentRoots();
+      const validated = validateShellCommand(
+        { command: args.command, working_directory: args.working_directory },
+        { resolvedRepoRoots: roots, defaultCwd: roots[0] }
+      );
+      return structuredToolText(await processSessions.start({
+        command: validated.command,
+        cwd: validated.cwd || roots[0],
+        ownerKey,
+        timeoutMs: args.timeout_ms
+      }), { includeStructured: true });
+    }
+    if (toolName === 'read_process_output') {
+      return structuredToolText(processSessions.read({
+        sessionId: args.session_id,
+        ownerKey,
+        offset: args.offset,
+        length: args.length
+      }), { includeStructured: true });
+    }
+    if (toolName === 'interact_with_process') {
+      return structuredToolText(await processSessions.interact({
+        sessionId: args.session_id,
+        ownerKey,
+        input: args.input,
+        timeoutMs: args.timeout_ms
+      }), { includeStructured: true });
+    }
+    return structuredToolText(await processSessions.terminate({
+      sessionId: args.session_id,
+      ownerKey
+    }), { includeStructured: true });
   }
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName) && filesystemClient) {
@@ -920,6 +1019,7 @@ async function shutdown() {
   stopSkillCatalogWatcher();
   workspaceRegistry.close();
   toolMetrics.close();
+  await processSessions.shutdown().catch(() => {});
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});
   await filesystemTransport?.close().catch(() => {});

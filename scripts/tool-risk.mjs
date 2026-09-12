@@ -35,6 +35,31 @@ const RISK_MAP = new Map(Object.entries({
     openWorldHint: true,
     riskLevel: 'low',
     category: TOOL_CATEGORIES.shell
+  },
+  start_process: {
+    readOnlyHint: false,
+    idempotentHint: false,
+    destructiveHint: true,
+    openWorldHint: true,
+    riskLevel: 'low',
+    category: TOOL_CATEGORIES.shell
+  },
+  read_process_output: { ...READ_ONLY, category: TOOL_CATEGORIES.shell },
+  interact_with_process: {
+    readOnlyHint: false,
+    idempotentHint: false,
+    destructiveHint: true,
+    openWorldHint: true,
+    riskLevel: 'low',
+    category: TOOL_CATEGORIES.shell
+  },
+  terminate_process: {
+    readOnlyHint: false,
+    idempotentHint: true,
+    destructiveHint: true,
+    openWorldHint: true,
+    riskLevel: 'low',
+    category: TOOL_CATEGORIES.shell
   }
 }));
 
@@ -83,7 +108,9 @@ export function applyToolRisk(tool) {
 export function shouldExposeToolForProfile(toolOrName, safetyProfile) {
   const name = normalizeRiskToolName(toolOrName);
   const risk = getToolRisk(toolOrName);
-  if (name === 'shell_execute') return Boolean(safetyProfile.exposeShell);
+  if (['shell_execute', 'start_process', 'read_process_output', 'interact_with_process', 'terminate_process'].includes(name)) {
+    return Boolean(safetyProfile.exposeShell);
+  }
   if (risk.openWorldHint && !safetyProfile.exposeOpenWorldTools) return false;
   if (risk.destructiveHint && !safetyProfile.exposeDestructiveTools) return false;
   return true;

@@ -173,6 +173,7 @@ function nodeSleepCommand(ms) {
   return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
 }
 
+
 await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirectory }) => {
   const baseConfig = fs.readFileSync(configPath, 'utf8');
   await initialize(baseUrl);
@@ -181,8 +182,12 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
     'edit_file',
     'get_skill',
     'image_preview',
+    'interact_with_process',
+    'read_process_output',
     'read_text_file',
     'shell_execute',
+    'start_process',
+    'terminate_process',
     'write_file'
   ]);
   for (const name of ['edit_file', 'shell_execute', 'write_file']) {
@@ -199,6 +204,8 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.equal(shellOutputSchema?.type, 'object');
   const shellInputSchema = tools.find(tool => tool.name === 'shell_execute')?.inputSchema;
   assert.equal(shellInputSchema?.properties?.timeout_ms?.maximum, 300000);
+  assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.default, 10000);
+  assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.maximum, 30000);
   for (const redundantField of [
     'command',
     'commandBytes',
@@ -259,6 +266,56 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const timedPayload = JSON.parse(timedShell.result.content[0].text);
   assert.equal(timedPayload.timedOut, true);
   assert.equal(timedPayload.exitCode, 124);
+
+  const shortProcess = await callTool(baseUrl, 18, 'start_process', {
+    command: nodeOutputCommand(4),
+    working_directory: workspace,
+    timeout_ms: 5000
+  });
+  const shortProcessPayload = JSON.parse(shortProcess.result.content[0].text);
+  assert.equal(shortProcessPayload.status, 'COMPLETED');
+  assert.equal(shortProcessPayload.output, 'xxxx');
+
+  const longProcess = await callTool(baseUrl, 19, 'start_process', {
+    command: nodeSleepCommand(600),
+    working_directory: workspace,
+    timeout_ms: 50
+  });
+  const longProcessPayload = JSON.parse(longProcess.result.content[0].text);
+  assert.equal(longProcessPayload.status, 'RUNNING');
+  let completedProcessPayload = longProcessPayload;
+  const processDeadline = Date.now() + 5000;
+  while (completedProcessPayload.status === 'RUNNING' && Date.now() < processDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const completedProcess = await callTool(baseUrl, 30, 'read_process_output', {
+      session_id: longProcessPayload.sessionId,
+      offset: 0,
+      length: 128
+    });
+    completedProcessPayload = JSON.parse(completedProcess.result.content[0].text);
+  }
+  assert.equal(completedProcessPayload.status, 'COMPLETED');
+
+  const interactiveScript = path.join(workspace, 'interactive-smoke.js');
+  fs.writeFileSync(interactiveScript, 'process.stdin.once(\"data\",d=>{process.stdout.write(\"got:\"+d.toString().trim());process.exit(0)});setTimeout(()=>{},5000);', 'utf8');
+  const interactiveCommand = process.platform === 'win32'
+    ? `& '${process.execPath.replaceAll("'", "''")}' '${interactiveScript.replaceAll("'", "''")}'`
+    : `'${process.execPath.replaceAll("'", "'\"'\"'")}' '${interactiveScript.replaceAll("'", "'\"'\"'")}'`;
+  const interactiveProcess = await callTool(baseUrl, 36, 'start_process', {
+    command: interactiveCommand,
+    working_directory: workspace,
+    timeout_ms: 50
+  });
+  const interactivePayload = JSON.parse(interactiveProcess.result.content[0].text);
+  assert.equal(interactivePayload.status, 'RUNNING');
+  const interacted = await callTool(baseUrl, 37, 'interact_with_process', {
+    session_id: interactivePayload.sessionId,
+    input: 'hello\n',
+    timeout_ms: 3000
+  });
+  const interactedPayload = JSON.parse(interacted.result.content[0].text);
+  assert.equal(interactedPayload.status, 'COMPLETED');
+  assert.match(interactedPayload.output, /got:hello/);
 
   const bootstrap = await callTool(baseUrl, 9, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);
