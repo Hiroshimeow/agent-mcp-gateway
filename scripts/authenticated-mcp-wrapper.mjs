@@ -46,6 +46,8 @@ import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
 import { createDeviceStore } from './device-store.mjs';
+import { callerAuditId, createDeviceAccessPolicy } from './device-access-policy.mjs';
+import { createDeviceAuditRecorder } from './device-audit.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -125,6 +127,11 @@ const deviceStore = createDeviceStore({ dbPath: path.join(runtimeDirectory, 'dev
 const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
   deviceStore
+});
+const deviceAccessPolicy = createDeviceAccessPolicy({ raw: process.env.MCP_DEVICE_ACCESS_POLICY || '' });
+const deviceAudit = createDeviceAuditRecorder({
+  auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
+  enabled: process.env.MCP_DEVICE_AUDIT_ENABLED !== 'false'
 });
 
 function currentRoots() {
@@ -524,7 +531,59 @@ function isRemoteProcessSession(sessionId) {
   return String(sessionId || '').startsWith('remote-');
 }
 
-async function routeToolCall(request, { callerKey } = {}) {
+async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args = {}, timeoutMs }) {
+  const callerSubject = context.callerSubject || context.callerCategory || 'anonymous';
+  const callerCategory = context.callerCategory || 'anonymous';
+  const requestId = randomUUID();
+  const startedAt = Date.now();
+  let grant = null;
+  try {
+    grant = deviceAccessPolicy.authorize({
+      callerSubject,
+      callerCategory,
+      deviceId,
+      tool,
+      arguments: args
+    });
+    const result = await deviceBroker.callDevice({
+      requestId,
+      deviceId,
+      tool,
+      arguments: args,
+      ...(timeoutMs === undefined ? {} : { timeoutMs })
+    });
+    const outputBytes = deviceAccessPolicy.assertOutput(grant, result);
+    deviceAudit.record({
+      requestId,
+      callerId: callerAuditId(callerSubject),
+      callerCategory,
+      deviceId,
+      tool,
+      outcome: 'success',
+      durationMs: Date.now() - startedAt,
+      inputBytes: grant.inputBytes,
+      outputBytes
+    });
+    return result;
+  } catch (error) {
+    const inputBytes = grant?.inputBytes ?? Buffer.byteLength(JSON.stringify(args ?? {}), 'utf8');
+    deviceAudit.record({
+      requestId,
+      callerId: callerAuditId(callerSubject),
+      callerCategory,
+      deviceId,
+      tool,
+      outcome: 'error',
+      durationMs: Date.now() - startedAt,
+      inputBytes,
+      errorCode: String(error?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64)
+    });
+    throw error;
+  }
+}
+
+async function routeToolCall(request, context = {}) {
+  const { callerKey } = context;
   const toolName = request.params.name;
   assertToolAllowedForProfile(toolName, runtimeProfile);
 
@@ -536,7 +595,8 @@ async function routeToolCall(request, { callerKey } = {}) {
       if (!Number.isInteger(remoteTimeoutMs) || remoteTimeoutMs < 1 || remoteTimeoutMs > 28000) {
         throw new Error('Remote shell_execute timeout_ms must be between 1 and 28000; use start_process for longer commands.');
       }
-      const result = await deviceBroker.callDevice({
+      const result = await callRemoteDevice({
+        context,
         deviceId,
         tool: 'shell_execute',
         arguments: { ...toolArguments, timeout_ms: remoteTimeoutMs },
@@ -573,7 +633,11 @@ async function routeToolCall(request, { callerKey } = {}) {
   }
 
   if (toolName === 'list_devices') {
-    return structuredToolText({ ok: true, devices: deviceBroker.listDevices() }, { includeStructured: true });
+    const devices = deviceAccessPolicy.filterDevices(deviceBroker.listDevices(), {
+      callerSubject: context.callerSubject || context.callerCategory || 'anonymous',
+      callerCategory: context.callerCategory || 'anonymous'
+    });
+    return structuredToolText({ ok: true, devices }, { includeStructured: true });
   }
 
   if (PROCESS_TOOL_NAMES.has(toolName) && enableShell) {
@@ -582,7 +646,8 @@ async function routeToolCall(request, { callerKey } = {}) {
     if (toolName === 'start_process') {
       const { deviceId, toolArguments } = splitDeviceArguments(args);
       if (deviceId) {
-        const remote = await deviceBroker.callDevice({
+        const remote = await callRemoteDevice({
+          context,
           deviceId,
           tool: 'start_process',
           arguments: toolArguments,
@@ -614,7 +679,8 @@ async function routeToolCall(request, { callerKey } = {}) {
       const remoteTimeoutMs = toolName === 'read_process_output'
         ? 12000
         : Math.min(Number(args.timeout_ms || 10000) + 2000, 30000);
-      const remote = await deviceBroker.callDevice({
+      const remote = await callRemoteDevice({
+        context,
         deviceId: remoteSession.deviceId,
         tool: toolName,
         arguments: remoteArgs,
@@ -651,7 +717,8 @@ async function routeToolCall(request, { callerKey } = {}) {
     const fileArgs = request.params.arguments || {};
     const { deviceId, toolArguments } = splitDeviceArguments(fileArgs);
     if (deviceId) {
-      const result = await deviceBroker.callDevice({
+      const result = await callRemoteDevice({
+        context,
         deviceId,
         tool: toolName,
         arguments: toolArguments
@@ -730,7 +797,7 @@ function currentResourceContext() {
   };
 }
 
-function createProxyServer({ callerKey, callerCategory }) {
+function createProxyServer({ callerKey, callerCategory, callerSubject }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -750,7 +817,7 @@ function createProxyServer({ callerKey, callerCategory }) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey, callerCategory }));
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey, callerCategory, callerSubject }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const context = currentResourceContext();
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
@@ -820,6 +887,12 @@ function skillCallerKeyFromRequest(req) {
 function callerCategoryFromRequest(req) {
   if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) return 'static-bearer';
   if (req.auth?.clientId) return 'oauth';
+  return 'anonymous';
+}
+
+function callerSubjectFromRequest(req) {
+  if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) return 'static-bearer';
+  if (req.auth?.clientId) return `oauth:${req.auth.clientId}`;
   return 'anonymous';
 }
 
@@ -995,7 +1068,8 @@ async function createTransport(req) {
   let transport;
   const server = createProxyServer({
     callerKey: skillCallerKeyFromRequest(req),
-    callerCategory: callerCategoryFromRequest(req)
+    callerCategory: callerCategoryFromRequest(req),
+    callerSubject: callerSubjectFromRequest(req)
   });
 
   if (!useStatefulMcpSessions) {
@@ -1121,6 +1195,7 @@ async function shutdown() {
   stopSkillCatalogWatcher();
   workspaceRegistry.close();
   toolMetrics.close();
+  deviceAudit.close();
   await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
   try { deviceStore.close(); } catch {}

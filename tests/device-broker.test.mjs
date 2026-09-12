@@ -130,3 +130,35 @@ test('reconnect increments connection epoch and stale socket close cannot mark n
   assert.equal(device.connectionEpoch, 2);
   assert.equal(device.online, true);
 });
+
+
+test('device broker preserves bounded remote tool error codes', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', requestTimeoutMs: 1000 });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+  const ws = await connectDevice(port, 'dev-secret');
+  t.after(() => ws.close());
+  ws.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type !== 'tool_call') return;
+    ws.send(JSON.stringify({
+      protocol_version: 1,
+      type: 'tool_error',
+      request_id: message.request_id,
+      device_id: 'thinkbook-test',
+      connection_epoch: message.connection_epoch,
+      timestamp: Date.now(),
+      payload: { message: 'too large', code: 'DEVICE_OUTPUT_TOO_LARGE' }
+    }));
+  });
+  await waitUntil(() => broker.listDevices().length === 1);
+  await assert.rejects(
+    broker.callDevice({ deviceId: 'thinkbook-test', tool: 'read_text_file', arguments: { path: 'x' } }),
+    error => error.code === 'DEVICE_OUTPUT_TOO_LARGE' && error.message === 'too large'
+  );
+});

@@ -240,8 +240,11 @@ export function createDeviceBroker(options = {}) {
     if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
     clearTimeout(entry.timer);
     pending.delete(requestId);
-    if (message.type === 'tool_error') entry.reject(new Error(String(message.payload?.message || 'Remote device tool error.')));
-    else entry.resolve(message.payload);
+    if (message.type === 'tool_error') {
+      const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
+      error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
+      entry.reject(error);
+    } else entry.resolve(message.payload);
   }
 
   wss.on('connection', ws => {
@@ -322,12 +325,14 @@ export function createDeviceBroker(options = {}) {
     return publicDevice(current);
   }
 
-  async function callDevice({ deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
+  async function callDevice({ requestId: requestedRequestId, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
     const device = devices.get(String(deviceId || ''));
     if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) throw new Error(`Device ${deviceId} is offline or unknown.`);
     if (!device.capabilities.includes(tool)) throw new Error(`Device ${deviceId} does not advertise capability ${tool}.`);
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Device request timeout must be an integer between 1 and 30000 ms.');
-    const requestId = randomUUID();
+    const requestId = requestedRequestId === undefined ? randomUUID() : String(requestedRequestId).trim();
+    if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
+    if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(requestId);

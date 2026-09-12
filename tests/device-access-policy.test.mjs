@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { callerAuditId, createDeviceAccessPolicy, DeviceAccessError } from '../scripts/device-access-policy.mjs';
+import { createDeviceAuditRecorder } from '../scripts/device-audit.mjs';
+
+function policy(rule = {}) {
+  return createDeviceAccessPolicy({
+    raw: JSON.stringify({
+      rules: [{
+        id: 'test-rule',
+        callers: ['oauth:client-a'],
+        devices: ['thinkbook'],
+        tools: ['read_text_file', 'write_file', 'shell_execute', 'read_process_output'],
+        roots: ['E:\\work\\project'],
+        requests_per_minute: 5,
+        max_input_bytes: 2048,
+        max_output_bytes: 4096,
+        ...rule
+      }]
+    })
+  });
+}
+
+test('device access is deny-by-default without an explicit rule', () => {
+  const access = createDeviceAccessPolicy();
+  assert.throws(() => access.authorize({
+    callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'dev', tool: 'read_text_file', arguments: { path: 'C:\\x' }
+  }), error => error instanceof DeviceAccessError && error.code === 'DEVICE_ACCESS_DENIED');
+});
+
+test('caller, device, tool, and remote root must all match', () => {
+  const access = policy();
+  const grant = access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+  });
+  assert.equal(grant.ruleId, 'test-rule');
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-b', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+  }), /not authorized/);
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'g8', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+  }), /not authorized/);
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'edit_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+  }), /not authorized/);
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\other\\secret.txt' }
+  }), error => error.code === 'DEVICE_PATH_DENIED');
+});
+
+test('device inventory is filtered by caller and advertised capabilities', () => {
+  const access = policy();
+  const devices = [
+    { deviceId: 'thinkbook', capabilities: ['read_text_file', 'shell_execute'] },
+    { deviceId: 'g8', capabilities: ['read_text_file'] },
+    { deviceId: 'thinkbook', capabilities: ['unknown_tool'] }
+  ];
+  const visible = access.filterDevices(devices, {
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth'
+  });
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].deviceId, 'thinkbook');
+  assert.deepEqual(access.filterDevices(devices, {
+    callerSubject: 'oauth:client-b', callerCategory: 'oauth'
+  }), []);
+});
+
+test('remote shell requires an explicitly allowed working directory', () => {
+  const access = policy();
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'shell_execute', arguments: { command: 'node -v' }
+  }), error => error.code === 'DEVICE_PATH_DENIED');
+  assert.doesNotThrow(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'shell_execute', arguments: { command: 'node -v', working_directory: 'E:\\work\\project' }
+  }));
+});
+
+test('rate and size bounds are enforced before and after dispatch', () => {
+  let now = 1000;
+  const access = createDeviceAccessPolicy({
+    now: () => now,
+    raw: JSON.stringify({ rules: [{
+      callers: ['static-bearer'], devices: ['dev'], tools: ['read_process_output'],
+      requests_per_minute: 2, max_input_bytes: 64, max_output_bytes: 80
+    }] })
+  });
+  const request = () => access.authorize({
+    callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'dev', tool: 'read_process_output', arguments: { session_id: 'r1' }
+  });
+  const first = request();
+  request();
+  assert.throws(request, error => error.code === 'DEVICE_RATE_LIMIT');
+  now += 60_001;
+  assert.doesNotThrow(request);
+  assert.throws(() => access.authorize({
+    callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'dev', tool: 'read_process_output', arguments: { session_id: 'x'.repeat(100) }
+  }), error => error.code === 'DEVICE_INPUT_TOO_LARGE');
+  assert.equal(access.assertOutput(first, { ok: true }), Buffer.byteLength(JSON.stringify({ ok: true })));
+  assert.throws(() => access.assertOutput(first, { data: 'x'.repeat(100) }), error => error.code === 'DEVICE_OUTPUT_TOO_LARGE');
+});
+
+test('device audit stores metadata only and hashes caller identity', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'device-audit-'));
+  const auditPath = path.join(root, 'audit.jsonl');
+  const recorder = createDeviceAuditRecorder({ auditPath });
+  recorder.record({
+    requestId: 'req-1', callerId: callerAuditId('oauth:client-a'), callerCategory: 'oauth',
+    deviceId: 'thinkbook', tool: 'shell_execute', outcome: 'success', durationMs: 12,
+    inputBytes: 33, outputBytes: 44
+  });
+  recorder.close();
+  const text = fs.readFileSync(auditPath, 'utf8');
+  const entry = JSON.parse(text.trim());
+  assert.equal(entry.tool, 'shell_execute');
+  assert.equal(entry.callerId.length, 16);
+  assert.equal(text.includes('oauth:client-a'), false);
+  assert.equal(text.includes('authorization'), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});

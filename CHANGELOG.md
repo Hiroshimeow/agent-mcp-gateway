@@ -6,6 +6,7 @@ Notable changes are recorded here. Add the newest entry first and keep each item
 
 ### Added
 
+- Added deny-by-default remote device ACLs, bounded rate/size policy, caller-filtered inventory, and metadata-only device audit logging.
 - Added durable Ed25519 device enrollment, challenge-response reconnect, SQLite identity persistence, restart recovery, and operator-only revocation.
 
 - Added a DeviceBroker skeleton with authenticated `/device` WebSocket enrollment, in-memory device registry, connection epochs, stable `list_devices`, and request/response routing without automatic replay.
