@@ -691,7 +691,9 @@ test('request id can be safely reused within the same connection epoch after tim
 
   const firstToolCallPromise = nextMessage(ws);
   const firstCall = broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping', timeoutMs: 20 });
-  await firstToolCallPromise;
+  const firstToolCall = await firstToolCallPromise;
+  const firstWireRequestId = firstToolCall.request_id;
+  assert.notEqual(firstWireRequestId, 'same-epoch-id');
   await assert.rejects(
     broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping', timeoutMs: 20 }),
     /already pending/i
@@ -702,7 +704,17 @@ test('request id can be safely reused within the same connection epoch after tim
   const secondToolCallPromise = nextMessage(ws);
   const secondCall = broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping' });
   const secondToolCall = await secondToolCallPromise;
+  assert.notEqual(secondToolCall.request_id, firstWireRequestId);
   heldCallback(new Error('late first send failure'));
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'tool_result',
+    request_id: firstWireRequestId,
+    device_id: 'request-reuse-device',
+    connection_epoch: secondToolCall.connection_epoch,
+    timestamp: Date.now(),
+    payload: { content: [{ type: 'text', text: 'old-result' }] }
+  }));
   ws.send(JSON.stringify({
     protocol_version: 1,
     type: 'tool_result',

@@ -76,6 +76,7 @@ export function createDeviceBroker(options = {}) {
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const devices = new Map();
   const pending = new Map();
+  const pendingByWireRequestId = new Map();
   const sockets = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   let attachedServer = null;
@@ -103,7 +104,9 @@ export function createDeviceBroker(options = {}) {
     for (const [requestId, entry] of pending) {
       if (entry.deviceId !== deviceId || entry.connectionEpoch !== connectionEpoch) continue;
       clearTimeout(entry.timer);
+      if (pending.get(requestId) !== entry) continue;
       pending.delete(requestId);
+      if (pendingByWireRequestId.get(entry.wireRequestId) === entry) pendingByWireRequestId.delete(entry.wireRequestId);
       entry.reject(new Error(reason));
     }
   }
@@ -291,12 +294,13 @@ export function createDeviceBroker(options = {}) {
       return;
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
-    const requestId = String(message.request_id || '');
+    const wireRequestId = String(message.request_id || '');
     const acceptResult = () => {
-      const entry = pending.get(requestId);
-      if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
+      const entry = pendingByWireRequestId.get(wireRequestId);
+      if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch || pending.get(entry.requestId) !== entry) return;
       clearTimeout(entry.timer);
-      pending.delete(requestId);
+      pending.delete(entry.requestId);
+      if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
       if (message.type === 'tool_error') {
         const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
         error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
@@ -416,10 +420,11 @@ export function createDeviceBroker(options = {}) {
     const requestId = requestedRequestId === undefined ? randomUUID() : String(requestedRequestId).trim();
     if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
     if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
+    const wireRequestId = randomUUID();
     const wireMessage = JSON.stringify({
       protocol_version: DEVICE_PROTOCOL_VERSION,
       type: 'tool_call',
-      request_id: requestId,
+      request_id: wireRequestId,
       device_id: device.deviceId,
       connection_epoch: device.connectionEpoch,
       timestamp: Date.now(),
@@ -428,19 +433,22 @@ export function createDeviceBroker(options = {}) {
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
-        entry = { resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
+        entry = { requestId, wireRequestId, resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
         const timer = setTimeout(() => {
           if (pending.get(requestId) !== entry) return;
           pending.delete(requestId);
+          if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
           entry.reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
         }, timeoutMs);
         entry.timer = timer;
         timer.unref?.();
         pending.set(requestId, entry);
+        pendingByWireRequestId.set(wireRequestId, entry);
         device.socket.send(wireMessage, error => {
           if (!error || pending.get(requestId) !== entry) return;
           clearTimeout(entry.timer);
           pending.delete(requestId);
+          if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
           entry.reject(error);
         });
       };
@@ -459,6 +467,7 @@ export function createDeviceBroker(options = {}) {
         if (entry && pending.get(requestId) === entry) {
           clearTimeout(entry.timer);
           pending.delete(requestId);
+          if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
         }
         if (durableAuth && /authorization changed|revoked|stale/i.test(String(error?.message || ''))) {
           invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
@@ -472,9 +481,12 @@ export function createDeviceBroker(options = {}) {
     if (attachedServer && upgradeHandler) attachedServer.off('upgrade', upgradeHandler);
     for (const entry of pending.values()) {
       clearTimeout(entry.timer);
+      if (pending.get(entry.requestId) === entry) pending.delete(entry.requestId);
+      if (pendingByWireRequestId.get(entry.wireRequestId) === entry) pendingByWireRequestId.delete(entry.wireRequestId);
       entry.reject(new Error('Device broker is shutting down.'));
     }
     pending.clear();
+    pendingByWireRequestId.clear();
     for (const ws of sockets) { try { ws.terminate(); } catch {} }
     sockets.clear();
     await new Promise(resolve => wss.close(() => resolve()));
