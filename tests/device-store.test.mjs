@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 import { createDeviceStore } from '../scripts/device-store.mjs';
 
@@ -148,7 +149,34 @@ test('authorization generations are monotonic and serialized authorization rejec
   assert.equal(store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 3 }, () => 'ok'), 'ok');
   assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 1 }, () => {}), /authorization changed|revoked|stale/i);
   store.revoke('generation-device');
+  assert.equal(store.get('generation-device').authorizationGeneration, 4);
   assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 4 }, () => {}), /authorization changed|revoked|stale/i);
+});
+
+test('legacy device registry migrates authorization generation idempotently', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-migration-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const legacy = new DatabaseSync(dbPath);
+  legacy.exec(`
+    CREATE TABLE devices (
+      device_id TEXT PRIMARY KEY,
+      public_key_pem TEXT NOT NULL,
+      enrolled_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+  `);
+  const key = publicKeyPem();
+  legacy.prepare('INSERT INTO devices (device_id, public_key_pem, enrolled_at, revoked_at) VALUES (?, ?, ?, NULL)')
+    .run('legacy-device', key, '2026-09-13T00:00:00.000Z');
+  legacy.close();
+
+  const first = createDeviceStore({ dbPath });
+  assert.equal(first.get('legacy-device').authorizationGeneration, 1);
+  first.close();
+  const second = createDeviceStore({ dbPath });
+  assert.equal(second.get('legacy-device').authorizationGeneration, 1);
+  second.close();
 });
 
 test('device store rejects stale expected key during rotation', t => {

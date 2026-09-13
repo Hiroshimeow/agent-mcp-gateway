@@ -122,7 +122,8 @@ export function createDeviceBroker(options = {}) {
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
       authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null,
-      authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null
+      authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null,
+      usedRequestIds: new Set()
     };
     devices.set(deviceId, current);
     ws.deviceId = deviceId;
@@ -134,6 +135,7 @@ export function createDeviceBroker(options = {}) {
         previous.connectionEpoch,
         'Device connection was replaced before the request result was known; the request was not replayed.'
       );
+      previous.usedRequestIds?.clear();
       if (previous.socket.readyState === WebSocket.OPEN) previous.socket.close(4001, 'replaced by newer connection');
     }
     return current;
@@ -153,6 +155,7 @@ export function createDeviceBroker(options = {}) {
     device.lastSeenAt = Date.now();
     device.authenticatedPublicKeyPem = null;
     device.authenticatedAuthorizationGeneration = null;
+    device.usedRequestIds?.clear();
     if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
   }
 
@@ -237,11 +240,8 @@ export function createDeviceBroker(options = {}) {
         return authFailure(ws, 'enrollment failed');
       }
     } else {
-      const stored = deviceStore.get(state.deviceId);
-      if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
-      if (stored.publicKeyPem !== state.publicKeyPem) return authFailure(ws, 'device key changed');
-      authorizedPublicKeyPem = stored.publicKeyPem;
-      authorizationGeneration = stored.authorizationGeneration;
+      authorizedPublicKeyPem = state.publicKeyPem;
+      authorizationGeneration = state.authorizationGeneration;
     }
 
     try {
@@ -295,20 +295,25 @@ export function createDeviceBroker(options = {}) {
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
     const requestId = String(message.request_id || '');
+    const acceptResult = () => {
+      const entry = pending.get(requestId);
+      if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
+      clearTimeout(entry.timer);
+      pending.delete(requestId);
+      if (message.type === 'tool_error') {
+        const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
+        error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
+        entry.reject(error);
+      } else entry.resolve(message.payload);
+    };
+    if (!durableAuth) {
+      acceptResult();
+      return;
+    }
     try {
       deviceStore.withCurrentAuthorization(
         { deviceId: device.deviceId, publicKeyPem: device.authenticatedPublicKeyPem, authorizationGeneration: device.authenticatedAuthorizationGeneration },
-        () => {
-          const entry = pending.get(requestId);
-          if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
-          clearTimeout(entry.timer);
-          pending.delete(requestId);
-          if (message.type === 'tool_error') {
-            const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
-            error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
-            entry.reject(error);
-          } else entry.resolve(message.payload);
-        }
+        acceptResult
       );
     } catch {
       invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
@@ -352,6 +357,7 @@ export function createDeviceBroker(options = {}) {
       current.online = false;
       current.socket = null;
       current.lastSeenAt = Date.now();
+      current.usedRequestIds?.clear();
       rejectPendingForConnection(ws.deviceId, ws.connectionEpoch, 'Device disconnected before the request result was known; the request was not replayed.');
     });
   });
@@ -400,6 +406,8 @@ export function createDeviceBroker(options = {}) {
     if (current.socket?.readyState === WebSocket.OPEN) current.socket.close(4004, 'device revoked');
     current.socket = null;
     current.authenticatedPublicKeyPem = null;
+    current.authenticatedAuthorizationGeneration = null;
+    current.usedRequestIds?.clear();
     devices.set(normalized, current);
     return publicDevice(current);
   }
@@ -413,31 +421,58 @@ export function createDeviceBroker(options = {}) {
     const requestId = requestedRequestId === undefined ? randomUUID() : String(requestedRequestId).trim();
     if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
     if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
+    if (device.usedRequestIds?.has(requestId)) throw new Error(`Device request ${requestId} cannot be reused within the same connection epoch.`);
+    const wireMessage = JSON.stringify({
+      protocol_version: DEVICE_PROTOCOL_VERSION,
+      type: 'tool_call',
+      request_id: requestId,
+      device_id: device.deviceId,
+      connection_epoch: device.connectionEpoch,
+      timestamp: Date.now(),
+      payload: { tool, arguments: args }
+    });
     return await new Promise((resolve, reject) => {
-      const entry = { resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
-      const timer = setTimeout(() => {
-        if (pending.get(requestId) !== entry) return;
-        pending.delete(requestId);
-        reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
-      }, timeoutMs);
-      entry.timer = timer;
-      timer.unref?.();
-      pending.set(requestId, entry);
-      device.socket.send(JSON.stringify({
-        protocol_version: DEVICE_PROTOCOL_VERSION,
-        type: 'tool_call',
-        request_id: requestId,
-        device_id: device.deviceId,
-        connection_epoch: device.connectionEpoch,
-        timestamp: Date.now(),
-        payload: { tool, arguments: args }
-      }), error => {
-        if (!error) return;
-        if (pending.get(requestId) !== entry) return;
-        clearTimeout(entry.timer);
-        pending.delete(requestId);
-        entry.reject(error);
-      });
+      let entry = null;
+      const dispatch = () => {
+        if (device.usedRequestIds?.has(requestId)) throw new Error(`Device request ${requestId} cannot be reused within the same connection epoch.`);
+        device.usedRequestIds?.add(requestId);
+        entry = { resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
+        const timer = setTimeout(() => {
+          if (pending.get(requestId) !== entry) return;
+          pending.delete(requestId);
+          entry.reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
+        }, timeoutMs);
+        entry.timer = timer;
+        timer.unref?.();
+        pending.set(requestId, entry);
+        device.socket.send(wireMessage, error => {
+          if (!error || pending.get(requestId) !== entry) return;
+          clearTimeout(entry.timer);
+          pending.delete(requestId);
+          entry.reject(error);
+        });
+      };
+      try {
+        if (durableAuth) {
+          deviceStore.withCurrentAuthorization(
+            {
+              deviceId: device.deviceId,
+              publicKeyPem: device.authenticatedPublicKeyPem,
+              authorizationGeneration: device.authenticatedAuthorizationGeneration
+            },
+            dispatch
+          );
+        } else dispatch();
+      } catch (error) {
+        if (entry && pending.get(requestId) === entry) {
+          clearTimeout(entry.timer);
+          pending.delete(requestId);
+        }
+        if (durableAuth && /authorization changed|revoked|stale/i.test(String(error?.message || ''))) {
+          invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
+        }
+        reject(error);
+      }
     });
   }
 
