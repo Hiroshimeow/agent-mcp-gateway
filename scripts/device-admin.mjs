@@ -8,16 +8,18 @@ const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(p
 const dbPath = path.resolve(process.env.MCP_DEVICE_DB_PATH || path.join(runtimeDirectory, 'devices.sqlite'));
 const [command, deviceId, publicKeyPath] = process.argv.slice(2);
 
-if (!deviceId || !['enroll', 'revoke'].includes(command) || (command === 'enroll' && !publicKeyPath)) {
-  console.error('Usage: npm run device:enroll -- <device_id> <public_key.pem> | npm run device:revoke -- <device_id>');
+if (!deviceId || !['enroll', 'rotate', 'revoke'].includes(command) || (['enroll', 'rotate'].includes(command) && !publicKeyPath)) {
+  console.error('Usage: npm run device:enroll -- <device_id> <public_key.pem> | npm run device:rotate -- <device_id> <public_key.pem> | npm run device:revoke -- <device_id>');
   process.exit(2);
 }
 
 const store = createDeviceStore({ dbPath });
 try {
-  if (command === 'enroll') {
+  if (command === 'enroll' || command === 'rotate') {
     const publicKeyPem = fs.readFileSync(path.resolve(publicKeyPath), 'utf8');
-    const result = store.enroll({ deviceId, publicKeyPem });
+    const result = command === 'enroll'
+      ? store.enroll({ deviceId, publicKeyPem })
+      : store.rotate({ deviceId, publicKeyPem });
     console.log(JSON.stringify({ ok: true, deviceId: result.deviceId, enrolledAt: result.enrolledAt }));
   } else {
     const result = store.revoke(deviceId);

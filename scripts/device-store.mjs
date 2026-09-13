@@ -56,6 +56,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     INSERT INTO devices (device_id, public_key_pem, enrolled_at, revoked_at)
     VALUES (?, ?, ?, NULL)
   `);
+  const rotateStatement = db.prepare(`
+    UPDATE devices
+    SET public_key_pem = ?
+    WHERE device_id = ? AND revoked_at IS NULL
+  `);
   const revokeStatement = db.prepare(`
     UPDATE devices
     SET revoked_at = ?
@@ -78,6 +83,16 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
+  function rotate({ deviceId, publicKeyPem }) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
+    const existing = get(normalizedId);
+    if (!existing) throw new Error(`Unknown device ${normalizedId}.`);
+    if (existing.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
+    rotateStatement.run(normalizedKey, normalizedId);
+    return get(normalizedId);
+  }
+
   function revoke(deviceId) {
     const normalizedId = normalizeDeviceId(deviceId);
     const result = revokeStatement.run(now(), normalizedId);
@@ -93,5 +108,5 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     db.close();
   }
 
-  return { get, list, enroll, revoke, close };
+  return { get, list, enroll, rotate, revoke, close };
 }

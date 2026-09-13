@@ -147,6 +147,32 @@ test('one-time token enrollment persists Ed25519 identity and reconnect needs on
   assert.equal(device.connectionEpoch, 2);
 });
 
+test('rotated device key rejects the old key and accepts the new key on reconnect', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-rotate-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const oldKeys = keyPair();
+  const newKeys = keyPair();
+
+  const enrolled = await openSocket(port, 'dev-secret');
+  await enroll(enrolled, { deviceId: 'rotated-device', ...oldKeys });
+  enrolled.close();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  store.rotate({ deviceId: 'rotated-device', publicKeyPem: newKeys.publicKeyPem });
+
+  const stale = await openSocket(port);
+  const staleClosed = new Promise(resolve => stale.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+  void reconnect(stale, { deviceId: 'rotated-device', privateKey: oldKeys.privateKey }).catch(() => {});
+  const staleResult = await staleClosed;
+  assert.equal(staleResult.code, 4003);
+
+  const current = await openSocket(port);
+  t.after(() => current.close());
+  const currentOk = await reconnect(current, { deviceId: 'rotated-device', privateKey: newKeys.privateKey });
+  assert.equal(currentOk.type, 'auth_ok');
+});
+
 test('invalid signature cannot authenticate an enrolled identity', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-'));
   const dbPath = path.join(dir, 'devices.sqlite');

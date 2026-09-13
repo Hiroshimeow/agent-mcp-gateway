@@ -9,16 +9,23 @@ import test from 'node:test';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const adminScript = path.join(repoRoot, 'scripts', 'device-admin.mjs');
 
-test('device admin supports operator pre-enroll then revoke', () => {
+test('device admin supports operator pre-enroll, key rotation, then revoke', () => {
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'device-admin-'));
-  const publicKeyPath = path.join(runtime, 'device.pub.pem');
-  const { publicKey } = generateKeyPairSync('ed25519');
-  fs.writeFileSync(publicKeyPath, publicKey.export({ type: 'spki', format: 'pem' }));
+  const firstPublicKeyPath = path.join(runtime, 'device-first.pub.pem');
+  const secondPublicKeyPath = path.join(runtime, 'device-second.pub.pem');
+  const first = generateKeyPairSync('ed25519');
+  const second = generateKeyPairSync('ed25519');
+  fs.writeFileSync(firstPublicKeyPath, first.publicKey.export({ type: 'spki', format: 'pem' }));
+  fs.writeFileSync(secondPublicKeyPath, second.publicKey.export({ type: 'spki', format: 'pem' }));
   const env = { ...process.env, MCP_RUNTIME_DIR: runtime };
-  const enroll = JSON.parse(execFileSync(process.execPath, [adminScript, 'enroll', 'thinkbook', publicKeyPath], { cwd: repoRoot, env, encoding: 'utf8' }));
+  const enroll = JSON.parse(execFileSync(process.execPath, [adminScript, 'enroll', 'thinkbook', firstPublicKeyPath], { cwd: repoRoot, env, encoding: 'utf8' }));
   assert.equal(enroll.ok, true);
   assert.equal(enroll.deviceId, 'thinkbook');
   assert.ok(enroll.enrolledAt);
+  const rotate = JSON.parse(execFileSync(process.execPath, [adminScript, 'rotate', 'thinkbook', secondPublicKeyPath], { cwd: repoRoot, env, encoding: 'utf8' }));
+  assert.equal(rotate.ok, true);
+  assert.equal(rotate.deviceId, 'thinkbook');
+  assert.equal(rotate.enrolledAt, enroll.enrolledAt);
   const revoke = JSON.parse(execFileSync(process.execPath, [adminScript, 'revoke', 'thinkbook'], { cwd: repoRoot, env, encoding: 'utf8' }));
   assert.equal(revoke.ok, true);
   assert.equal(revoke.deviceId, 'thinkbook');

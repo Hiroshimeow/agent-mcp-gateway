@@ -47,3 +47,46 @@ test('device store refuses silent public-key replacement', t => {
     /already enrolled/i
   );
 });
+
+test('device store explicitly rotates the key of an active device atomically', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const times = ['2026-09-13T00:00:00.000Z', '2026-09-13T01:00:00.000Z'];
+  const store = createDeviceStore({ dbPath, now: () => times.shift() });
+  t.after(() => {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const firstKey = publicKeyPem();
+  const secondKey = publicKeyPem();
+  const enrolled = store.enroll({ deviceId: 'thinkbook', publicKeyPem: firstKey });
+  const rotated = store.rotate({ deviceId: 'thinkbook', publicKeyPem: secondKey });
+
+  assert.equal(rotated.deviceId, 'thinkbook');
+  assert.equal(rotated.publicKeyPem, secondKey);
+  assert.equal(rotated.enrolledAt, enrolled.enrolledAt);
+  assert.equal(rotated.revokedAt, null);
+  assert.equal(store.get('thinkbook').publicKeyPem, secondKey);
+});
+
+test('device store refuses key rotation for unknown or revoked devices', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  t.after(() => {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  assert.throws(
+    () => store.rotate({ deviceId: 'missing', publicKeyPem: publicKeyPem() }),
+    /unknown device/i
+  );
+  store.enroll({ deviceId: 'revoked', publicKeyPem: publicKeyPem() });
+  store.revoke('revoked');
+  assert.throws(
+    () => store.rotate({ deviceId: 'revoked', publicKeyPem: publicKeyPem() }),
+    /revoked/i
+  );
+});
