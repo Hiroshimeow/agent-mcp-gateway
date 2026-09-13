@@ -132,6 +132,25 @@ test('invalid expected or replacement keys leave the enrolled record unchanged',
   assert.equal(store.get('invalid-key-device').publicKeyPem, currentKey);
 });
 
+test('authorization generations are monotonic and serialized authorization rejects stale state', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-generation-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const a = publicKeyPem();
+  const b = publicKeyPem();
+  const enrolled = store.enroll({ deviceId: 'generation-device', publicKeyPem: a });
+  assert.equal(enrolled.authorizationGeneration, 1);
+  const rotated = store.rotate({ deviceId: 'generation-device', expectedPublicKeyPem: a, publicKeyPem: b });
+  assert.equal(rotated.authorizationGeneration, 2);
+  const rolledBack = store.rotate({ deviceId: 'generation-device', expectedPublicKeyPem: b, publicKeyPem: a });
+  assert.equal(rolledBack.authorizationGeneration, 3);
+  assert.equal(store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 3 }, () => 'ok'), 'ok');
+  assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 1 }, () => {}), /authorization changed|revoked|stale/i);
+  store.revoke('generation-device');
+  assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 4 }, () => {}), /authorization changed|revoked|stale/i);
+});
+
 test('device store rejects stale expected key during rotation', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
   const dbPath = path.join(dir, 'devices.sqlite');

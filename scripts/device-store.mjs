@@ -23,7 +23,8 @@ function rowToDevice(row) {
     deviceId: row.device_id,
     publicKeyPem: row.public_key_pem,
     enrolledAt: row.enrolled_at,
-    revokedAt: row.revoked_at
+    revokedAt: row.revoked_at,
+    authorizationGeneration: Number(row.authorization_generation)
   };
 }
 
@@ -38,32 +39,38 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       device_id TEXT PRIMARY KEY,
       public_key_pem TEXT NOT NULL,
       enrolled_at TEXT NOT NULL,
-      revoked_at TEXT
+      revoked_at TEXT,
+      authorization_generation INTEGER NOT NULL DEFAULT 1
     );
   `);
+  const columns = db.prepare(`PRAGMA table_info(devices)`).all();
+  if (!columns.some(column => column.name === 'authorization_generation')) {
+    db.exec('ALTER TABLE devices ADD COLUMN authorization_generation INTEGER NOT NULL DEFAULT 1');
+  }
+  db.exec('PRAGMA busy_timeout = 5000');
 
   const getStatement = db.prepare(`
-    SELECT device_id, public_key_pem, enrolled_at, revoked_at
+    SELECT device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     WHERE device_id = ?
   `);
   const listStatement = db.prepare(`
-    SELECT device_id, public_key_pem, enrolled_at, revoked_at
+    SELECT device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     ORDER BY device_id
   `);
   const insertStatement = db.prepare(`
-    INSERT INTO devices (device_id, public_key_pem, enrolled_at, revoked_at)
-    VALUES (?, ?, ?, NULL)
+    INSERT INTO devices (device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation)
+    VALUES (?, ?, ?, NULL, 1)
   `);
   const rotateStatement = db.prepare(`
     UPDATE devices
-    SET public_key_pem = ?
+    SET public_key_pem = ?, authorization_generation = authorization_generation + 1
     WHERE device_id = ? AND public_key_pem = ? AND revoked_at IS NULL
   `);
   const revokeStatement = db.prepare(`
     UPDATE devices
-    SET revoked_at = ?
+    SET revoked_at = ?, authorization_generation = authorization_generation + 1
     WHERE device_id = ? AND revoked_at IS NULL
   `);
 
@@ -79,8 +86,9 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     const normalizedId = normalizeDeviceId(deviceId);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
     if (getStatement.get(normalizedId)) throw new Error(`Device ${normalizedId} is already enrolled.`);
-    insertStatement.run(normalizedId, normalizedKey, now());
-    return get(normalizedId);
+    const enrolledAt = now();
+    insertStatement.run(normalizedId, normalizedKey, enrolledAt);
+    return { deviceId: normalizedId, publicKeyPem: normalizedKey, enrolledAt, revokedAt: null, authorizationGeneration: 1 };
   }
 
   function rotate({ deviceId, expectedPublicKeyPem, publicKeyPem }) {
@@ -108,9 +116,28 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
-  function close() {
-    db.close();
+  function withCurrentAuthorization({ deviceId, publicKeyPem, authorizationGeneration }, callback) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
+    let began = false;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      began = true;
+      const row = getStatement.get(normalizedId);
+      if (!row || row.revoked_at || row.public_key_pem !== normalizedKey || Number(row.authorization_generation) !== Number(authorizationGeneration)) {
+        throw new Error(`Device ${normalizedId} authorization changed, was revoked, or is stale.`);
+      }
+      const result = callback(rowToDevice(row));
+      db.exec('COMMIT');
+      began = false;
+      return result;
+    } catch (error) {
+      if (began) { try { db.exec('ROLLBACK'); } catch {} }
+      throw error;
+    }
   }
 
-  return { get, list, enroll, rotate, revoke, close };
+  function close() { db.close(); }
+
+  return { get, list, enroll, rotate, revoke, withCurrentAuthorization, close };
 }

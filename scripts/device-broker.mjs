@@ -93,7 +93,8 @@ export function createDeviceBroker(options = {}) {
         capabilities: [],
         connectedAt: null,
         lastSeenAt: null,
-        authenticatedPublicKeyPem: null
+        authenticatedPublicKeyPem: null,
+        authenticatedAuthorizationGeneration: null
       });
     }
   }
@@ -107,7 +108,7 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  function registerConnection(ws, { deviceId, agentVersion, capabilities, publicKeyPem = null }) {
+  function registerConnection(ws, { deviceId, agentVersion, capabilities, publicKeyPem = null, authorizationGeneration = null }) {
     const previous = devices.get(deviceId);
     const connectionEpoch = (previous?.connectionEpoch || 0) + 1;
     const current = {
@@ -120,7 +121,8 @@ export function createDeviceBroker(options = {}) {
       capabilities: normalizeCapabilities(capabilities),
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
-      authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null
+      authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null,
+      authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null
     };
     devices.set(deviceId, current);
     ws.deviceId = deviceId;
@@ -150,6 +152,7 @@ export function createDeviceBroker(options = {}) {
     device.socket = null;
     device.lastSeenAt = Date.now();
     device.authenticatedPublicKeyPem = null;
+    device.authenticatedAuthorizationGeneration = null;
     if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
   }
 
@@ -160,7 +163,7 @@ export function createDeviceBroker(options = {}) {
       invalidateAuthorization(device, { revoked: true, reason: 'Device was revoked', closeCode: 4004 });
       return false;
     }
-    if (!device.authenticatedPublicKeyPem || stored.publicKeyPem !== device.authenticatedPublicKeyPem) {
+    if (!device.authenticatedPublicKeyPem || stored.publicKeyPem !== device.authenticatedPublicKeyPem || stored.authorizationGeneration !== device.authenticatedAuthorizationGeneration) {
       invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
       return false;
     }
@@ -203,7 +206,8 @@ export function createDeviceBroker(options = {}) {
       deviceId,
       publicKeyPem: stored.publicKeyPem,
       agentVersion: message.payload?.agent_version,
-      capabilities: message.payload?.capabilities
+      capabilities: message.payload?.capabilities,
+      authorizationGeneration: stored.authorizationGeneration
     });
   }
 
@@ -223,10 +227,12 @@ export function createDeviceBroker(options = {}) {
     if (!valid) return authFailure(ws, 'invalid signature');
 
     let authorizedPublicKeyPem = state.publicKeyPem;
+    let authorizationGeneration;
     if (state.mode === 'enroll') {
       try {
-        deviceStore.enroll({ deviceId: state.deviceId, publicKeyPem: state.publicKeyPem });
-        authorizedPublicKeyPem = deviceStore.get(state.deviceId).publicKeyPem;
+        const enrolled = deviceStore.enroll({ deviceId: state.deviceId, publicKeyPem: state.publicKeyPem });
+        authorizedPublicKeyPem = enrolled.publicKeyPem;
+        authorizationGeneration = enrolled.authorizationGeneration;
       } catch {
         return authFailure(ws, 'enrollment failed');
       }
@@ -235,18 +241,26 @@ export function createDeviceBroker(options = {}) {
       if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
       if (stored.publicKeyPem !== state.publicKeyPem) return authFailure(ws, 'device key changed');
       authorizedPublicKeyPem = stored.publicKeyPem;
+      authorizationGeneration = stored.authorizationGeneration;
     }
 
-    const current = registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem });
-    ws.authState = null;
-    ws.send(JSON.stringify({
-      protocol_version: DEVICE_PROTOCOL_VERSION,
-      type: 'auth_ok',
-      device_id: current.deviceId,
-      connection_epoch: current.connectionEpoch,
-      timestamp: Date.now(),
-      payload: { accepted: true }
-    }));
+    try {
+      deviceStore.withCurrentAuthorization(
+        { deviceId: state.deviceId, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration },
+        () => {
+          const current = registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration });
+          ws.authState = null;
+          ws.send(JSON.stringify({
+            protocol_version: DEVICE_PROTOCOL_VERSION,
+            type: 'auth_ok',
+            device_id: current.deviceId,
+            connection_epoch: current.connectionEpoch,
+            timestamp: Date.now(),
+            payload: { accepted: true }
+          }));
+        }
+      );
+    } catch { return authFailure(ws, 'device authorization changed'); }
   }
 
   function registerLegacyHello(ws, message) {
@@ -281,15 +295,24 @@ export function createDeviceBroker(options = {}) {
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
     const requestId = String(message.request_id || '');
-    const entry = pending.get(requestId);
-    if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
-    clearTimeout(entry.timer);
-    pending.delete(requestId);
-    if (message.type === 'tool_error') {
-      const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
-      error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
-      entry.reject(error);
-    } else entry.resolve(message.payload);
+    try {
+      deviceStore.withCurrentAuthorization(
+        { deviceId: device.deviceId, publicKeyPem: device.authenticatedPublicKeyPem, authorizationGeneration: device.authenticatedAuthorizationGeneration },
+        () => {
+          const entry = pending.get(requestId);
+          if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch) return;
+          clearTimeout(entry.timer);
+          pending.delete(requestId);
+          if (message.type === 'tool_error') {
+            const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
+            error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
+            entry.reject(error);
+          } else entry.resolve(message.payload);
+        }
+      );
+    } catch {
+      invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
+    }
   }
 
   wss.on('connection', ws => {
@@ -391,12 +414,15 @@ export function createDeviceBroker(options = {}) {
     if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
     if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
     return await new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
       const timer = setTimeout(() => {
+        if (pending.get(requestId) !== entry) return;
         pending.delete(requestId);
         reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
       }, timeoutMs);
+      entry.timer = timer;
       timer.unref?.();
-      pending.set(requestId, { resolve, reject, timer, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch });
+      pending.set(requestId, entry);
       device.socket.send(JSON.stringify({
         protocol_version: DEVICE_PROTOCOL_VERSION,
         type: 'tool_call',
@@ -407,11 +433,10 @@ export function createDeviceBroker(options = {}) {
         payload: { tool, arguments: args }
       }), error => {
         if (!error) return;
-        const entry = pending.get(requestId);
-        if (!entry) return;
+        if (pending.get(requestId) !== entry) return;
         clearTimeout(entry.timer);
         pending.delete(requestId);
-        reject(error);
+        entry.reject(error);
       });
     });
   }
