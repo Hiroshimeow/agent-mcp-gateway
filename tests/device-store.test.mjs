@@ -91,6 +91,47 @@ test('device store refuses key rotation for unknown or revoked devices', t => {
   );
 });
 
+test('invalid expected or replacement keys leave the enrolled record unchanged', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-invalid-key-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  t.after(() => {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const currentKey = publicKeyPem();
+  store.enroll({ deviceId: 'invalid-key-device', publicKeyPem: currentKey });
+
+  assert.throws(
+    () => store.rotate({ deviceId: 'invalid-key-device', expectedPublicKeyPem: 'not-a-public-key', publicKeyPem: publicKeyPem() }),
+    /invalid|key|decoder/i
+  );
+  assert.equal(store.get('invalid-key-device').publicKeyPem, currentKey);
+
+  assert.throws(
+    () => store.rotate({ deviceId: 'invalid-key-device', expectedPublicKeyPem: currentKey, publicKeyPem: 'not-a-public-key' }),
+    /invalid|key|decoder/i
+  );
+  assert.equal(store.get('invalid-key-device').publicKeyPem, currentKey);
+
+  const ecKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({
+    type: 'spki',
+    format: 'pem'
+  });
+  assert.throws(
+    () => store.rotate({ deviceId: 'invalid-key-device', expectedPublicKeyPem: ecKey, publicKeyPem: publicKeyPem() }),
+    /Ed25519/i
+  );
+  assert.equal(store.get('invalid-key-device').publicKeyPem, currentKey);
+
+  assert.throws(
+    () => store.rotate({ deviceId: 'invalid-key-device', expectedPublicKeyPem: currentKey, publicKeyPem: ecKey }),
+    /Ed25519/i
+  );
+  assert.equal(store.get('invalid-key-device').publicKeyPem, currentKey);
+});
+
 test('device store rejects stale expected key during rotation', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
   const dbPath = path.join(dir, 'devices.sqlite');
