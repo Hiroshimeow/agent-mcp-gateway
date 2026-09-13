@@ -92,7 +92,8 @@ export function createDeviceBroker(options = {}) {
         agentVersion: 'unknown',
         capabilities: [],
         connectedAt: null,
-        lastSeenAt: null
+        lastSeenAt: null,
+        authenticatedPublicKeyPem: null
       });
     }
   }
@@ -106,7 +107,7 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  function registerConnection(ws, { deviceId, agentVersion, capabilities }) {
+  function registerConnection(ws, { deviceId, agentVersion, capabilities, publicKeyPem = null }) {
     const previous = devices.get(deviceId);
     const connectionEpoch = (previous?.connectionEpoch || 0) + 1;
     const current = {
@@ -118,16 +119,52 @@ export function createDeviceBroker(options = {}) {
       agentVersion: String(agentVersion || 'unknown'),
       capabilities: normalizeCapabilities(capabilities),
       connectedAt: Date.now(),
-      lastSeenAt: Date.now()
+      lastSeenAt: Date.now(),
+      authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null
     };
     devices.set(deviceId, current);
     ws.deviceId = deviceId;
     ws.connectionEpoch = connectionEpoch;
     ws.authenticated = true;
-    if (previous?.socket && previous.socket !== ws && previous.socket.readyState === WebSocket.OPEN) {
-      previous.socket.close(4001, 'replaced by newer connection');
+    if (previous?.socket && previous.socket !== ws) {
+      rejectPendingForConnection(
+        deviceId,
+        previous.connectionEpoch,
+        'Device connection was replaced before the request result was known; the request was not replayed.'
+      );
+      if (previous.socket.readyState === WebSocket.OPEN) previous.socket.close(4001, 'replaced by newer connection');
     }
     return current;
+  }
+
+  function invalidateAuthorization(device, { revoked, reason, closeCode }) {
+    const socket = device.socket;
+    const connectionEpoch = device.connectionEpoch;
+    rejectPendingForConnection(
+      device.deviceId,
+      connectionEpoch,
+      `${reason} before the request result was known; the request was not replayed.`
+    );
+    device.revoked = Boolean(revoked);
+    device.online = false;
+    device.socket = null;
+    device.lastSeenAt = Date.now();
+    device.authenticatedPublicKeyPem = null;
+    if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
+  }
+
+  function refreshAuthorization(device) {
+    if (!durableAuth || !device?.online || !device.socket) return true;
+    const stored = deviceStore.get(device.deviceId);
+    if (!stored || stored.revokedAt) {
+      invalidateAuthorization(device, { revoked: true, reason: 'Device was revoked', closeCode: 4004 });
+      return false;
+    }
+    if (!device.authenticatedPublicKeyPem || stored.publicKeyPem !== device.authenticatedPublicKeyPem) {
+      invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
+      return false;
+    }
+    return true;
   }
 
   function sendAuthChallenge(ws, authState) {
@@ -185,15 +222,22 @@ export function createDeviceBroker(options = {}) {
     );
     if (!valid) return authFailure(ws, 'invalid signature');
 
+    let authorizedPublicKeyPem = state.publicKeyPem;
     if (state.mode === 'enroll') {
-      try { deviceStore.enroll({ deviceId: state.deviceId, publicKeyPem: state.publicKeyPem }); }
-      catch { return authFailure(ws, 'enrollment failed'); }
+      try {
+        deviceStore.enroll({ deviceId: state.deviceId, publicKeyPem: state.publicKeyPem });
+        authorizedPublicKeyPem = deviceStore.get(state.deviceId).publicKeyPem;
+      } catch {
+        return authFailure(ws, 'enrollment failed');
+      }
     } else {
       const stored = deviceStore.get(state.deviceId);
       if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
+      if (stored.publicKeyPem !== state.publicKeyPem) return authFailure(ws, 'device key changed');
+      authorizedPublicKeyPem = stored.publicKeyPem;
     }
 
-    const current = registerConnection(ws, state);
+    const current = registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem });
     ws.authState = null;
     ws.send(JSON.stringify({
       protocol_version: DEVICE_PROTOCOL_VERSION,
@@ -225,6 +269,7 @@ export function createDeviceBroker(options = {}) {
   function handleRegisteredMessage(ws, message) {
     const device = devices.get(ws.deviceId);
     if (!device || device.socket !== ws || device.connectionEpoch !== ws.connectionEpoch) return;
+    if (!refreshAuthorization(device)) return;
     if (message.device_id && message.device_id !== ws.deviceId) throw new Error('device_id does not match authenticated connection.');
     if (message.connection_epoch !== undefined && message.connection_epoch !== ws.connectionEpoch) return;
     device.lastSeenAt = Date.now();
@@ -309,6 +354,9 @@ export function createDeviceBroker(options = {}) {
   }
 
   function listDevices() {
+    for (const device of devices.values()) {
+      if (device.online) refreshAuthorization(device);
+    }
     return [...devices.values()].map(publicDevice).sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
@@ -317,16 +365,25 @@ export function createDeviceBroker(options = {}) {
     const normalized = normalizeDeviceId(deviceId);
     const stored = deviceStore.revoke(normalized);
     const current = devices.get(normalized) || { deviceId: normalized, connectionEpoch: 0, capabilities: [] };
+    if (current.socket) {
+      rejectPendingForConnection(
+        normalized,
+        current.connectionEpoch,
+        'Device was revoked before the request result was known; the request was not replayed.'
+      );
+    }
     current.revoked = true;
     current.online = false;
     if (current.socket?.readyState === WebSocket.OPEN) current.socket.close(4004, 'device revoked');
     current.socket = null;
+    current.authenticatedPublicKeyPem = null;
     devices.set(normalized, current);
     return publicDevice(current);
   }
 
   async function callDevice({ requestId: requestedRequestId, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
     const device = devices.get(String(deviceId || ''));
+    if (device?.online && !refreshAuthorization(device)) throw new Error(`Device ${deviceId} authorization changed or was revoked; it is offline.`);
     if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) throw new Error(`Device ${deviceId} is offline or unknown.`);
     if (!device.capabilities.includes(tool)) throw new Error(`Device ${deviceId} does not advertise capability ${tool}.`);
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Device request timeout must be an integer between 1 and 30000 ms.');

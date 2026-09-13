@@ -59,7 +59,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   const rotateStatement = db.prepare(`
     UPDATE devices
     SET public_key_pem = ?
-    WHERE device_id = ? AND revoked_at IS NULL
+    WHERE device_id = ? AND public_key_pem = ? AND revoked_at IS NULL
   `);
   const revokeStatement = db.prepare(`
     UPDATE devices
@@ -83,13 +83,17 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
-  function rotate({ deviceId, publicKeyPem }) {
+  function rotate({ deviceId, expectedPublicKeyPem, publicKeyPem }) {
     const normalizedId = normalizeDeviceId(deviceId);
+    const expectedKey = normalizeEd25519PublicKey(expectedPublicKeyPem);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
-    const existing = get(normalizedId);
-    if (!existing) throw new Error(`Unknown device ${normalizedId}.`);
-    if (existing.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
-    rotateStatement.run(normalizedKey, normalizedId);
+    const result = rotateStatement.run(normalizedKey, normalizedId, expectedKey);
+    if (Number(result.changes) === 0) {
+      const existing = get(normalizedId);
+      if (!existing) throw new Error(`Unknown device ${normalizedId}.`);
+      if (existing.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
+      throw new Error(`Device ${normalizedId} current key changed; rotation was not applied.`);
+    }
     return get(normalizedId);
   }
 

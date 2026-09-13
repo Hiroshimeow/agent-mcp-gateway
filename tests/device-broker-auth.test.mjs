@@ -159,7 +159,7 @@ test('rotated device key rejects the old key and accepts the new key on reconnec
   await enroll(enrolled, { deviceId: 'rotated-device', ...oldKeys });
   enrolled.close();
   await new Promise(resolve => setTimeout(resolve, 50));
-  store.rotate({ deviceId: 'rotated-device', publicKeyPem: newKeys.publicKeyPem });
+  store.rotate({ deviceId: 'rotated-device', expectedPublicKeyPem: oldKeys.publicKeyPem, publicKeyPem: newKeys.publicKeyPem });
 
   const stale = await openSocket(port);
   const staleClosed = new Promise(resolve => stale.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
@@ -171,6 +171,128 @@ test('rotated device key rejects the old key and accepts the new key on reconnec
   t.after(() => current.close());
   const currentOk = await reconnect(current, { deviceId: 'rotated-device', privateKey: newKeys.privateKey });
   assert.equal(currentOk.type, 'auth_ok');
+});
+
+test('rotation between challenge and auth response invalidates the challenged old key', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-race-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const oldKeys = keyPair();
+  const newKeys = keyPair();
+
+  const enrolled = await openSocket(port, 'dev-secret');
+  await enroll(enrolled, { deviceId: 'race-device', ...oldKeys });
+  enrolled.close();
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  const stale = await openSocket(port);
+  const challengePromise = nextMessage(stale);
+  stale.send(JSON.stringify({ protocol_version: 1, type: 'auth_hello', device_id: 'race-device', timestamp: Date.now(), payload: {} }));
+  const challenge = await challengePromise;
+  store.rotate({ deviceId: 'race-device', expectedPublicKeyPem: oldKeys.publicKeyPem, publicKeyPem: newKeys.publicKeyPem });
+  const signature = sign(null, buildDeviceAuthChallenge({ deviceId: 'race-device', nonce: challenge.payload.nonce }), oldKeys.privateKey).toString('base64');
+  const outcome = Promise.race([
+    nextMessage(stale).then(message => ({ kind: 'message', message }), error => ({ kind: 'closed', error })),
+    new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 1000))
+  ]);
+  stale.send(JSON.stringify({ protocol_version: 1, type: 'auth_response', device_id: 'race-device', timestamp: Date.now(), payload: { signature } }));
+  const result = await outcome;
+  assert.equal(result.kind, 'closed', `expected authentication rejection, got ${JSON.stringify(result)}`);
+  assert.match(result.error.message, /socket closed 4003/i);
+});
+
+test('external key rotation invalidates a live session before dispatch', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-live-rotate-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const oldKeys = keyPair();
+  const newKeys = keyPair();
+  const ws = await openSocket(port, 'dev-secret');
+  await enroll(ws, { deviceId: 'live-rotate-device', ...oldKeys });
+  const closed = new Promise(resolve => ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+
+  store.rotate({ deviceId: 'live-rotate-device', expectedPublicKeyPem: oldKeys.publicKeyPem, publicKeyPem: newKeys.publicKeyPem });
+  await assert.rejects(
+    broker.callDevice({ deviceId: 'live-rotate-device', tool: 'ping' }),
+    /authorization changed|offline/i
+  );
+  const result = await closed;
+  assert.equal(result.code, 4005);
+  assert.equal(broker.listDevices()[0].online, false);
+});
+
+test('external revocation invalidates a live session before dispatch', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-live-revoke-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const ws = await openSocket(port, 'dev-secret');
+  await enroll(ws, { deviceId: 'live-revoke-device', ...keys });
+  const closed = new Promise(resolve => ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+
+  store.revoke('live-revoke-device');
+  await assert.rejects(
+    broker.callDevice({ deviceId: 'live-revoke-device', tool: 'ping' }),
+    /authorization changed|revoked/i
+  );
+  const result = await closed;
+  assert.equal(result.code, 4004);
+  const [device] = broker.listDevices();
+  assert.equal(device.online, false);
+  assert.equal(device.revoked, true);
+});
+
+test('external rotation rejects a pending stale-session result without replay', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-pending-rotate-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const oldKeys = keyPair();
+  const newKeys = keyPair();
+  const ws = await openSocket(port, 'dev-secret');
+  await enroll(ws, { deviceId: 'pending-rotate-device', ...oldKeys });
+
+  const toolCallPromise = nextMessage(ws);
+  const pendingCall = broker.callDevice({ requestId: 'pending-rotate-1', deviceId: 'pending-rotate-device', tool: 'ping' });
+  const toolCall = await toolCallPromise;
+  assert.equal(toolCall.type, 'tool_call');
+  store.rotate({ deviceId: 'pending-rotate-device', expectedPublicKeyPem: oldKeys.publicKeyPem, publicKeyPem: newKeys.publicKeyPem });
+  const closed = new Promise(resolve => ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'tool_result',
+    request_id: toolCall.request_id,
+    device_id: 'pending-rotate-device',
+    connection_epoch: toolCall.connection_epoch,
+    timestamp: Date.now(),
+    payload: { content: [{ type: 'text', text: 'stale-result' }] }
+  }));
+  await assert.rejects(pendingCall, /authorization changed.*not replayed/i);
+  const result = await closed;
+  assert.equal(result.code, 4005);
+});
+
+test('replacement connection rejects old pending requests immediately without replay', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-replace-pending-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const first = await openSocket(port, 'dev-secret');
+  await enroll(first, { deviceId: 'replace-pending-device', ...keys });
+
+  const toolCallPromise = nextMessage(first);
+  const pendingCall = broker.callDevice({ requestId: 'replace-pending-1', deviceId: 'replace-pending-device', tool: 'ping' });
+  const pendingRejected = assert.rejects(pendingCall, /replaced.*not replayed/i);
+  await toolCallPromise;
+  const replacement = await openSocket(port);
+  t.after(() => replacement.close());
+  const ok = await reconnect(replacement, { deviceId: 'replace-pending-device', privateKey: keys.privateKey });
+  assert.equal(ok.type, 'auth_ok');
+  await pendingRejected;
 });
 
 test('invalid signature cannot authenticate an enrolled identity', async t => {

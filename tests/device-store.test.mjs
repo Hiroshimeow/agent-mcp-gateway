@@ -61,7 +61,7 @@ test('device store explicitly rotates the key of an active device atomically', t
   const firstKey = publicKeyPem();
   const secondKey = publicKeyPem();
   const enrolled = store.enroll({ deviceId: 'thinkbook', publicKeyPem: firstKey });
-  const rotated = store.rotate({ deviceId: 'thinkbook', publicKeyPem: secondKey });
+  const rotated = store.rotate({ deviceId: 'thinkbook', expectedPublicKeyPem: firstKey, publicKeyPem: secondKey });
 
   assert.equal(rotated.deviceId, 'thinkbook');
   assert.equal(rotated.publicKeyPem, secondKey);
@@ -80,13 +80,34 @@ test('device store refuses key rotation for unknown or revoked devices', t => {
   });
 
   assert.throws(
-    () => store.rotate({ deviceId: 'missing', publicKeyPem: publicKeyPem() }),
+    () => store.rotate({ deviceId: 'missing', expectedPublicKeyPem: publicKeyPem(), publicKeyPem: publicKeyPem() }),
     /unknown device/i
   );
   store.enroll({ deviceId: 'revoked', publicKeyPem: publicKeyPem() });
   store.revoke('revoked');
   assert.throws(
-    () => store.rotate({ deviceId: 'revoked', publicKeyPem: publicKeyPem() }),
+    () => store.rotate({ deviceId: 'revoked', expectedPublicKeyPem: publicKeyPem(), publicKeyPem: publicKeyPem() }),
     /revoked/i
   );
+});
+
+test('device store rejects stale expected key during rotation', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  t.after(() => {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const firstKey = publicKeyPem();
+  const secondKey = publicKeyPem();
+  const thirdKey = publicKeyPem();
+  store.enroll({ deviceId: 'cas-device', publicKeyPem: firstKey });
+  store.rotate({ deviceId: 'cas-device', expectedPublicKeyPem: firstKey, publicKeyPem: secondKey });
+  assert.throws(
+    () => store.rotate({ deviceId: 'cas-device', expectedPublicKeyPem: firstKey, publicKeyPem: thirdKey }),
+    /current key changed/i
+  );
+  assert.equal(store.get('cas-device').publicKeyPem, secondKey);
 });
