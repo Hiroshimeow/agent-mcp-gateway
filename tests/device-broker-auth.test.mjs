@@ -656,9 +656,32 @@ test('delayed old send callback cannot remove replacement request with the same 
   assert.equal(result.content[0].text, 'new-result');
 });
 
-test('request id cannot be reused within the same connection epoch after timeout', async t => {
+test('request id can be safely reused within the same connection epoch after timeout', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-request-reuse-'));
   const dbPath = path.join(dir, 'devices.sqlite');
+  const originalSend = WebSocket.prototype.send;
+  let heldCallback = null;
+  let holdFirstToolCall = true;
+  WebSocket.prototype.send = function patchedSend(data, options, callback) {
+    let cb = callback;
+    let opts = options;
+    if (typeof options === 'function') {
+      cb = options;
+      opts = undefined;
+    }
+    let parsed = null;
+    try { parsed = JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : String(data)); } catch {}
+    if (holdFirstToolCall && parsed?.type === 'tool_call' && typeof cb === 'function') {
+      holdFirstToolCall = false;
+      heldCallback = cb;
+      return opts === undefined
+        ? originalSend.call(this, data, () => {})
+        : originalSend.call(this, data, opts, () => {});
+    }
+    return originalSend.apply(this, arguments);
+  };
+  t.after(() => { WebSocket.prototype.send = originalSend; });
+
   const { broker, port } = await createHarness(t, dbPath);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const keys = keyPair();
@@ -669,11 +692,27 @@ test('request id cannot be reused within the same connection epoch after timeout
   const firstToolCallPromise = nextMessage(ws);
   const firstCall = broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping', timeoutMs: 20 });
   await firstToolCallPromise;
-  await assert.rejects(firstCall, /timed out/i);
-
   await assert.rejects(
     broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping', timeoutMs: 20 }),
-    /already used|cannot be reused|connection epoch/i
+    /already pending/i
   );
+  await assert.rejects(firstCall, /timed out/i);
+  assert.equal(typeof heldCallback, 'function');
+
+  const secondToolCallPromise = nextMessage(ws);
+  const secondCall = broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping' });
+  const secondToolCall = await secondToolCallPromise;
+  heldCallback(new Error('late first send failure'));
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'tool_result',
+    request_id: secondToolCall.request_id,
+    device_id: 'request-reuse-device',
+    connection_epoch: secondToolCall.connection_epoch,
+    timestamp: Date.now(),
+    payload: { content: [{ type: 'text', text: 'new-result' }] }
+  }));
+  const result = await secondCall;
+  assert.equal(result.content[0].text, 'new-result');
 });
 

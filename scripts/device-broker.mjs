@@ -122,8 +122,7 @@ export function createDeviceBroker(options = {}) {
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
       authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null,
-      authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null,
-      usedRequestIds: new Set()
+      authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null
     };
     devices.set(deviceId, current);
     ws.deviceId = deviceId;
@@ -135,7 +134,6 @@ export function createDeviceBroker(options = {}) {
         previous.connectionEpoch,
         'Device connection was replaced before the request result was known; the request was not replayed.'
       );
-      previous.usedRequestIds?.clear();
       if (previous.socket.readyState === WebSocket.OPEN) previous.socket.close(4001, 'replaced by newer connection');
     }
     return current;
@@ -155,7 +153,6 @@ export function createDeviceBroker(options = {}) {
     device.lastSeenAt = Date.now();
     device.authenticatedPublicKeyPem = null;
     device.authenticatedAuthorizationGeneration = null;
-    device.usedRequestIds?.clear();
     if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
   }
 
@@ -357,7 +354,6 @@ export function createDeviceBroker(options = {}) {
       current.online = false;
       current.socket = null;
       current.lastSeenAt = Date.now();
-      current.usedRequestIds?.clear();
       rejectPendingForConnection(ws.deviceId, ws.connectionEpoch, 'Device disconnected before the request result was known; the request was not replayed.');
     });
   });
@@ -407,7 +403,6 @@ export function createDeviceBroker(options = {}) {
     current.socket = null;
     current.authenticatedPublicKeyPem = null;
     current.authenticatedAuthorizationGeneration = null;
-    current.usedRequestIds?.clear();
     devices.set(normalized, current);
     return publicDevice(current);
   }
@@ -421,7 +416,6 @@ export function createDeviceBroker(options = {}) {
     const requestId = requestedRequestId === undefined ? randomUUID() : String(requestedRequestId).trim();
     if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
     if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
-    if (device.usedRequestIds?.has(requestId)) throw new Error(`Device request ${requestId} cannot be reused within the same connection epoch.`);
     const wireMessage = JSON.stringify({
       protocol_version: DEVICE_PROTOCOL_VERSION,
       type: 'tool_call',
@@ -434,8 +428,6 @@ export function createDeviceBroker(options = {}) {
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
-        if (device.usedRequestIds?.has(requestId)) throw new Error(`Device request ${requestId} cannot be reused within the same connection epoch.`);
-        device.usedRequestIds?.add(requestId);
         entry = { resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
         const timer = setTimeout(() => {
           if (pending.get(requestId) !== entry) return;
