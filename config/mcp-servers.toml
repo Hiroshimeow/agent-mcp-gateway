@@ -10,6 +10,9 @@ title = "Local Coding Gateway"
 description = "Local coding workspace for filesystem, shell, image inspection, and optional skills."
 instructions = "Use read_text_file, write_file, and edit_file for file content; shell_execute for search, Git, tests, builds, and package management; image_preview for local images; and get_skill for reusable workflows."
 
+[surface]
+mode = "agent"
+
 [trusted_roots]
 # An explicit absolute path used by a tool call is registered here persistently.
 # Each entry may be a string path or an object with path/project_id/display_name.
@@ -33,8 +36,8 @@ profile = "local-gpt"
 enabled = true
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
-# Migration-safe default. Canary switches v2 explicitly to "hybrid".
-exposure_mode = "direct"
+# Agent-mode canary keeps the external catalog bounded while preserving brokered discovery.
+exposure_mode = "hybrid"
 eager_schema_budget_bytes = 24576
 eager_allowlist = []
 startup_timeout_sec = 30.0
