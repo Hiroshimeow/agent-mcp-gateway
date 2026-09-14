@@ -271,14 +271,17 @@ export function createDeviceBroker(options = {}) {
     if (message.type === 'pair_hello') {
       const pairingCredential = String(ws.enrollmentCredential || '').trim();
       if (!pairingStore || !pairingCredential) return authFailure(ws, 'pairing grant required');
-      if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
+      if (stored?.revokedAt) return authFailure(ws, 'revoked device');
+      const publicKeyPem = stored?.publicKeyPem || String(message.payload?.public_key_pem || '');
+      if (!publicKeyPem) return authFailure(ws, 'public key required for device migration');
       sendAuthChallenge(ws, {
         mode: 'pair',
         deviceId,
-        publicKeyPem: stored.publicKeyPem,
+        publicKeyPem,
         agentVersion: message.payload?.agent_version,
         capabilities: message.payload?.capabilities,
-        authorizationGeneration: stored.authorizationGeneration,
+        authorizationGeneration: stored?.authorizationGeneration ?? null,
+        wasEnrolled: Boolean(stored),
         enrollmentGrant: pairingCredential
       });
       return;
@@ -340,11 +343,24 @@ export function createDeviceBroker(options = {}) {
           deviceId: state.deviceId,
           publicKeyPem: state.publicKeyPem
         });
-        const updated = deviceStore.updateMetadata({
-          deviceId: state.deviceId,
-          deviceName: pairing.deviceName,
-          accountLabel: pairing.account?.label || null
-        });
+        const current = deviceStore.get(state.deviceId);
+        let updated;
+        if (!current) {
+          updated = deviceStore.enroll({
+            deviceId: state.deviceId,
+            publicKeyPem: state.publicKeyPem,
+            deviceName: pairing.deviceName,
+            accountLabel: pairing.account?.label || null
+          });
+        } else {
+          if (current.revokedAt || current.publicKeyPem !== state.publicKeyPem) throw new Error('device authorization changed');
+          if (state.wasEnrolled && current.authorizationGeneration !== state.authorizationGeneration) throw new Error('device authorization changed');
+          updated = deviceStore.updateMetadata({
+            deviceId: state.deviceId,
+            deviceName: pairing.deviceName,
+            accountLabel: pairing.account?.label || null
+          });
+        }
         authorizedPublicKeyPem = updated.publicKeyPem;
         authorizationGeneration = updated.authorizationGeneration;
       } catch {

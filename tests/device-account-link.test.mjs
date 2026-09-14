@@ -46,6 +46,43 @@ function grant(store, deviceId, publicKeyPem) {
   return store.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier }).enrollmentGrant;
 }
 
+test('existing local identity can migrate into an empty central device store only after signed pairing proof', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-account-migrate-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  const pairing = createDevicePairingStore({ dbPath });
+  const key = keys();
+  const broker = createDeviceBroker({ deviceStore: store, pairingStore: pairing });
+  const server = http.createServer((_req, res) => res.end('ok'));
+  broker.attach(server);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(async () => { await broker.shutdown(); pairing.close(); store.close(); await new Promise(resolve => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const pairingGrant = grant(pairing, 'migrated-device', key.publicKeyPem);
+  const ws = await open(port, pairingGrant);
+  t.after(() => ws.close());
+  const challengePromise = next(ws);
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'pair_hello',
+    device_id: 'migrated-device',
+    timestamp: Date.now(),
+    payload: { agent_version: 'test', capabilities: ['ping'], public_key_pem: key.publicKeyPem }
+  }));
+  const challenge = await challengePromise;
+  assert.equal(challenge.type, 'auth_challenge');
+  assert.equal(store.get('migrated-device'), null);
+
+  const linked = await signChallenge(ws, 'migrated-device', key.privateKey, challenge);
+  assert.equal(linked.type, 'auth_ok');
+  assert.deepEqual(linked.payload.account, { connected: true, label: 'HCU Gateway' });
+  const stored = store.get('migrated-device');
+  assert.equal(stored.deviceName, 'Linked Device');
+  assert.equal(stored.accountLabel, 'HCU Gateway');
+  assert.equal(stored.publicKeyPem, key.publicKeyPem);
+});
+
 test('enrolled device can relink and logout account only after signed proof', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-account-link-'));
   const dbPath = path.join(dir, 'devices.sqlite');
