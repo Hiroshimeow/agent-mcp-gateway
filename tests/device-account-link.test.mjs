@@ -42,7 +42,7 @@ async function signChallenge(ws, deviceId, privateKey, challenge) {
 function grant(store, deviceId, publicKeyPem) {
   const p = pkce();
   const started = store.start({ clientId: 'mcp-device', deviceId, deviceName: 'Linked Device', publicKeyPem, codeChallenge: p.challenge });
-  store.approve({ userCode: started.userCode, accountLabel: 'HCU Gateway' });
+  store.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' });
   return store.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier }).enrollmentGrant;
 }
 
@@ -76,10 +76,10 @@ test('existing local identity can migrate into an empty central device store onl
 
   const linked = await signChallenge(ws, 'migrated-device', key.privateKey, challenge);
   assert.equal(linked.type, 'auth_ok');
-  assert.deepEqual(linked.payload.account, { connected: true, label: 'HCU Gateway' });
+  assert.deepEqual(linked.payload.account, { connected: true, label: 'Example Gateway' });
   const stored = store.get('migrated-device');
   assert.equal(stored.deviceName, 'Linked Device');
-  assert.equal(stored.accountLabel, 'HCU Gateway');
+  assert.equal(stored.accountLabel, 'Example Gateway');
   assert.equal(stored.publicKeyPem, key.publicKeyPem);
 });
 
@@ -106,8 +106,8 @@ test('enrolled device can relink and logout account only after signed proof', as
   assert.equal(challenge.type, 'auth_challenge');
   const linked = await signChallenge(ws, 'account-device', key.privateKey, challenge);
   assert.equal(linked.type, 'auth_ok');
-  assert.deepEqual(linked.payload.account, { connected: true, label: 'HCU Gateway' });
-  assert.equal(store.get('account-device').accountLabel, 'HCU Gateway');
+  assert.deepEqual(linked.payload.account, { connected: true, label: 'Example Gateway' });
+  assert.equal(store.get('account-device').accountLabel, 'Example Gateway');
 
   const statusPromise = next(ws);
   ws.send(JSON.stringify({ protocol_version: 1, type: 'account_logout', device_id: 'account-device', connection_epoch: linked.connection_epoch, timestamp: Date.now(), payload: {} }));

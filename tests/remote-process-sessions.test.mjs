@@ -8,14 +8,14 @@ test('remote process registry keeps device routing internal and caller-owned', (
   const registry = createRemoteProcessSessionRegistry({ ttlMs: 1000, now: () => now });
   const sessionId = registry.register({
     ownerKey: 'caller-a',
-    deviceId: 'thinkbook',
+    deviceId: 'device',
     remoteSessionId: 'native-42'
   });
 
   assert.match(sessionId, /^remote-/);
   assert.deepEqual(registry.resolve({ sessionId, ownerKey: 'caller-a' }), {
     ownerKey: 'caller-a',
-    deviceId: 'thinkbook',
+    deviceId: 'device',
     remoteSessionId: 'native-42',
     lastUsedAt: 1000
   });

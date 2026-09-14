@@ -19,17 +19,17 @@ test('device store persists enrolled identities across reopen and supports revok
 
   const key = publicKeyPem();
   const first = createDeviceStore({ dbPath });
-  first.enroll({ deviceId: 'thinkbook-1', publicKeyPem: key });
-  assert.equal(first.get('thinkbook-1').revokedAt, null);
+  first.enroll({ deviceId: 'device-1', publicKeyPem: key });
+  assert.equal(first.get('device-1').revokedAt, null);
   assert.equal(first.list().length, 1);
   first.close();
 
   const second = createDeviceStore({ dbPath });
-  const restored = second.get('thinkbook-1');
-  assert.equal(restored.deviceId, 'thinkbook-1');
+  const restored = second.get('device-1');
+  assert.equal(restored.deviceId, 'device-1');
   assert.equal(restored.publicKeyPem, key);
-  second.revoke('thinkbook-1');
-  assert.ok(second.get('thinkbook-1').revokedAt);
+  second.revoke('device-1');
+  assert.ok(second.get('device-1').revokedAt);
   second.close();
 });
 
@@ -61,14 +61,14 @@ test('device store explicitly rotates the key of an active device atomically', t
 
   const firstKey = publicKeyPem();
   const secondKey = publicKeyPem();
-  const enrolled = store.enroll({ deviceId: 'thinkbook', publicKeyPem: firstKey });
-  const rotated = store.rotate({ deviceId: 'thinkbook', expectedPublicKeyPem: firstKey, publicKeyPem: secondKey });
+  const enrolled = store.enroll({ deviceId: 'device', publicKeyPem: firstKey });
+  const rotated = store.rotate({ deviceId: 'device', expectedPublicKeyPem: firstKey, publicKeyPem: secondKey });
 
-  assert.equal(rotated.deviceId, 'thinkbook');
+  assert.equal(rotated.deviceId, 'device');
   assert.equal(rotated.publicKeyPem, secondKey);
   assert.equal(rotated.enrolledAt, enrolled.enrolledAt);
   assert.equal(rotated.revokedAt, null);
-  assert.equal(store.get('thinkbook').publicKeyPem, secondKey);
+  assert.equal(store.get('device').publicKeyPem, secondKey);
 });
 
 test('device store refuses key rotation for unknown or revoked devices', t => {

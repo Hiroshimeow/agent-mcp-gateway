@@ -144,7 +144,10 @@ const deviceBroker = createDeviceBroker({
   pairingStore: devicePairingStore,
   usageStore: deviceUsageStore
 });
-const deviceAccessPolicy = createDeviceAccessPolicy({ raw: process.env.MCP_DEVICE_ACCESS_POLICY || '' });
+const deviceAccessPolicy = createDeviceAccessPolicy({
+  raw: process.env.MCP_DEVICE_ACCESS_POLICY || '',
+  profile: runtimeProfile.name
+});
 const deviceAudit = createDeviceAuditRecorder({
   auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
   enabled: process.env.MCP_DEVICE_AUDIT_ENABLED !== 'false'
@@ -181,7 +184,7 @@ function createFilesystemTransport() {
 
 const filesystemTransport = enableFilesystem ? createFilesystemTransport() : null;
 const filesystemClient = filesystemTransport
-  ? createClient('personal-mcp-launcher-filesystem', '2.0.0', filesystemTransport, { roots: { listChanged: true } })
+  ? createClient('agent-mcp-gateway-filesystem', '2.0.0', filesystemTransport, { roots: { listChanged: true } })
   : null;
 
 if (filesystemClient) {

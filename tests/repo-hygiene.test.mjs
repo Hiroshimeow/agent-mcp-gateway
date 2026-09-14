@@ -33,8 +33,8 @@ test('direct main entrypoint supports local gateway plus optional tunnel', () =>
 test('committed mcp config is generic, single-source, and optional upstreams are opt-in', () => {
   const config = read('config/mcp-servers.toml');
   assert.match(config, /^\[server\]$/m);
-  assert.match(config, /title = "Local Coding Gateway"/);
-  assert.doesNotMatch(config, /ThinkBook/i);
+  assert.match(config, /title = "MCP Gateway"/);
+  assert.doesNotMatch(config, /(\/home\/|[A-Z]:\\|\/Users\/|\\Users\\)/i);
   assert.match(config, /^\[trusted_roots\]$/m);
   assert.match(config, /^\[mcp_servers\.context7\]$/m);
   assert.match(config, /^\[mcp_servers\.deepwiki\]$/m);

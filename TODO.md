@@ -1,4 +1,4 @@
-# TODO - personal-mcp-launcher
+# TODO - agent-mcp-gateway
 
 ## Current target
 

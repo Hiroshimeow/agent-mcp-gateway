@@ -113,9 +113,14 @@ export function callerAuditId(callerSubject) {
   return createHash('sha256').update(String(callerSubject || 'anonymous')).digest('hex').slice(0, 16);
 }
 
-export function createDeviceAccessPolicy({ raw = '', now = Date.now } = {}) {
+export function createDeviceAccessPolicy({ raw = '', now = Date.now, profile = 'safe' } = {}) {
   const rules = parseRules(raw);
   const windows = new Map();
+  const yolo = String(profile || '').trim().toLowerCase() === 'yolo';
+
+  function authenticatedCaller(category) {
+    return category === 'oauth' || category === 'static-bearer';
+  }
 
   function matchingRule({ callerSubject, callerCategory, deviceId, tool }) {
     return rules.find(rule =>
@@ -144,9 +149,16 @@ export function createDeviceAccessPolicy({ raw = '', now = Date.now } = {}) {
     const normalizedTool = String(tool || '').trim();
     const subject = String(callerSubject || callerCategory || 'anonymous');
     const category = String(callerCategory || 'anonymous');
+    const inputBytes = bytes(args);
+    if (yolo) {
+      if (!authenticatedCaller(category)) throw new DeviceAccessError(`Remote device access is not authorized for ${normalizedTool}.`);
+      if (inputBytes > HARD_MAX_INPUT_BYTES) {
+        throw new DeviceAccessError('Remote device request exceeds the hard input size limit.', 'DEVICE_INPUT_TOO_LARGE');
+      }
+      return { ruleId: 'yolo-authenticated-device', inputBytes, maxOutputBytes: HARD_MAX_OUTPUT_BYTES };
+    }
     const rule = matchingRule({ callerSubject: subject, callerCategory: category, deviceId: normalizedDevice, tool: normalizedTool });
     if (!rule) throw new DeviceAccessError(`Remote device access is not authorized for ${normalizedTool}.`);
-    const inputBytes = bytes(args);
     if (inputBytes > rule.maxInputBytes) {
       throw new DeviceAccessError('Remote device request exceeds the allowed input size.', 'DEVICE_INPUT_TOO_LARGE');
     }
@@ -167,7 +179,9 @@ export function createDeviceAccessPolicy({ raw = '', now = Date.now } = {}) {
   function filterDevices(devices, { callerSubject = 'anonymous', callerCategory = 'anonymous' } = {}) {
     const subject = String(callerSubject || callerCategory || 'anonymous');
     const category = String(callerCategory || 'anonymous');
-    return (Array.isArray(devices) ? devices : []).filter(device => {
+    const inventory = Array.isArray(devices) ? devices : [];
+    if (yolo) return authenticatedCaller(category) ? inventory : [];
+    return inventory.filter(device => {
       const deviceId = String(device?.deviceId || '').trim();
       const capabilities = Array.isArray(device?.capabilities) ? device.capabilities.map(String) : [];
       return rules.some(rule =>

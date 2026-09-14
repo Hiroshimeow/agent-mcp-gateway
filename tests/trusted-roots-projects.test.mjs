@@ -28,7 +28,7 @@ test('parseTrustedRootLine ignores blank lines and full-line comments', () => {
 });
 
 test('parseTrustedRootLine parses path-only legacy lines', () => {
-  const root = abs('paperclip');
+  const root = abs('example-app');
   const entry = parseTrustedRootLine(root);
 
   assert.equal(entry.root, path.resolve(root));
@@ -38,28 +38,28 @@ test('parseTrustedRootLine parses path-only legacy lines', () => {
 });
 
 test('parseTrustedRootLine parses path with projectId and displayName', () => {
-  const root = abs('Paperclip With Spaces');
+  const root = abs('Example App With Spaces');
 
   assert.deepEqual(
-    parseTrustedRootLine(`${root}|paperclip`),
+    parseTrustedRootLine(`${root}|example-app`),
     {
-      rawLine: `${root}|paperclip`,
+      rawLine: `${root}|example-app`,
       lineNumber: undefined,
       root: path.resolve(root),
-      projectId: 'paperclip',
+      projectId: 'example-app',
       displayName: undefined,
       explicitProjectId: true
     }
   );
 
-  const named = parseTrustedRootLine(`${root} | paperclip | Paperclip`);
-  assert.equal(named.projectId, 'paperclip');
-  assert.equal(named.displayName, 'Paperclip');
+  const named = parseTrustedRootLine(`${root} | example-app | Example App`);
+  assert.equal(named.projectId, 'example-app');
+  assert.equal(named.displayName, 'Example App');
 });
 
 test('parseTrustedRootLine rejects relative paths and invalid project ids', () => {
   assert.throws(() => parseTrustedRootLine('relative/path | project'), { code: 'TRUSTED_ROOT_MUST_BE_ABSOLUTE' });
-  assert.throws(() => parseTrustedRootLine(`${abs('repo')} | Paperclip`), { code: 'INVALID_PROJECT_ID' });
+  assert.throws(() => parseTrustedRootLine(`${abs('repo')} | Example App`), { code: 'INVALID_PROJECT_ID' });
 });
 
 test('parseTrustedRootLine accepts Windows drive paths with slash or backslash separators', () => {
@@ -87,7 +87,7 @@ test('resolveTrustedRootPaths sends path-only roots for pipe-format config', () 
   fs.mkdirSync(assetRoot);
 
   const result = resolveTrustedRootPaths(
-    `${repoRoot} | paperclip | Paperclip\n${assetRoot} | paperclip | Paperclip Assets`,
+    `${repoRoot} | example-app | Example App\n${assetRoot} | example-app | Example App Assets`,
     undefined
   );
 
@@ -108,55 +108,55 @@ test('resolveTrustedRootPaths keeps legacy path-only roots working', () => {
 });
 
 test('normalizeTrustedRootEntries generates ids, supports repeated ids, and dedupes roots', () => {
-  const rootA = abs('paperclip');
-  const rootB = abs('paperclip-assets');
+  const rootA = abs('example-app');
+  const rootB = abs('example-app-assets');
   const entries = normalizeTrustedRootEntries([
     rootA,
-    `${rootB} | paperclip | Paperclip`,
-    `${rootB} | paperclip | Paperclip Duplicate`
+    `${rootB} | example-app | Example App`,
+    `${rootB} | example-app | Example App Duplicate`
   ]);
 
   assert.equal(entries.length, 2);
-  assert.equal(entries[0].projectId, 'paperclip');
-  assert.equal(entries[0].displayName, 'paperclip');
+  assert.equal(entries[0].projectId, 'example-app');
+  assert.equal(entries[0].displayName, 'example-app');
   assert.equal(entries[0].explicitProjectId, false);
-  assert.equal(entries[1].projectId, 'paperclip');
-  assert.equal(entries[1].displayName, 'Paperclip');
+  assert.equal(entries[1].projectId, 'example-app');
+  assert.equal(entries[1].displayName, 'Example App');
   assert.equal(entries[1].explicitProjectId, true);
 });
 
 test('buildTrustedRootsProjectRegistry groups multiple roots per project and keeps first root as repoRoot', () => {
-  const repoRoot = abs('paperclip');
-  const assetRoot = abs('paperclip-assets');
+  const repoRoot = abs('example-app');
+  const assetRoot = abs('example-app-assets');
   const deerRoot = abs('deer-flow');
 
   const registry = buildTrustedRootsProjectRegistry([
-    `${repoRoot} | paperclip | Paperclip`,
-    `${assetRoot} | paperclip`,
+    `${repoRoot} | example-app | Example App`,
+    `${assetRoot} | example-app`,
     `${deerRoot} | deer-flow`
-  ], { defaultProjectId: 'paperclip' });
+  ], { defaultProjectId: 'example-app' });
 
   assert.equal(registry.mode, 'trusted-roots-projects');
-  assert.equal(registry.defaultProjectId, 'paperclip');
+  assert.equal(registry.defaultProjectId, 'example-app');
   assert.deepEqual(registry.allTrustedRoots, [path.resolve(repoRoot), path.resolve(assetRoot), path.resolve(deerRoot)]);
 
-  const paperclip = registry.projects.get('paperclip');
-  assert.equal(paperclip.repoRoot, path.resolve(repoRoot));
-  assert.deepEqual(paperclip.trustedRoots, [path.resolve(repoRoot), path.resolve(assetRoot)]);
-  assert.deepEqual(paperclip.extraTrustedRoots, [path.resolve(assetRoot)]);
-  assert.equal(paperclip.displayName, 'Paperclip');
+  const exampleApp = registry.projects.get('example-app');
+  assert.equal(exampleApp.repoRoot, path.resolve(repoRoot));
+  assert.deepEqual(exampleApp.trustedRoots, [path.resolve(repoRoot), path.resolve(assetRoot)]);
+  assert.deepEqual(exampleApp.extraTrustedRoots, [path.resolve(assetRoot)]);
+  assert.equal(exampleApp.displayName, 'Example App');
 });
 
 test('buildTrustedRootsProjectRegistry sorts root index by longest prefix for inference', () => {
-  const broadRoot = abs('git-project');
-  const nestedRoot = abs('git-project', 'paperclip');
+  const broadRoot = abs('workspace');
+  const nestedRoot = abs('workspace', 'example-repo');
   const registry = buildTrustedRootsProjectRegistry([
-    `${broadRoot} | git-project-workspace`,
-    `${nestedRoot} | paperclip`
+    `${broadRoot} | workspace-root`,
+    `${nestedRoot} | example-repo`
   ]);
 
-  assert.equal(inferProjectIdFromPath(registry, path.join(nestedRoot, 'README.md')), 'paperclip');
-  assert.equal(inferProjectIdFromPath(registry, path.join(broadRoot, 'other', 'README.md')), 'git-project-workspace');
+  assert.equal(inferProjectIdFromPath(registry, path.join(nestedRoot, 'README.md')), 'example-repo');
+  assert.equal(inferProjectIdFromPath(registry, path.join(broadRoot, 'other', 'README.md')), 'workspace-root');
 });
 
 test('buildTrustedRootsProjectRegistryFromRaw uses fallback root only when no config exists', () => {
@@ -202,8 +202,8 @@ test('loadTrustedRootsProjectRegistry reads trusted roots files', () => {
 });
 
 test('listProjectSummaries does not expose full local paths by default', () => {
-  const repoRoot = abs('paperclip');
-  const registry = buildTrustedRootsProjectRegistry([`${repoRoot} | paperclip | Paperclip`]);
+  const repoRoot = abs('example-app');
+  const registry = buildTrustedRootsProjectRegistry([`${repoRoot} | example-app | Example App`]);
 
   const hidden = listProjectSummaries(registry, { showPaths: true });
   assert.equal(hidden.projects[0].repoRoot, undefined);

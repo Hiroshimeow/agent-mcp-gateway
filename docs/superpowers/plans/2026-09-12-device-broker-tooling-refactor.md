@@ -2,9 +2,9 @@
 
 > Status: OPERATOR DECISIONS LOCKED / READY FOR IMPLEMENTATION
 > Date: 2026-09-12
-> Primary repo: E:\git-project\agent-mcp-gateway
-> Device runtime repo: E:\git-project\broker-mcp-gateway (fork of wonderwhy-er/DesktopCommanderMCP; preserve upstream attribution/license)
-> Governing roadmap: E:\git-project\playwright-auto\.plan\mcp-harness-efficiency-roadmap\mcp-harness-efficiency-roadmap-plan.md
+> Primary repo: `<gateway-repo>`
+> Device runtime repo: `<device-runtime-repo>` (fork of wonderwhy-er/DesktopCommanderMCP; preserve upstream attribution/license)
+> Governing roadmap: `<control-repo>/.plan/mcp-harness-efficiency-roadmap/mcp-harness-efficiency-roadmap-plan.md`
 > No implementation is authorized by this document alone.
 
 ## 1. Executive decision
@@ -511,7 +511,7 @@ Devices report capability metadata at connection time.
 
 Broker public schema does not dynamically add:
 - g8_read_file
-- thinkbook_read_file
+- device_read_file
 - device-specific tool names.
 
 Instead device_id is runtime routing state/argument.

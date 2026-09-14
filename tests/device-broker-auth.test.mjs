@@ -130,16 +130,16 @@ test('one-time token enrollment persists Ed25519 identity and reconnect needs on
   const keys = keyPair();
 
   const first = await openSocket(port, 'dev-secret');
-  const firstOk = await enroll(first, { deviceId: 'thinkbook-auth', ...keys });
+  const firstOk = await enroll(first, { deviceId: 'device-auth', ...keys });
   assert.equal(firstOk.type, 'auth_ok');
   assert.equal(firstOk.connection_epoch, 1);
-  assert.equal(store.get('thinkbook-auth').revokedAt, null);
+  assert.equal(store.get('device-auth').revokedAt, null);
   first.close();
   await new Promise(resolve => setTimeout(resolve, 50));
 
   const second = await openSocket(port);
   t.after(() => second.close());
-  const secondOk = await reconnect(second, { deviceId: 'thinkbook-auth', privateKey: keys.privateKey });
+  const secondOk = await reconnect(second, { deviceId: 'device-auth', privateKey: keys.privateKey });
   assert.equal(secondOk.type, 'auth_ok');
   assert.equal(secondOk.connection_epoch, 2);
   const [device] = broker.listDevices();

@@ -13,7 +13,7 @@ function policy(rule = {}) {
       rules: [{
         id: 'test-rule',
         callers: ['oauth:client-a'],
-        devices: ['thinkbook'],
+        devices: ['device'],
         tools: ['read_text_file', 'write_file', 'shell_execute', 'read_process_output'],
         roots: ['E:\\work\\project'],
         requests_per_minute: 5,
@@ -25,45 +25,74 @@ function policy(rule = {}) {
   });
 }
 
-test('device access is deny-by-default without an explicit rule', () => {
-  const access = createDeviceAccessPolicy();
+test('safe and assisted device access remain deny-by-default without an explicit rule', () => {
+  for (const profile of ['safe', 'assisted']) {
+    const access = createDeviceAccessPolicy({ profile });
+    assert.throws(() => access.authorize({
+      callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'device-a', tool: 'read_text_file', arguments: { path: 'C:\\work\\file.txt' }
+    }), error => error instanceof DeviceAccessError && error.code === 'DEVICE_ACCESS_DENIED');
+  }
+});
+
+test('yolo device access trusts authenticated callers and enrolled device capabilities without gateway root allowlists', () => {
+  const access = createDeviceAccessPolicy({ profile: 'yolo' });
+  const devices = [
+    { deviceId: 'device-a', capabilities: ['read_text_file', 'shell_execute'] },
+    { deviceId: 'device-b', capabilities: ['write_file'] }
+  ];
+
+  assert.deepEqual(access.filterDevices(devices, {
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth'
+  }), devices);
+
+  const grant = access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device-a', tool: 'read_text_file',
+    arguments: { path: 'D:\\shared\\outside-any-repo\\file.txt' }
+  });
+  assert.equal(grant.ruleId, 'yolo-authenticated-device');
+  assert.doesNotThrow(() => access.authorize({
+    callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'device-a', tool: 'shell_execute',
+    arguments: { command: 'node -v', working_directory: 'C:\\Users\\Public' }
+  }));
+
   assert.throws(() => access.authorize({
-    callerSubject: 'static-bearer', callerCategory: 'static-bearer', deviceId: 'dev', tool: 'read_text_file', arguments: { path: 'C:\\x' }
+    callerSubject: 'anonymous', callerCategory: 'anonymous', deviceId: 'device-a', tool: 'read_text_file', arguments: { path: 'C:\\work\\file.txt' }
   }), error => error instanceof DeviceAccessError && error.code === 'DEVICE_ACCESS_DENIED');
+  assert.deepEqual(access.filterDevices(devices, { callerSubject: 'anonymous', callerCategory: 'anonymous' }), []);
 });
 
 test('caller, device, tool, and remote root must all match', () => {
   const access = policy();
   const grant = access.authorize({
-    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
   });
   assert.equal(grant.ruleId, 'test-rule');
   assert.throws(() => access.authorize({
-    callerSubject: 'oauth:client-b', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+    callerSubject: 'oauth:client-b', callerCategory: 'oauth', deviceId: 'device', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
   }), /not authorized/);
   assert.throws(() => access.authorize({
     callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'g8', tool: 'read_text_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
   }), /not authorized/);
   assert.throws(() => access.authorize({
-    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'edit_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'edit_file', arguments: { path: 'E:\\work\\project\\src\\a.txt' }
   }), /not authorized/);
   assert.throws(() => access.authorize({
-    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'read_text_file', arguments: { path: 'E:\\work\\other\\secret.txt' }
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'read_text_file', arguments: { path: 'E:\\work\\other\\secret.txt' }
   }), error => error.code === 'DEVICE_PATH_DENIED');
 });
 
 test('device inventory is filtered by caller and advertised capabilities', () => {
   const access = policy();
   const devices = [
-    { deviceId: 'thinkbook', capabilities: ['read_text_file', 'shell_execute'] },
+    { deviceId: 'device', capabilities: ['read_text_file', 'shell_execute'] },
     { deviceId: 'g8', capabilities: ['read_text_file'] },
-    { deviceId: 'thinkbook', capabilities: ['unknown_tool'] }
+    { deviceId: 'device', capabilities: ['unknown_tool'] }
   ];
   const visible = access.filterDevices(devices, {
     callerSubject: 'oauth:client-a', callerCategory: 'oauth'
   });
   assert.equal(visible.length, 1);
-  assert.equal(visible[0].deviceId, 'thinkbook');
+  assert.equal(visible[0].deviceId, 'device');
   assert.deepEqual(access.filterDevices(devices, {
     callerSubject: 'oauth:client-b', callerCategory: 'oauth'
   }), []);
@@ -72,10 +101,10 @@ test('device inventory is filtered by caller and advertised capabilities', () =>
 test('remote shell requires an explicitly allowed working directory', () => {
   const access = policy();
   assert.throws(() => access.authorize({
-    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'shell_execute', arguments: { command: 'node -v' }
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'shell_execute', arguments: { command: 'node -v' }
   }), error => error.code === 'DEVICE_PATH_DENIED');
   assert.doesNotThrow(() => access.authorize({
-    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'thinkbook', tool: 'shell_execute', arguments: { command: 'node -v', working_directory: 'E:\\work\\project' }
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'shell_execute', arguments: { command: 'node -v', working_directory: 'E:\\work\\project' }
   }));
 });
 
@@ -109,7 +138,7 @@ test('device audit stores metadata only and hashes caller identity', () => {
   const recorder = createDeviceAuditRecorder({ auditPath });
   recorder.record({
     requestId: 'req-1', callerId: callerAuditId('oauth:client-a'), callerCategory: 'oauth',
-    deviceId: 'thinkbook', tool: 'shell_execute', outcome: 'success', durationMs: 12,
+    deviceId: 'device', tool: 'shell_execute', outcome: 'success', durationMs: 12,
     inputBytes: 33, outputBytes: 44
   });
   recorder.close();

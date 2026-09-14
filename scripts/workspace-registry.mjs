@@ -400,7 +400,7 @@ export function createWorkspaceRegistry(options = {}) {
       }),
       projectRegistry,
       server: {
-        name: rawConfig.server?.name || 'personal-mcp-launcher',
+        name: rawConfig.server?.name || 'agent-mcp-gateway',
         title: rawConfig.server?.title || 'Local Coding Gateway',
         description: rawConfig.server?.description || 'Local coding workspace for filesystem, shell, image inspection, and optional skills.',
         instructions: rawConfig.server?.instructions || 'Use filesystem tools for content, shell_execute for terminal workflows, image_preview for local images, and get_skill for reusable coding guidance.'

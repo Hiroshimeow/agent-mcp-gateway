@@ -41,7 +41,7 @@ test('pairing start issues bounded human and device codes without secrets in sta
     const publicKeyPem = keypair();
     const started = f.store.start({
       clientId: 'mcp-device',
-      deviceId: 'thinkbook-test',
+      deviceId: 'device-test',
       deviceName: 'ThinkBook Test',
       publicKeyPem,
       codeChallenge: p.challenge
@@ -53,7 +53,7 @@ test('pairing start issues bounded human and device codes without secrets in sta
     assert.equal(started.interval, 2);
 
     const status = f.store.getStatusByUserCode(started.userCode);
-    assert.equal(status.deviceId, 'thinkbook-test');
+    assert.equal(status.deviceId, 'device-test');
     assert.equal(status.deviceName, 'ThinkBook Test');
     assert.equal(status.status, 'pending');
     assert.equal('deviceCode' in status, false);
@@ -69,7 +69,7 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
     const publicKeyPem = keypair();
     const started = f.store.start({
       clientId: 'mcp-device',
-      deviceId: 'thinkbook-test',
+      deviceId: 'device-test',
       deviceName: 'ThinkBook Test',
       publicKeyPem,
       codeChallenge: p.challenge
@@ -81,8 +81,8 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
       codeVerifier: p.verifier
     }), { status: 'authorization_pending' });
 
-    const approved = f.store.approve({ userCode: started.userCode, accountLabel: 'HCU Gateway' });
-    assert.equal(approved.accountLabel, 'HCU Gateway');
+    const approved = f.store.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' });
+    assert.equal(approved.accountLabel, 'Example Gateway');
 
     assert.throws(() => f.store.poll({
       deviceCode: started.deviceCode,
@@ -97,8 +97,8 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
     });
     assert.equal(polled.status, 'approved');
     assert.match(polled.enrollmentGrant, /^[A-Za-z0-9_-]{32,}$/);
-    assert.deepEqual(polled.account, { connected: true, label: 'HCU Gateway' });
-    assert.equal(polled.deviceId, 'thinkbook-test');
+    assert.deepEqual(polled.account, { connected: true, label: 'Example Gateway' });
+    assert.equal(polled.deviceId, 'device-test');
 
     assert.throws(() => f.store.consumeGrant({
       enrollmentGrant: polled.enrollmentGrant,
@@ -108,15 +108,15 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
 
     const consumed = f.store.consumeGrant({
       enrollmentGrant: polled.enrollmentGrant,
-      deviceId: 'thinkbook-test',
+      deviceId: 'device-test',
       publicKeyPem
     });
-    assert.deepEqual(consumed.account, { connected: true, label: 'HCU Gateway' });
-    assert.equal(consumed.deviceId, 'thinkbook-test');
+    assert.deepEqual(consumed.account, { connected: true, label: 'Example Gateway' });
+    assert.equal(consumed.deviceId, 'device-test');
 
     assert.throws(() => f.store.consumeGrant({
       enrollmentGrant: polled.enrollmentGrant,
-      deviceId: 'thinkbook-test',
+      deviceId: 'device-test',
       publicKeyPem
     }), /consumed|invalid|used/i);
   } finally { f.close(); }
@@ -129,14 +129,14 @@ test('pairing expires closed before approval, polling, or grant consumption', ()
     const publicKeyPem = keypair();
     const started = f.store.start({
       clientId: 'mcp-device',
-      deviceId: 'thinkbook-test',
+      deviceId: 'device-test',
       deviceName: 'ThinkBook Test',
       publicKeyPem,
       codeChallenge: p.challenge
     });
     f.advance(10 * 60_000 + 1);
 
-    assert.throws(() => f.store.approve({ userCode: started.userCode, accountLabel: 'HCU Gateway' }), /expired/i);
+    assert.throws(() => f.store.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' }), /expired/i);
     assert.throws(() => f.store.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier }), /expired/i);
   } finally { f.close(); }
 });

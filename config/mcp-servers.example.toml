@@ -1,31 +1,33 @@
 # Unified MCP gateway config example.
-# Keep secrets out of TOML; use *_env fields for environment-variable names.
+# Keep secrets and machine-specific paths out of Git; use environment variables
+# and runtime overlays for private values.
 
 [server]
-name = "personal-mcp-launcher"
-title = "Local Coding Gateway"
-description = "Local coding workspace for filesystem, shell, image inspection, and optional skills."
-instructions = "Use filesystem tools for content, shell_execute for terminal workflows, image_preview for images, and get_skill for reusable guidance."
+name = "agent-mcp-gateway"
+title = "MCP Gateway"
+description = "Remote MCP gateway for filesystem, shell, device routing, optional skills, and external MCP upstreams."
+instructions = "Use filesystem tools for file content, shell/process tools for terminal workflows, list_devices for remote machines, and get_skill only when a reusable skill clearly matches the task."
+
+[surface]
+mode = "agent"
 
 [trusted_roots]
-# This array is the sole path-authorization source for filesystem, shell, images,
-# resources, and project discovery. Legacy MCP_TRUSTED_ROOTS and
-# MCP_IMAGE_PREVIEW_ROOTS values must be migrated here.
-# Absolute paths used explicitly by tool calls are appended here automatically.
-# Forward-slash Windows paths avoid TOML escaping.
 roots = [
-  { path = "${repoRoot}", project_id = "personal-mcp-launcher", display_name = "Personal MCP Launcher" }
+  { path = "${repoRoot}", project_id = "workspace", display_name = "Workspace" }
 ]
 
 [openai_tunnel]
 enabled = false
 command = "tunnel-client"
-profile = "local-gpt"
+profile = "default"
 
 [external_mcp]
 enabled = true
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
+exposure_mode = "hybrid"
+eager_schema_budget_bytes = 24576
+eager_allowlist = []
 startup_timeout_sec = 30.0
 shutdown_timeout_sec = 5.0
 default_enabled = false
@@ -46,7 +48,4 @@ url = "https://mcp.deepwiki.com/mcp"
 enabled = false
 preset = "eslint"
 
-# Add other optional servers with enabled = false, then switch to true at runtime.
-# Runtime changes are staged and committed transactionally; a failed candidate
-# leaves the previous client/catalog/routes active.
-# Codegraph and ripgrep are intentionally used as CLI tools through shell_execute.
+# Add optional upstreams with enabled = false, then opt in explicitly.

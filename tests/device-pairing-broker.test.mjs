@@ -97,7 +97,7 @@ function approvedGrant(pairingStore, { deviceId, deviceName, publicKeyPem }) {
   const started = pairingStore.start({
     clientId: 'mcp-device', deviceId, deviceName, publicKeyPem, codeChallenge: p.challenge
   });
-  pairingStore.approve({ userCode: started.userCode, accountLabel: 'HCU Gateway' });
+  pairingStore.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' });
   const polled = pairingStore.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier });
   return { ...polled, userCode: started.userCode };
 }
@@ -139,30 +139,30 @@ test('pairing grant is consumed only after key proof and persists account/device
   const f = await fixture(t);
   const keys = keyPair();
   const grant = approvedGrant(f.pairingStore, {
-    deviceId: 'paired-thinkbook', deviceName: 'ThinkBook G6+', publicKeyPem: keys.publicKeyPem
+    deviceId: 'paired-device', deviceName: 'Workstation A', publicKeyPem: keys.publicKeyPem
   });
 
   const abandoned = await openSocket(f.port, grant.enrollmentGrant);
-  const firstChallenge = await sendEnrollHello(abandoned, { deviceId: 'paired-thinkbook', publicKeyPem: keys.publicKeyPem });
+  const firstChallenge = await sendEnrollHello(abandoned, { deviceId: 'paired-device', publicKeyPem: keys.publicKeyPem });
   assert.equal(firstChallenge.type, 'auth_challenge');
   assert.equal(f.pairingStore.getStatusByUserCode(grant.userCode).status, 'approved');
   abandoned.close();
 
   const ws = await openSocket(f.port, grant.enrollmentGrant);
   t.after(() => ws.close());
-  const challenge = await sendEnrollHello(ws, { deviceId: 'paired-thinkbook', publicKeyPem: keys.publicKeyPem });
-  const ok = await answerChallenge(ws, { deviceId: 'paired-thinkbook', privateKey: keys.privateKey, challenge });
+  const challenge = await sendEnrollHello(ws, { deviceId: 'paired-device', publicKeyPem: keys.publicKeyPem });
+  const ok = await answerChallenge(ws, { deviceId: 'paired-device', privateKey: keys.privateKey, challenge });
   assert.equal(ok.type, 'auth_ok');
-  assert.deepEqual(ok.payload.account, { connected: true, label: 'HCU Gateway' });
-  assert.equal(ok.payload.device.name, 'ThinkBook G6+');
+  assert.deepEqual(ok.payload.account, { connected: true, label: 'Example Gateway' });
+  assert.equal(ok.payload.device.name, 'Workstation A');
   assert.equal(ok.payload.schema.toolCount, 16);
   assert.equal(ok.payload.schema.toolSchemaTokenEstimate, 4057);
   assert.equal(ok.payload.schema.tokenUsageKind, 'schema_estimate_not_billing');
   assert.equal(f.pairingStore.getStatusByUserCode(grant.userCode).status, 'consumed');
 
-  const stored = f.deviceStore.get('paired-thinkbook');
-  assert.equal(stored.deviceName, 'ThinkBook G6+');
-  assert.equal(stored.accountLabel, 'HCU Gateway');
+  const stored = f.deviceStore.get('paired-device');
+  assert.equal(stored.deviceName, 'Workstation A');
+  assert.equal(stored.accountLabel, 'Example Gateway');
 });
 
 test('usage counters survive reconnect and account metadata returns without another pairing grant', async t => {
@@ -197,7 +197,7 @@ test('usage counters survive reconnect and account metadata returns without anot
   t.after(() => reconnecting.close());
   const reauth = await reconnect(reconnecting, { deviceId: 'usage-paired', privateKey: keys.privateKey });
   assert.equal(reauth.type, 'auth_ok');
-  assert.deepEqual(reauth.payload.account, { connected: true, label: 'HCU Gateway' });
+  assert.deepEqual(reauth.payload.account, { connected: true, label: 'Example Gateway' });
   assert.equal(reauth.payload.usage.connections, 2);
   assert.equal(reauth.payload.usage.reconnects, 1);
   assert.equal(reauth.payload.usage.toolCallsStarted, 1);

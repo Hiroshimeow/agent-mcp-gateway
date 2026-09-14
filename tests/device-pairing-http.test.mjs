@@ -34,7 +34,7 @@ async function fixture() {
   installDevicePairingRoutes(app, {
     pairingStore: store,
     authProvider: provider,
-    accountLabel: 'HCU Gateway',
+    accountLabel: 'Example Gateway',
     baseUrlFromRequest: () => 'https://mcp-v2.example.test'
   });
   const server = await new Promise(resolve => {
@@ -61,7 +61,7 @@ async function startPairing(f, p = pkce()) {
     body: JSON.stringify({
       client_id: 'mcp-device',
       scope: 'mcp:tools',
-      device_id: 'thinkbook-http',
+      device_id: 'device-http',
       device_name: 'ThinkBook HTTP',
       public_key_pem: publicKeyPem(),
       code_challenge: p.challenge,
@@ -129,8 +129,8 @@ test('browser verification reuses gateway human auth session and poll returns ac
     assert.equal(poll.status, 200);
     const payload = await poll.json();
     assert.match(payload.enrollment_grant, /^[A-Za-z0-9_-]{32,}$/);
-    assert.deepEqual(payload.account, { connected: true, label: 'HCU Gateway' });
-    assert.equal(payload.device_id, 'thinkbook-http');
+    assert.deepEqual(payload.account, { connected: true, label: 'Example Gateway' });
+    assert.equal(payload.device_id, 'device-http');
 
     const second = await startPairing(f);
     const connectedPage = await fetch(`${f.base}/device/verify?user_code=${encodeURIComponent(second.data.user_code)}`, {
@@ -138,6 +138,6 @@ test('browser verification reuses gateway human auth session and poll returns ac
     });
     const connectedHtml = await connectedPage.text();
     assert.doesNotMatch(connectedHtml, /type="password"/i);
-    assert.match(connectedHtml, /HCU Gateway/);
+    assert.match(connectedHtml, /Example Gateway/);
   } finally { await f.close(); }
 });

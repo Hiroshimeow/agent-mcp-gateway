@@ -1,42 +1,33 @@
 # Unified MCP gateway config.
 #
-# This is the single config file for generic server metadata, trusted roots,
-# optional external MCP upstreams, and tunnel settings. Keep secrets out of it.
-# Trusted-root and enabled-state changes hot-reload without restarting the gateway.
+# This committed file is intentionally generic. Keep machine-specific paths,
+# credentials, device identities, and private upstreams out of Git.
 
 [server]
-name = "personal-mcp-launcher"
-title = "Local Coding Gateway"
-description = "Local coding workspace for filesystem, shell, image inspection, and optional skills."
-instructions = "Use read_text_file, write_file, and edit_file for file content; shell_execute for search, Git, tests, builds, and package management; image_preview for local images; and get_skill for reusable workflows."
+name = "agent-mcp-gateway"
+title = "MCP Gateway"
+description = "Remote MCP gateway for filesystem, shell, device routing, optional skills, and external MCP upstreams."
+instructions = "Use filesystem tools for file content, shell/process tools for terminal workflows, list_devices for remote machines, and get_skill only when a reusable skill clearly matches the task."
 
 [surface]
 mode = "agent"
 
 [trusted_roots]
-# An explicit absolute path used by a tool call is registered here persistently.
-# Each entry may be a string path or an object with path/project_id/display_name.
-# Forward slashes avoid TOML escaping for Windows paths.
+# The launcher substitutes ${repoRoot}. Additional machine-specific roots are
+# added through the runtime overlay and must not be committed here.
 roots = [
-  { path = "${repoRoot}", project_id = "agent-mcp-gateway", display_name = "agent-mcp-gateway" },
-  { path = "/home/ayumi/Workspace/git_project/Screens-Trans-Chatbot", project_id = "screens-trans-chatbot", display_name = "Screens-Trans-Chatbot" },
-  { path = "/home/ayumi/Workspace/git_project/hport", project_id = "hport", display_name = "hport" },
-  { path = "/home/ayumi/Workspace/OpenClaw-bot-review", project_id = "openclaw-bot-review", display_name = "OpenClaw Bot Review" },
-  { path = "/home/ayumi/Workspace/git_project", project_id = "git-project-workspace", display_name = "Git Project Workspace Can access all repo" },
-  { path = "/home/ayumi/Workspace/fpt", project_id = "fpt", display_name = "FPT" },
-  { path = "/home/ayumi/.openclaw/workspace/skills/", project_id = "openclaw-skills", display_name = "OpenClaw Skills" },
+  { path = "${repoRoot}", project_id = "workspace", display_name = "Workspace" }
 ]
 
 [openai_tunnel]
 enabled = false
 command = "tunnel-client"
-profile = "local-gpt"
+profile = "default"
 
 [external_mcp]
 enabled = true
 fail_gateway_on_startup_error = false
 catalog_cache = "startup"
-# Agent-mode canary keeps the external catalog bounded while preserving brokered discovery.
 exposure_mode = "hybrid"
 eager_schema_budget_bytes = 24576
 eager_allowlist = []
@@ -64,5 +55,4 @@ enabled = false
 preset = "eslint"
 startup_timeout_sec = 30.0
 
-# Codegraph and ripgrep are CLI workflows invoked through shell_execute/get_skill;
-# they are intentionally not MCP upstreams.
+# Codegraph and ripgrep remain CLI workflows invoked through shell_execute/get_skill.

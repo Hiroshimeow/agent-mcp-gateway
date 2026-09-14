@@ -27,7 +27,7 @@ function connectDevice(port, token, hello = {}) {
       ws.send(JSON.stringify({
         protocol_version: 1,
         type: 'hello',
-        device_id: hello.device_id || 'thinkbook-test',
+        device_id: hello.device_id || 'device-test',
         timestamp: Date.now(),
         payload: {
           agent_version: 'test-1',
@@ -68,7 +68,7 @@ test('device broker authenticates enrollment token, registers hello, and routes 
       protocol_version: 1,
       type: 'tool_result',
       request_id: message.request_id,
-      device_id: 'thinkbook-test',
+      device_id: 'device-test',
       connection_epoch: message.connection_epoch,
       timestamp: Date.now(),
       payload: { ok: true, pong: true }
@@ -77,12 +77,12 @@ test('device broker authenticates enrollment token, registers hello, and routes 
 
   await waitUntil(() => broker.listDevices().length === 1);
   const [device] = broker.listDevices();
-  assert.equal(device.deviceId, 'thinkbook-test');
+  assert.equal(device.deviceId, 'device-test');
   assert.equal(device.online, true);
   assert.deepEqual(device.capabilities, ['ping', 'read_text_file']);
   assert.equal(device.connectionEpoch, 1);
 
-  const result = await broker.callDevice({ deviceId: 'thinkbook-test', tool: 'ping', arguments: {} });
+  const result = await broker.callDevice({ deviceId: 'device-test', tool: 'ping', arguments: {} });
   assert.deepEqual(result, { ok: true, pong: true });
 });
 
@@ -150,7 +150,7 @@ test('device broker preserves bounded remote tool error codes', async t => {
       protocol_version: 1,
       type: 'tool_error',
       request_id: message.request_id,
-      device_id: 'thinkbook-test',
+      device_id: 'device-test',
       connection_epoch: message.connection_epoch,
       timestamp: Date.now(),
       payload: { message: 'too large', code: 'DEVICE_OUTPUT_TOO_LARGE' }
@@ -158,7 +158,7 @@ test('device broker preserves bounded remote tool error codes', async t => {
   });
   await waitUntil(() => broker.listDevices().length === 1);
   await assert.rejects(
-    broker.callDevice({ deviceId: 'thinkbook-test', tool: 'read_text_file', arguments: { path: 'x' } }),
+    broker.callDevice({ deviceId: 'device-test', tool: 'read_text_file', arguments: { path: 'x' } }),
     error => error.code === 'DEVICE_OUTPUT_TOO_LARGE' && error.message === 'too large'
   );
 });
