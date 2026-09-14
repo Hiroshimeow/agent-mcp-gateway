@@ -49,7 +49,10 @@ import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
 import { listDevicesToolDefinition, paginateDeviceInventory } from './device-inventory.mjs';
+import { installDevicePairingRoutes } from './device-pairing-http.mjs';
+import { createDevicePairingStore } from './device-pairing-store.mjs';
 import { createDeviceStore } from './device-store.mjs';
+import { createDeviceUsageStore } from './device-usage.mjs';
 import { callerAuditId, createDeviceAccessPolicy } from './device-access-policy.mjs';
 import { createDeviceAuditRecorder } from './device-audit.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
@@ -130,10 +133,15 @@ function currentSurfaceConfig(snapshot = workspaceSnapshot()) {
 
 const processSessions = createProcessSessionManager({ env: process.env });
 const remoteProcessSessions = createRemoteProcessSessionRegistry();
-const deviceStore = createDeviceStore({ dbPath: path.join(runtimeDirectory, 'devices.sqlite') });
+const deviceDbPath = path.join(runtimeDirectory, 'devices.sqlite');
+const deviceStore = createDeviceStore({ dbPath: deviceDbPath });
+const devicePairingStore = createDevicePairingStore({ dbPath: deviceDbPath });
+const deviceUsageStore = createDeviceUsageStore({ dbPath: deviceDbPath });
 const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
-  deviceStore
+  deviceStore,
+  pairingStore: devicePairingStore,
+  usageStore: deviceUsageStore
 });
 const deviceAccessPolicy = createDeviceAccessPolicy({ raw: process.env.MCP_DEVICE_ACCESS_POLICY || '' });
 const deviceAudit = createDeviceAuditRecorder({
@@ -431,6 +439,17 @@ async function listMergedTools() {
   }
   tools.push(...await externalMcpManager.listAllToolsUnfiltered());
   return tools.filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
+}
+
+async function refreshDeviceSchemaSnapshot() {
+  const tools = await listMergedTools();
+  const toolSchemaBytes = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
+  return deviceBroker.setSchemaSnapshot({
+    toolCount: tools.length,
+    toolSchemaBytes,
+    toolSchemaTokenEstimate: Math.ceil(toolSchemaBytes / 4),
+    tokenEstimateMethod: 'utf8_bytes_div_4_estimate'
+  });
 }
 
 async function ensureFileTarget(args = {}) {
@@ -914,6 +933,7 @@ function getProvidedAuthorizationToken(authorizationHeader) {
   return (match ? match[1] : header).trim();
 }
 
+await refreshDeviceSchemaSnapshot();
 const provider = new PasswordProtectedAuthProvider(authPassword, new FileBackedAuthState(authStatePath));
 const app = express();
 app.set('trust proxy', 1);
@@ -980,6 +1000,13 @@ function requestBaseUrl(req) {
   const proto = forwardedProto || (isLocalHost ? req.protocol || (req.secure ? 'https' : 'http') : 'https');
   return normalizeBaseUrl(`${proto}://${host}`);
 }
+
+installDevicePairingRoutes(app, {
+  pairingStore: devicePairingStore,
+  authProvider: provider,
+  accountLabel: process.env.MCP_ACCOUNT_LABEL || 'Local Dev MCP',
+  baseUrlFromRequest: requestBaseUrl
+});
 
 function buildAuthUrls(baseUrl) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || fallbackBaseUrl;
@@ -1206,6 +1233,8 @@ async function shutdown() {
   deviceAudit.close();
   await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
+  try { deviceUsageStore.close(); } catch {}
+  try { devicePairingStore.close(); } catch {}
   try { deviceStore.close(); } catch {}
   await externalMcpManager.shutdown().catch(() => {});
   await filesystemClient?.close().catch(() => {});

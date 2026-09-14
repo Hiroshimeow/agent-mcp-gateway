@@ -51,16 +51,23 @@ function normalizeCapabilities(value) {
   return [...new Set(value.map(item => String(item).trim()).filter(Boolean))].sort();
 }
 
-function publicDevice(device) {
+function publicDevice(device, { stored = null, usage = null, schema = null } = {}) {
   return {
     deviceId: device.deviceId,
+    deviceName: stored?.deviceName || device.deviceId,
+    account: {
+      connected: Boolean(stored?.accountLabel),
+      label: stored?.accountLabel || null
+    },
     online: Boolean(device.online),
     revoked: Boolean(device.revoked),
     connectionEpoch: device.connectionEpoch || 0,
     agentVersion: device.agentVersion || 'unknown',
     capabilities: [...(device.capabilities || [])],
     connectedAt: device.connectedAt || null,
-    lastSeenAt: device.lastSeenAt || null
+    lastSeenAt: device.lastSeenAt || null,
+    usage,
+    schema
   };
 }
 
@@ -71,7 +78,10 @@ function authFailure(ws, message = 'authentication failed') {
 export function createDeviceBroker(options = {}) {
   const enrollmentToken = String(options.enrollmentToken || '').trim();
   const deviceStore = options.deviceStore || null;
+  const pairingStore = options.pairingStore || null;
+  const usageStore = options.usageStore || null;
   const durableAuth = Boolean(deviceStore);
+  let schemaSnapshot = normalizeSchemaSnapshot(options.schemaSnapshot);
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const devices = new Map();
@@ -81,6 +91,57 @@ export function createDeviceBroker(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   let attachedServer = null;
   let upgradeHandler = null;
+
+  function normalizeSchemaSnapshot(value = {}) {
+    const toolCount = Number.isInteger(Number(value.toolCount)) ? Number(value.toolCount) : 0;
+    const toolSchemaBytes = Number.isInteger(Number(value.toolSchemaBytes)) ? Number(value.toolSchemaBytes) : 0;
+    const toolSchemaTokenEstimate = Number.isInteger(Number(value.toolSchemaTokenEstimate))
+      ? Number(value.toolSchemaTokenEstimate)
+      : Math.ceil(toolSchemaBytes / 4);
+    return {
+      toolCount,
+      toolSchemaBytes,
+      toolSchemaTokenEstimate,
+      tokenEstimateMethod: String(value.tokenEstimateMethod || 'utf8_bytes_div_4_estimate').slice(0, 64),
+      tokenUsageKind: 'schema_estimate_not_billing'
+    };
+  }
+
+  function statusForDevice(device) {
+    const stored = durableAuth ? deviceStore.get(device.deviceId) : null;
+    const usage = usageStore ? usageStore.get(device.deviceId) : null;
+    return publicDevice(device, { stored, usage, schema: schemaSnapshot });
+  }
+
+  function statusPayload(device) {
+    const status = statusForDevice(device);
+    return {
+      accepted: true,
+      account: status.account,
+      device: {
+        id: status.deviceId,
+        name: status.deviceName,
+        online: status.online,
+        connectionEpoch: status.connectionEpoch,
+        connectedAt: status.connectedAt,
+        lastSeenAt: status.lastSeenAt
+      },
+      usage: status.usage,
+      schema: status.schema
+    };
+  }
+
+  function sendStatusSnapshot(ws, device) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !device) return;
+    ws.send(JSON.stringify({
+      protocol_version: DEVICE_PROTOCOL_VERSION,
+      type: 'status_snapshot',
+      device_id: device.deviceId,
+      connection_epoch: device.connectionEpoch,
+      timestamp: Date.now(),
+      payload: statusPayload(device)
+    }));
+  }
 
   if (durableAuth) {
     for (const stored of deviceStore.list()) {
@@ -187,7 +248,10 @@ export function createDeviceBroker(options = {}) {
   function handleAuthHello(ws, message) {
     const deviceId = normalizeDeviceId(message.device_id);
     if (message.type === 'enroll_hello') {
-      if (!ws.enrollmentAuthorized) return authFailure(ws, 'enrollment authorization required');
+      const pairingCredential = String(ws.enrollmentCredential || '').trim();
+      if (!ws.enrollmentAuthorized && !(pairingStore && pairingCredential)) {
+        return authFailure(ws, 'enrollment authorization required');
+      }
       const existing = deviceStore.get(deviceId);
       if (existing) return authFailure(ws, existing.revokedAt ? 'device revoked' : 'device already enrolled');
       const publicKeyPem = String(message.payload?.public_key_pem || '');
@@ -197,12 +261,29 @@ export function createDeviceBroker(options = {}) {
         deviceId,
         publicKeyPem,
         agentVersion: message.payload?.agent_version,
-        capabilities: message.payload?.capabilities
+        capabilities: message.payload?.capabilities,
+        legacyEnrollmentAuthorized: Boolean(ws.enrollmentAuthorized),
+        enrollmentGrant: ws.enrollmentAuthorized ? null : pairingCredential
       });
       return;
     }
-    if (message.type !== 'auth_hello') return authFailure(ws, 'first message must be enroll_hello or auth_hello');
     const stored = deviceStore.get(deviceId);
+    if (message.type === 'pair_hello') {
+      const pairingCredential = String(ws.enrollmentCredential || '').trim();
+      if (!pairingStore || !pairingCredential) return authFailure(ws, 'pairing grant required');
+      if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
+      sendAuthChallenge(ws, {
+        mode: 'pair',
+        deviceId,
+        publicKeyPem: stored.publicKeyPem,
+        agentVersion: message.payload?.agent_version,
+        capabilities: message.payload?.capabilities,
+        authorizationGeneration: stored.authorizationGeneration,
+        enrollmentGrant: pairingCredential
+      });
+      return;
+    }
+    if (message.type !== 'auth_hello') return authFailure(ws, 'first message must be enroll_hello, pair_hello, or auth_hello');
     if (!stored || stored.revokedAt) return authFailure(ws, 'unknown or revoked device');
     sendAuthChallenge(ws, {
       mode: 'reconnect',
@@ -233,11 +314,41 @@ export function createDeviceBroker(options = {}) {
     let authorizationGeneration;
     if (state.mode === 'enroll') {
       try {
-        const enrolled = deviceStore.enroll({ deviceId: state.deviceId, publicKeyPem: state.publicKeyPem });
+        let pairing = null;
+        if (!state.legacyEnrollmentAuthorized) {
+          pairing = pairingStore.consumeGrant({
+            enrollmentGrant: state.enrollmentGrant,
+            deviceId: state.deviceId,
+            publicKeyPem: state.publicKeyPem
+          });
+        }
+        const enrolled = deviceStore.enroll({
+          deviceId: state.deviceId,
+          publicKeyPem: state.publicKeyPem,
+          deviceName: pairing?.deviceName || state.deviceId,
+          accountLabel: pairing?.account?.label || null
+        });
         authorizedPublicKeyPem = enrolled.publicKeyPem;
         authorizationGeneration = enrolled.authorizationGeneration;
       } catch {
         return authFailure(ws, 'enrollment failed');
+      }
+    } else if (state.mode === 'pair') {
+      try {
+        const pairing = pairingStore.consumeGrant({
+          enrollmentGrant: state.enrollmentGrant,
+          deviceId: state.deviceId,
+          publicKeyPem: state.publicKeyPem
+        });
+        const updated = deviceStore.updateMetadata({
+          deviceId: state.deviceId,
+          deviceName: pairing.deviceName,
+          accountLabel: pairing.account?.label || null
+        });
+        authorizedPublicKeyPem = updated.publicKeyPem;
+        authorizationGeneration = updated.authorizationGeneration;
+      } catch {
+        return authFailure(ws, 'account pairing failed');
       }
     } else {
       authorizedPublicKeyPem = state.publicKeyPem;
@@ -245,21 +356,23 @@ export function createDeviceBroker(options = {}) {
     }
 
     try {
-      deviceStore.withCurrentAuthorization(
+      const current = deviceStore.withCurrentAuthorization(
         { deviceId: state.deviceId, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration },
-        () => {
-          const current = registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration });
-          ws.authState = null;
-          ws.send(JSON.stringify({
-            protocol_version: DEVICE_PROTOCOL_VERSION,
-            type: 'auth_ok',
-            device_id: current.deviceId,
-            connection_epoch: current.connectionEpoch,
-            timestamp: Date.now(),
-            payload: { accepted: true }
-          }));
-        }
+        () => registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration })
       );
+      ws.authState = null;
+      if (usageStore) {
+        const previousUsage = usageStore.get(current.deviceId);
+        usageStore.recordConnection(current.deviceId, { reconnect: previousUsage.connections > 0 });
+      }
+      ws.send(JSON.stringify({
+        protocol_version: DEVICE_PROTOCOL_VERSION,
+        type: 'auth_ok',
+        device_id: current.deviceId,
+        connection_epoch: current.connectionEpoch,
+        timestamp: Date.now(),
+        payload: statusPayload(current)
+      }));
     } catch { return authFailure(ws, 'device authorization changed'); }
   }
 
@@ -287,14 +400,29 @@ export function createDeviceBroker(options = {}) {
     if (message.device_id && message.device_id !== ws.deviceId) throw new Error('device_id does not match authenticated connection.');
     if (message.connection_epoch !== undefined && message.connection_epoch !== ws.connectionEpoch) return;
     device.lastSeenAt = Date.now();
-    if (message.type === 'heartbeat') return;
+    if (message.type === 'account_logout') {
+      if (!durableAuth) return;
+      deviceStore.updateMetadata({ deviceId: device.deviceId, accountLabel: null });
+      usageStore?.touch(device.deviceId);
+      sendStatusSnapshot(ws, device);
+      return;
+    }
+    if (message.type === 'heartbeat') {
+      usageStore?.touch(device.deviceId);
+      sendStatusSnapshot(ws, device);
+      return;
+    }
     if (message.type === 'capability_sync') {
       device.capabilities = normalizeCapabilities(message.payload?.capabilities);
       device.agentVersion = String(message.payload?.agent_version || device.agentVersion);
+      usageStore?.touch(device.deviceId);
+      sendStatusSnapshot(ws, device);
       return;
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
     const wireRequestId = String(message.request_id || '');
+    const responseBytes = Buffer.byteLength(JSON.stringify(message), 'utf8');
+    let usageOutcome = null;
     const acceptResult = () => {
       const entry = pendingByWireRequestId.get(wireRequestId);
       if (!entry || entry.deviceId !== ws.deviceId || entry.connectionEpoch !== ws.connectionEpoch || pending.get(entry.requestId) !== entry) return;
@@ -304,18 +432,26 @@ export function createDeviceBroker(options = {}) {
       if (message.type === 'tool_error') {
         const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
         error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
+        usageOutcome = { ok: false, errorCode: error.code };
         entry.reject(error);
-      } else entry.resolve(message.payload);
+      } else {
+        usageOutcome = { ok: true };
+        entry.resolve(message.payload);
+      }
     };
-    if (!durableAuth) {
-      acceptResult();
-      return;
-    }
     try {
-      deviceStore.withCurrentAuthorization(
-        { deviceId: device.deviceId, publicKeyPem: device.authenticatedPublicKeyPem, authorizationGeneration: device.authenticatedAuthorizationGeneration },
-        acceptResult
-      );
+      if (!durableAuth) acceptResult();
+      else {
+        deviceStore.withCurrentAuthorization(
+          { deviceId: device.deviceId, publicKeyPem: device.authenticatedPublicKeyPem, authorizationGeneration: device.authenticatedAuthorizationGeneration },
+          acceptResult
+        );
+      }
+      if (usageOutcome && usageStore) {
+        if (usageOutcome.ok) usageStore.recordToolSucceeded(device.deviceId, responseBytes);
+        else usageStore.recordToolFailed(device.deviceId, responseBytes, usageOutcome.errorCode);
+        sendStatusSnapshot(ws, device);
+      }
     } catch {
       invalidateAuthorization(device, { revoked: false, reason: 'Device authorization changed', closeCode: 4005 });
     }
@@ -375,7 +511,9 @@ export function createDeviceBroker(options = {}) {
         if (!tokenMatches(bearerToken(request), enrollmentToken)) return rejectUpgrade(socket, 401, 'Unauthorized');
       }
       wss.handleUpgrade(request, socket, head, ws => {
-        ws.enrollmentAuthorized = tokenMatches(bearerToken(request), enrollmentToken);
+        const credential = bearerToken(request);
+        ws.enrollmentAuthorized = tokenMatches(credential, enrollmentToken);
+        ws.enrollmentCredential = ws.enrollmentAuthorized ? '' : credential;
         wss.emit('connection', ws, request);
       });
     };
@@ -386,7 +524,7 @@ export function createDeviceBroker(options = {}) {
     for (const device of devices.values()) {
       if (device.online) refreshAuthorization(device);
     }
-    return [...devices.values()].map(publicDevice).sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    return [...devices.values()].map(statusForDevice).sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
   function revokeDevice(deviceId) {
@@ -408,7 +546,7 @@ export function createDeviceBroker(options = {}) {
     current.authenticatedPublicKeyPem = null;
     current.authenticatedAuthorizationGeneration = null;
     devices.set(normalized, current);
-    return publicDevice(current);
+    return statusForDevice(current);
   }
 
   async function callDevice({ requestId: requestedRequestId, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
@@ -430,6 +568,7 @@ export function createDeviceBroker(options = {}) {
       timestamp: Date.now(),
       payload: { tool, arguments: args }
     });
+    const requestBytes = Buffer.byteLength(wireMessage, 'utf8');
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
@@ -438,6 +577,7 @@ export function createDeviceBroker(options = {}) {
           if (pending.get(requestId) !== entry) return;
           pending.delete(requestId);
           if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
+          usageStore?.recordToolFailed(device.deviceId, 0, 'DEVICE_REQUEST_TIMEOUT');
           entry.reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
         }, timeoutMs);
         entry.timer = timer;
@@ -449,6 +589,7 @@ export function createDeviceBroker(options = {}) {
           clearTimeout(entry.timer);
           pending.delete(requestId);
           if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
+          usageStore?.recordToolFailed(device.deviceId, 0, 'DEVICE_SEND_ERROR');
           entry.reject(error);
         });
       };
@@ -463,6 +604,7 @@ export function createDeviceBroker(options = {}) {
             dispatch
           );
         } else dispatch();
+        usageStore?.recordToolStarted(device.deviceId, requestBytes);
       } catch (error) {
         if (entry && pending.get(requestId) === entry) {
           clearTimeout(entry.timer);
@@ -494,5 +636,13 @@ export function createDeviceBroker(options = {}) {
     upgradeHandler = null;
   }
 
-  return { attach, listDevices, revokeDevice, callDevice, shutdown };
+  function setSchemaSnapshot(value) {
+    schemaSnapshot = normalizeSchemaSnapshot(value);
+    for (const device of devices.values()) {
+      if (device.online) sendStatusSnapshot(device.socket, device);
+    }
+    return schemaSnapshot;
+  }
+
+  return { attach, listDevices, revokeDevice, callDevice, setSchemaSnapshot, shutdown };
 }

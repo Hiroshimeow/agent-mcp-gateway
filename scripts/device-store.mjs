@@ -21,6 +21,8 @@ function rowToDevice(row) {
   if (!row) return null;
   return {
     deviceId: row.device_id,
+    deviceName: row.device_name || row.device_id,
+    accountLabel: row.account_label || null,
     publicKeyPem: row.public_key_pem,
     enrolledAt: row.enrolled_at,
     revokedAt: row.revoked_at,
@@ -40,28 +42,36 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       public_key_pem TEXT NOT NULL,
       enrolled_at TEXT NOT NULL,
       revoked_at TEXT,
-      authorization_generation INTEGER NOT NULL DEFAULT 1
+      authorization_generation INTEGER NOT NULL DEFAULT 1,
+      device_name TEXT,
+      account_label TEXT
     );
   `);
   const columns = db.prepare(`PRAGMA table_info(devices)`).all();
   if (!columns.some(column => column.name === 'authorization_generation')) {
     db.exec('ALTER TABLE devices ADD COLUMN authorization_generation INTEGER NOT NULL DEFAULT 1');
   }
+  if (!columns.some(column => column.name === 'device_name')) {
+    db.exec('ALTER TABLE devices ADD COLUMN device_name TEXT');
+  }
+  if (!columns.some(column => column.name === 'account_label')) {
+    db.exec('ALTER TABLE devices ADD COLUMN account_label TEXT');
+  }
   db.exec('PRAGMA busy_timeout = 5000');
 
   const getStatement = db.prepare(`
-    SELECT device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, account_label, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     WHERE device_id = ?
   `);
   const listStatement = db.prepare(`
-    SELECT device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, account_label, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     ORDER BY device_id
   `);
   const insertStatement = db.prepare(`
-    INSERT INTO devices (device_id, public_key_pem, enrolled_at, revoked_at, authorization_generation)
-    VALUES (?, ?, ?, NULL, 1)
+    INSERT INTO devices (device_id, device_name, account_label, public_key_pem, enrolled_at, revoked_at, authorization_generation)
+    VALUES (?, ?, ?, ?, ?, NULL, 1)
   `);
   const rotateStatement = db.prepare(`
     UPDATE devices
@@ -73,6 +83,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     SET revoked_at = ?, authorization_generation = authorization_generation + 1
     WHERE device_id = ? AND revoked_at IS NULL
   `);
+  const metadataStatement = db.prepare(`
+    UPDATE devices
+    SET device_name = ?, account_label = ?
+    WHERE device_id = ? AND revoked_at IS NULL
+  `);
 
   function get(deviceId) {
     return rowToDevice(getStatement.get(normalizeDeviceId(deviceId)));
@@ -82,13 +97,23 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return listStatement.all().map(rowToDevice);
   }
 
-  function enroll({ deviceId, publicKeyPem }) {
+  function enroll({ deviceId, publicKeyPem, deviceName = null, accountLabel = null }) {
     const normalizedId = normalizeDeviceId(deviceId);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
+    const normalizedName = String(deviceName || '').trim().slice(0, 128) || normalizedId;
+    const normalizedAccount = String(accountLabel || '').trim().slice(0, 128) || null;
     if (getStatement.get(normalizedId)) throw new Error(`Device ${normalizedId} is already enrolled.`);
     const enrolledAt = now();
-    insertStatement.run(normalizedId, normalizedKey, enrolledAt);
-    return { deviceId: normalizedId, publicKeyPem: normalizedKey, enrolledAt, revokedAt: null, authorizationGeneration: 1 };
+    insertStatement.run(normalizedId, normalizedName, normalizedAccount, normalizedKey, enrolledAt);
+    return {
+      deviceId: normalizedId,
+      deviceName: normalizedName,
+      accountLabel: normalizedAccount,
+      publicKeyPem: normalizedKey,
+      enrolledAt,
+      revokedAt: null,
+      authorizationGeneration: 1
+    };
   }
 
   function rotate({ deviceId, expectedPublicKeyPem, publicKeyPem }) {
@@ -102,6 +127,18 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       if (existing.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
       throw new Error(`Device ${normalizedId} current key changed; rotation was not applied.`);
     }
+    return get(normalizedId);
+  }
+
+  function updateMetadata({ deviceId, deviceName, accountLabel }) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    const current = get(normalizedId);
+    if (!current) throw new Error(`Unknown device ${normalizedId}.`);
+    if (current.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
+    const nextName = deviceName === undefined ? current.deviceName : (String(deviceName || '').trim().slice(0, 128) || normalizedId);
+    const nextAccount = accountLabel === undefined ? current.accountLabel : (String(accountLabel || '').trim().slice(0, 128) || null);
+    const result = metadataStatement.run(nextName, nextAccount, normalizedId);
+    if (Number(result.changes) !== 1) throw new Error(`Device ${normalizedId} metadata update failed.`);
     return get(normalizedId);
   }
 
@@ -139,5 +176,5 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function close() { db.close(); }
 
-  return { get, list, enroll, rotate, revoke, withCurrentAuthorization, close };
+  return { get, list, enroll, rotate, updateMetadata, revoke, withCurrentAuthorization, close };
 }

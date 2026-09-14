@@ -113,28 +113,36 @@ export class PasswordProtectedAuthProvider {
     this.stateStore?.setSession(sessionId, sessionData);
   }
 
+  hasRequestSession(req) {
+    const cookies = parseCookies(req?.headers?.cookie || '');
+    const sessionId = cookies.mcp_auth_session;
+    return Boolean(sessionId && this.hasSession(sessionId));
+  }
+
+  authenticateHumanPassword(password, res) {
+    if (String(password || '') !== this.password) return false;
+    const sessionId = crypto.randomUUID();
+    this.rememberSession(sessionId);
+    res.cookie('mcp_auth_session', sessionId, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: true,
+      maxAge: SESSION_TTL_MS,
+      path: '/'
+    });
+    return true;
+  }
+
   async authorize(client, params, res) {
     const req = res.req;
-    const cookies = parseCookies(req.headers.cookie || '');
-    const sessionId = cookies.mcp_auth_session;
-    const hasSession = sessionId && this.hasSession(sessionId);
+    const hasSession = this.hasRequestSession(req);
 
     if (!hasSession) {
       const submittedPassword = req.method === 'POST' ? String(req.body?.password || '') : '';
-      if (submittedPassword !== this.password) {
+      if (!this.authenticateHumanPassword(submittedPassword, res)) {
         res.status(200).type('html').send(renderLoginPage(req, submittedPassword.length > 0));
         return;
       }
-
-      const newSessionId = crypto.randomUUID();
-      this.rememberSession(newSessionId);
-      res.cookie('mcp_auth_session', newSessionId, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: true,
-        maxAge: SESSION_TTL_MS,
-        path: '/'
-      });
     }
 
     const code = crypto.randomUUID();
