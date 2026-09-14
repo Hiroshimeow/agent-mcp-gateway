@@ -14,6 +14,7 @@
     "smoke:mcp-schemas": "node scripts/smoke-mcp-schemas.mjs",
     "smoke:mcp:tools": "node scripts/smoke-mcp-tools.mjs",
     "smoke:mcp:upstreams": "node scripts/smoke-mcp-upstreams.mjs",
+    "benchmark:catalog": "node scripts/benchmark-mcp-catalog.mjs",
     "device:revoke": "node scripts/device-admin.mjs revoke",
     "device:rotate": "node scripts/device-admin.mjs rotate",
     "device:enroll": "node scripts/device-admin.mjs enroll"
