@@ -28,6 +28,8 @@ const RISK_MAP = new Map(Object.entries({
   list_allowed_directories: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   image_preview: { ...READ_ONLY, category: TOOL_CATEGORIES.filesystem },
   get_skill: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  project_list: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  project_inspect: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   list_devices: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   shell_execute: {
     readOnlyHint: false,

@@ -184,6 +184,8 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
     'image_preview',
     'interact_with_process',
     'list_devices',
+    'project_inspect',
+    'project_list',
     'read_process_output',
     'read_text_file',
     'shell_execute',
@@ -199,6 +201,24 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const deviceList = await callTool(baseUrl, 38, 'list_devices', {});
   const deviceListPayload = JSON.parse(deviceList.result.content[0].text);
   assert.deepEqual(deviceListPayload.devices, []);
+
+  for (const projectToolName of ['project_list', 'project_inspect']) {
+    const projectTool = tools.find(tool => tool.name === projectToolName);
+    assert.equal(projectTool?._meta?.trusted_roots, undefined);
+    assert.equal(projectTool?._meta?.root_repo, undefined);
+    assert.equal(projectTool?._meta?.repo_root, undefined);
+  }
+  const projectList = await callTool(baseUrl, 39, 'project_list', { limit: 10 });
+  const projectListPayload = JSON.parse(projectList.result.content[0].text);
+  assert.equal(projectListPayload.ok, true);
+  assert.equal(projectListPayload.data.items.length, 1);
+  const smokeProjectId = projectListPayload.data.items[0].projectId;
+  const projectSummary = await callTool(baseUrl, 40, 'project_inspect', { projectId: smokeProjectId, view: 'summary' });
+  const projectSummaryPayload = JSON.parse(projectSummary.result.content[0].text);
+  assert.equal(projectSummaryPayload.data.projectId, smokeProjectId);
+  const projectTree = await callTool(baseUrl, 41, 'project_inspect', { projectId: smokeProjectId, view: 'tree', depth: 2, limit: 20 });
+  const projectTreePayload = JSON.parse(projectTree.result.content[0].text);
+  assert.equal(Array.isArray(projectTreePayload.data.entries), true);
 
   const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
   assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
@@ -480,7 +500,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'list_devices', 'read_text_file']);
+  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
   observedProfiles.safe = names(tools);
@@ -489,7 +509,7 @@ await withServer('safe', async ({ baseUrl }) => {
 await withServer('assisted', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'list_devices', 'read_text_file', 'write_file']);
+  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file', 'write_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);

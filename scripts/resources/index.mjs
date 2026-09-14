@@ -1,11 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
 import { buildRuntimeProfileStatus, getRuntimeProfile } from '../runtime-profile.mjs';
+import { inspectProject, listProjects } from '../project-inspection.mjs';
 import { applyToolRisk, buildToolRiskManifest } from '../tool-risk.mjs';
 import { listSkillResources, readSkillResource } from '../skills/index.mjs';
 
-const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'logs', 'packages', '_zip_temp']);
 const MAX_RESOURCE_FILE_BYTES = 1024 * 1024;
 
 function looksBinary(buffer) {
@@ -29,30 +28,12 @@ function getProject(context, projectId) {
   return project;
 }
 
-function exposePaths(context) {
-  return Boolean(context.projectRegistry?.exposeProjectPaths || context.env?.MCP_EXPOSE_PROJECT_PATHS === 'true');
-}
-
 function hasReadme(project) {
   return fs.existsSync(path.join(project.repoRoot, 'README.md')) || fs.existsSync(path.join(project.repoRoot, 'README.vi.md'));
 }
 
 function hasPackageJson(project) {
   return fs.existsSync(path.join(project.repoRoot, 'package.json'));
-}
-
-function projectSummary(project, context) {
-  const data = {
-    projectId: project.projectId,
-    displayName: project.displayName,
-    defaultRootName: path.basename(project.repoRoot) || project.projectId,
-    default: context.projectRegistry?.defaultProjectId === project.projectId,
-    hasPackageJson: hasPackageJson(project),
-    hasReadme: hasReadme(project),
-    runtimeProfile: getRuntimeProfile(context.env || process.env).name
-  };
-  if (exposePaths(context)) data.repoRoot = project.repoRoot;
-  return data;
 }
 
 export function listRepoResources(context = {}) {
@@ -93,53 +74,13 @@ function safeRelativePath(project, encodedPath) {
   return resolved;
 }
 
-function readTree(root, maxDepth = 3, maxEntries = 500) {
-  let count = 0;
-  function walk(dir, depth) {
-    if (count >= maxEntries) return [];
-    const entries = fs.readdirSync(dir, { withFileTypes: true }).filter(e => !DEFAULT_EXCLUDES.has(e.name)).sort((a, b) => a.name.localeCompare(b.name));
-    const out = [];
-    for (const entry of entries) {
-      if (count >= maxEntries) break;
-      count += 1;
-      const item = { name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' };
-      if (entry.isDirectory() && depth < maxDepth) item.children = walk(path.join(dir, entry.name), depth + 1);
-      out.push(item);
-    }
-    return out;
-  }
-  return { rootName: path.basename(root), maxDepth, maxEntries, truncated: count >= maxEntries, entries: walk(root, 1) };
-}
-
-function execGitRead(cwd, args) {
-  return new Promise(resolve => {
-    execFile('git', args, { cwd, timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      resolve({ ok: !error, stdout, stderr, exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0 });
-    });
-  });
-}
-
-async function gitStatus(project) {
-  const result = await execGitRead(project.repoRoot, ['status', '--short', '--branch']);
-  return { projectId: project.projectId, ok: result.ok, status: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
-}
-
-async function gitDiff(project, staged = false) {
-  const result = await execGitRead(project.repoRoot, staged ? ['diff', '--staged'] : ['diff']);
-  return textContent(`repo://project/${encodeURIComponent(project.projectId)}/git/diff${staged ? '?staged=true' : ''}`, result.ok ? result.stdout : result.stderr, 'text/plain');
-}
-
 export async function readRepoResource(uri, context = {}) {
   const parsed = new URL(uri);
   if (parsed.protocol === 'skill:') return readSkillResource(uri);
   if (parsed.protocol !== 'repo:') throw new Error(`Unsupported resource URI: ${uri}`);
   if (uri === 'repo://projects') {
-    const projects = [...(context.projectRegistry?.projects?.values() || [])].map(project => {
-      const item = { projectId: project.projectId, displayName: project.displayName, default: context.projectRegistry?.defaultProjectId === project.projectId };
-      if (exposePaths(context)) item.repoRoot = project.repoRoot;
-      return item;
-    });
-    return jsonContent(uri, { projects, pathExposure: exposePaths(context) });
+    const result = listProjects(context, { limit: 200 });
+    return jsonContent(uri, { projects: result.items, pathExposure: result.pathExposure, nextCursor: result.nextCursor });
   }
 
   const match = uri.match(/^repo:\/\/project\/([^/?#]+)\/(.+)$/);
@@ -147,7 +88,7 @@ export async function readRepoResource(uri, context = {}) {
   const project = getProject(context, decodeURIComponent(match[1]));
   const rest = match[2].replace(/[?#].*$/, '');
 
-  if (rest === 'summary') return jsonContent(uri, projectSummary(project, context));
+  if (rest === 'summary') return jsonContent(uri, await inspectProject(context, { projectId: project.projectId, view: 'summary' }));
   if (rest === 'runtime-profile' || rest === 'safety-profile') return jsonContent(uri, buildRuntimeProfileStatus(context.env || process.env));
   if (rest === 'tool-manifest') {
     const runtimeProfile = getRuntimeProfile(context.env || process.env);
@@ -155,22 +96,24 @@ export async function readRepoResource(uri, context = {}) {
     return jsonContent(uri, { profile: runtimeProfile.name, tools: buildToolRiskManifest(tools, runtimeProfile) });
   }
   if (rest === 'readme') {
-    const readme = ['README.md', 'README.vi.md'].map(name => path.join(project.repoRoot, name)).find(file => fs.existsSync(file));
-    if (!readme) throw new Error('README resource not found.');
-    return textContent(uri, await fs.promises.readFile(readme, 'utf8'), 'text/markdown');
+    const result = await inspectProject(context, { projectId: project.projectId, view: 'readme' });
+    return textContent(uri, result.text, 'text/markdown');
   }
   if (rest === 'package') {
-    const pkg = path.join(project.repoRoot, 'package.json');
-    if (!fs.existsSync(pkg)) throw new Error('package.json resource not found.');
-    return jsonContent(uri, JSON.parse(await fs.promises.readFile(pkg, 'utf8')));
+    const result = await inspectProject(context, { projectId: project.projectId, view: 'package' });
+    return jsonContent(uri, result.data);
   }
   if (rest === 'tree') {
-    const requestedDepth = Number(parsed.searchParams.get('depth') || 3);
-    const depth = Number.isFinite(requestedDepth) ? Math.max(1, Math.min(10, requestedDepth)) : 3;
-    return jsonContent(uri, readTree(project.repoRoot, depth));
+    const depthText = parsed.searchParams.get('depth');
+    const depthNumber = depthText === null || depthText === '' ? 3 : Number(depthText);
+    const depth = Number.isInteger(depthNumber) && depthNumber >= 1 && depthNumber <= 10 ? depthNumber : 3;
+    return jsonContent(uri, await inspectProject(context, { projectId: project.projectId, view: 'tree', depth, limit: 500 }));
   }
-  if (rest === 'git/status') return jsonContent(uri, await gitStatus(project));
-  if (rest === 'git/diff') return await gitDiff(project, parsed.searchParams.get('staged') === 'true');
+  if (rest === 'git/status') return jsonContent(uri, await inspectProject(context, { projectId: project.projectId, view: 'git_status' }));
+  if (rest === 'git/diff') {
+    const result = await inspectProject(context, { projectId: project.projectId, view: 'git_diff', staged: parsed.searchParams.get('staged') === 'true' });
+    return textContent(uri, result.text, 'text/plain');
+  }
   if (rest.startsWith('file/')) {
     const filePath = safeRelativePath(project, rest.slice('file/'.length));
     const stat = await fs.promises.stat(filePath);

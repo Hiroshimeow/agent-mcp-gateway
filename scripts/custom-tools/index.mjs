@@ -1,10 +1,25 @@
 import { imagePreviewTool } from './image-preview-tool.mjs';
 import { fail, ok } from './response-utils.mjs';
 import { getSkillTool } from '../skills/index.mjs';
+import { inspectProject, listProjects, PROJECT_INSPECTION_VIEWS } from '../project-inspection.mjs';
 import { applyToolRisk } from '../tool-risk.mjs';
 
 function schema(properties = {}, required = []) {
   return { type: 'object', properties, required, additionalProperties: false };
+}
+
+function structuredOutputSchema() {
+  return {
+    type: 'object',
+    properties: {
+      ok: { type: 'boolean' },
+      tool: { type: 'string' },
+      summary: { type: 'string' },
+      data: { type: 'object' }
+    },
+    required: ['ok', 'tool', 'summary', 'data'],
+    additionalProperties: false
+  };
 }
 
 const TOOL_DEFINITIONS = [
@@ -17,17 +32,7 @@ const TOOL_DEFINITIONS = [
         description: 'Registered skill name or alias. Omit only to discover the compact live skill catalog.'
       }
     }),
-    outputSchema: {
-      type: 'object',
-      properties: {
-        ok: { type: 'boolean' },
-        tool: { type: 'string' },
-        summary: { type: 'string' },
-        data: { type: 'object' }
-      },
-      required: ['ok', 'tool', 'summary', 'data'],
-      additionalProperties: false
-    },
+    outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: args => ok('get_skill', 'Loaded skill definition', getSkillTool(args))
   },
@@ -45,6 +50,33 @@ const TOOL_DEFINITIONS = [
     }),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: imagePreviewTool
+  },
+  {
+    name: 'project_list',
+    description: 'List configured projects with bounded pagination and optional name/id filtering. Local absolute paths stay hidden unless path exposure is explicitly enabled.',
+    inputSchema: schema({
+      query: { type: 'string', description: 'Optional project id or display-name filter.' },
+      cursor: { type: 'string', description: 'Opaque cursor returned by the previous page.' },
+      limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
+    }),
+    outputSchema: structuredOutputSchema(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: (args, context) => ok('project_list', 'Listed projects', listProjects(context, args))
+  },
+  {
+    name: 'project_inspect',
+    description: 'Inspect one configured project through bounded summary, tree, Git, README, or package views. Use read_text_file for generic file bodies.',
+    inputSchema: schema({
+      projectId: { type: 'string', description: 'Configured project id.' },
+      view: { type: 'string', enum: [...PROJECT_INSPECTION_VIEWS] },
+      depth: { type: 'integer', minimum: 1, maximum: 10, default: 3 },
+      staged: { type: 'boolean', default: false },
+      cursor: { type: 'string', description: 'Opaque cursor returned by a bounded tree page.' },
+      limit: { type: 'integer', minimum: 1, maximum: 500, default: 200 }
+    }, ['projectId', 'view']),
+    outputSchema: structuredOutputSchema(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: async (args, context) => ok('project_inspect', `Inspected project ${args.projectId}`, await inspectProject(context, args))
   }
 ];
 
@@ -54,19 +86,13 @@ export function isLocalCustomTool(name) {
   return LOCAL_TOOLS.has(String(name || ''));
 }
 
-export function listCustomTools(context = {}) {
-  const meta = {
-    trusted_roots: context.resolvedRepoRoots || [],
-    root_repo: context.resolvedRepoRoot,
-    repo_root: context.resolvedRepoRoot
-  };
+export function listCustomTools(_context = {}) {
   return TOOL_DEFINITIONS.map(tool => applyToolRisk({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
-    annotations: { ...tool.annotations },
-    _meta: meta
+    annotations: { ...tool.annotations }
   }));
 }
 
