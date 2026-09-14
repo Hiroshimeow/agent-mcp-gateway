@@ -23,7 +23,16 @@ async function readCount(file) {
   try { return Number(await fs.promises.readFile(file, 'utf8')) || 0; } catch { return 0; }
 }
 
-async function makeDynamicManager({ mode = 'startup', ttl = 1000, prefix = 'dyn', envExtra = {}, localToolNames = [] } = {}) {
+async function makeDynamicManager({
+  mode = 'startup',
+  ttl = 1000,
+  prefix = 'dyn',
+  envExtra = {},
+  localToolNames = [],
+  exposureMode = 'direct',
+  eagerBudget = 24576,
+  eagerAllowlist = []
+} = {}) {
   const dir = await tempDir();
   const statePath = path.join(dir, 'state.json');
   const countPath = path.join(dir, 'count.txt');
@@ -33,6 +42,9 @@ async function makeDynamicManager({ mode = 'startup', ttl = 1000, prefix = 'dyn'
 [external_mcp]
 catalog_cache = "${mode}"
 catalog_cache_ttl_ms = ${ttl}
+exposure_mode = "${exposureMode}"
+eager_schema_budget_bytes = ${eagerBudget}
+eager_allowlist = ${JSON.stringify(eagerAllowlist)}
 
 [mcp_servers.dyn]
 enabled = true
@@ -112,6 +124,25 @@ async function makeTrackedManager(serverBlocks, tracker, changes = []) {
   });
   return { manager, dir, configPath, env };
 }
+
+test('hybrid defers unannotated external tools while retaining full cached routes and bounded diagnostics', async () => {
+  const { manager } = await makeDynamicManager({ exposureMode: 'hybrid' });
+  try {
+    assert.deepEqual(await toolNames(manager), []);
+    assert.equal(manager.hasTool('dyn_a'), true);
+    const call = await manager.callTool('dyn_a', {});
+    assert.match(call.content[0].text, /dynamic:a/);
+
+    const diagnostics = manager.getDiagnostics();
+    assert.equal(diagnostics.catalog.mode, 'hybrid');
+    assert.equal(diagnostics.catalog.total.count, 1);
+    assert.equal(diagnostics.catalog.eager.count, 0);
+    assert.equal(diagnostics.catalog.deferred.count, 1);
+    assert.equal('tools' in diagnostics.catalog, false);
+  } finally {
+    await manager.shutdown();
+  }
+});
 
 test('startup cache does not refresh when upstream catalog changes', async () => {
   const { manager, statePath, countPath } = await makeDynamicManager({ mode: 'startup' });

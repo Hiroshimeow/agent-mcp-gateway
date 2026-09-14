@@ -14,6 +14,7 @@ export function summarizeDiagnostics(statuses, catalogState = {}, config = {}) {
     lastRefreshAt: catalogState.lastRefreshAt || null,
     lastRefreshError: catalogState.lastRefreshError || null,
     refreshInFlight: Boolean(catalogState.refreshInFlight),
+    catalog: snapshot.exposure?.diagnostics || null,
     servers: [...statuses.entries()].map(([id, value]) => ({ id, ...value })),
     upstreams: Object.fromEntries([...statuses.entries()].map(([id, value]) => [id, value]))
   };

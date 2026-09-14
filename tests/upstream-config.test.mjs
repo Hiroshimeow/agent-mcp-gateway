@@ -38,6 +38,31 @@ args = ["server.mjs"]
   assert.equal(cfg.servers[0].cwd, dir);
 });
 
+test('external exposure defaults to direct during migration and validates explicit budget modes', async () => {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mcp-config-'));
+  const defaults = await loadExternalMcpConfig({ repoRoot: dir, env: {} });
+  assert.equal(defaults.external.exposure_mode, 'direct');
+  assert.equal(defaults.external.eager_schema_budget_bytes, 24576);
+  assert.deepEqual(defaults.external.eager_allowlist, []);
+
+  const validPath = path.join(dir, 'hybrid.toml');
+  await fs.promises.writeFile(validPath, '[external_mcp]\nexposure_mode = "hybrid"\neager_schema_budget_bytes = 1234\neager_allowlist = ["alpha_read", "beta_write"]\n');
+  const valid = await loadExternalMcpConfig({ repoRoot: dir, env: { MCP_UPSTREAM_CONFIG: validPath } });
+  assert.equal(valid.external.exposure_mode, 'hybrid');
+  assert.equal(valid.external.eager_schema_budget_bytes, 1234);
+  assert.deepEqual(valid.external.eager_allowlist, ['alpha_read', 'beta_write']);
+
+  for (const [name, body, pattern] of [
+    ['bad-mode', '[external_mcp]\nexposure_mode = "auto"\n', /exposure_mode/i],
+    ['bad-budget', '[external_mcp]\neager_schema_budget_bytes = -1\n', /eager_schema_budget_bytes/i],
+    ['bad-list', '[external_mcp]\neager_allowlist = "alpha"\n', /eager_allowlist/i]
+  ]) {
+    const configPath = path.join(dir, `${name}.toml`);
+    await fs.promises.writeFile(configPath, body);
+    await assert.rejects(() => loadExternalMcpConfig({ repoRoot: dir, env: { MCP_UPSTREAM_CONFIG: configPath } }), pattern);
+  }
+});
+
 test('external default_enabled can opt all configured servers in', async () => {
   const { dir, configPath } = await tempConfig('default-enabled.toml', `
 [external_mcp]

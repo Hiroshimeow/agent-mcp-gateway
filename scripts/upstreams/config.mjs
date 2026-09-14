@@ -17,7 +17,10 @@ const DEFAULT_EXTERNAL = {
   startup_timeout_ms: 15000,
   shutdown_timeout_ms: 5000,
   default_transport: 'stdio',
-  default_enabled: false
+  default_enabled: false,
+  exposure_mode: 'direct',
+  eager_schema_budget_bytes: 24576,
+  eager_allowlist: []
 };
 
 function envFlag(value, defaultValue = true) {
@@ -32,6 +35,21 @@ function asMs(value, fallback, label) {
   const n = Number(value ?? fallback);
   if (!Number.isFinite(n) || n < 0) throw new Error(`Invalid ${label}: ${value}`);
   return n;
+}
+
+function asNonNegativeInteger(value, fallback, label) {
+  const n = Number(value ?? fallback);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`Invalid ${label}: ${value}`);
+  return n;
+}
+
+function normalizeStringList(value, fallback, label) {
+  if (value === undefined) return [...fallback];
+  if (!Array.isArray(value)) throw new Error(`Invalid ${label}: expected an array of tool names.`);
+  const items = value.map(item => String(item).trim());
+  if (items.some(item => !item)) throw new Error(`Invalid ${label}: tool names must be non-empty strings.`);
+  if (new Set(items).size !== items.length) throw new Error(`Invalid ${label}: duplicate tool names are not allowed.`);
+  return items;
 }
 
 function asMsWithSec(raw, msKey, secKey, fallback, label) {
@@ -72,17 +90,22 @@ export async function loadExternalMcpConfig({ env = process.env, repoRoot = proc
 export function normalizeExternalMcpConfig(raw = {}, { configPath = null, repoRoot = process.cwd(), env = process.env, noConfig = false } = {}) {
   const externalRaw = raw.external_mcp || {};
   const catalogCache = String(externalRaw.catalog_cache ?? DEFAULT_EXTERNAL.catalog_cache).trim().toLowerCase();
+  const exposureMode = String(externalRaw.exposure_mode ?? DEFAULT_EXTERNAL.exposure_mode).trim().toLowerCase();
   const external = {
     ...DEFAULT_EXTERNAL,
     ...externalRaw,
     enabled: envFlag(env.MCP_EXTERNAL_MCP_ENABLED, externalRaw.enabled ?? DEFAULT_EXTERNAL.enabled),
     catalog_cache: catalogCache,
     catalog_cache_ttl_ms: DEFAULT_EXTERNAL.catalog_cache_ttl_ms,
+    exposure_mode: exposureMode,
+    eager_schema_budget_bytes: asNonNegativeInteger(externalRaw.eager_schema_budget_bytes, DEFAULT_EXTERNAL.eager_schema_budget_bytes, 'eager_schema_budget_bytes'),
+    eager_allowlist: normalizeStringList(externalRaw.eager_allowlist, DEFAULT_EXTERNAL.eager_allowlist, 'eager_allowlist'),
     startup_timeout_ms: asMsWithSec(externalRaw, 'startup_timeout_ms', 'startup_timeout_sec', DEFAULT_EXTERNAL.startup_timeout_ms, 'startup_timeout_ms'),
     shutdown_timeout_ms: asMsWithSec(externalRaw, 'shutdown_timeout_ms', 'shutdown_timeout_sec', DEFAULT_EXTERNAL.shutdown_timeout_ms, 'shutdown_timeout_ms')
   };
   external.fail_gateway_on_startup_error = Boolean(externalRaw.fail_gateway_on_startup_error ?? DEFAULT_EXTERNAL.fail_gateway_on_startup_error);
   if (!['startup', 'ttl', 'none'].includes(external.catalog_cache)) throw new Error(`Invalid catalog_cache: ${external.catalog_cache}`);
+  if (!['direct', 'brokered', 'hybrid'].includes(external.exposure_mode)) throw new Error(`Invalid exposure_mode: ${external.exposure_mode}`);
   if (external.catalog_cache === 'ttl') {
     external.catalog_cache_ttl_ms = asMs(externalRaw.catalog_cache_ttl_ms, DEFAULT_EXTERNAL.catalog_cache_ttl_ms, 'catalog_cache_ttl_ms');
     if (external.catalog_cache_ttl_ms <= 0) {

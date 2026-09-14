@@ -5,6 +5,7 @@ import { createCatalogSnapshot, createCatalogState } from './catalog-cache.mjs';
 import { toExternalToolName, toExternalPromptName, assertNoNameCollision } from './names.mjs';
 import { encodeUpstreamResourceUri, isExternalResourceUri, parseExternalResourceUri, toExternalResourceUri } from './resource-uri.mjs';
 import { diagnosticsResource, summarizeDiagnostics } from './diagnostics.mjs';
+import { selectExternalCatalog } from '../catalog-budget.mjs';
 
 function safeError(error) {
   return String(error?.message || error || '').slice(0, 1000);
@@ -80,7 +81,7 @@ function addServerStatus(statuses, server, patch) {
   });
 }
 
-export async function buildExternalCatalog({ servers, clients, localToolNames = [], localPromptNames = [], generation = 0, statuses = new Map() }) {
+export async function buildExternalCatalog({ servers, clients, localToolNames = [], localPromptNames = [], generation = 0, statuses = new Map(), externalConfig = {} }) {
   const snapshot = createCatalogSnapshot({ generation, builtAt: new Date().toISOString() });
   const toolNames = new Set(localToolNames);
   const promptNames = new Set(localPromptNames);
@@ -196,6 +197,7 @@ export async function buildExternalCatalog({ servers, clients, localToolNames = 
   }
 
   snapshot.diagnostics = Object.fromEntries(serverDiagnostics.entries());
+  snapshot.exposure = selectExternalCatalog(snapshot.tools, externalConfig, servers);
   return snapshot;
 }
 
@@ -214,8 +216,9 @@ function serverSignature(server) {
 }
 
 function catalogKeys(snapshot) {
+  const exposedTools = snapshot.exposure?.eagerTools ?? snapshot.tools ?? [];
   return {
-    tools: (snapshot.tools || []).map(item => item.name).sort().join('\n'),
+    tools: exposedTools.map(item => item.name).sort().join('\n'),
     resources: (snapshot.resources || []).map(item => item.uri).sort().join('\n') + '\n' +
       (snapshot.resourceTemplates || []).map(item => item.uriTemplate).sort().join('\n'),
     prompts: (snapshot.prompts || []).map(item => item.name).sort().join('\n')
@@ -287,7 +290,8 @@ export async function createExternalMcpManager({
       localToolNames,
       localPromptNames,
       generation: nextGeneration,
-      statuses: candidateStatuses
+      statuses: candidateStatuses,
+      externalConfig: config.external
     });
     for (const [id, status] of candidateStatuses.entries()) statuses.set(id, status);
     const previous = catalogState.snapshot;
@@ -399,7 +403,8 @@ export async function createExternalMcpManager({
         localToolNames,
         localPromptNames,
         generation: previousGeneration + 1,
-        statuses: candidateStatuses
+        statuses: candidateStatuses,
+        externalConfig: resolvedConfig.external
       });
     } catch (error) {
       await Promise.all(stagedClients.map(client => closeClientWithTimeout(client, resolvedConfig.external.shutdown_timeout_ms)));
@@ -448,8 +453,14 @@ export async function createExternalMcpManager({
 
   return {
     get config() { return config; },
-    async listAllToolsUnfiltered() { return [...(await snapshotForCatalogList()).tools]; },
-    async listToolsForProfile() { return [...(await snapshotForCatalogList()).tools]; },
+    async listAllToolsUnfiltered() {
+      const snapshot = await snapshotForCatalogList();
+      return [...(snapshot.exposure?.eagerTools ?? snapshot.tools)];
+    },
+    async listToolsForProfile() {
+      const snapshot = await snapshotForCatalogList();
+      return [...(snapshot.exposure?.eagerTools ?? snapshot.tools)];
+    },
     hasTool(name) { return currentSnapshot().toolRoutes.has(name); },
     isExternalToolName(name) { return currentSnapshot().toolRoutes.has(name) || knownExternalToolNames.has(name); },
     isExternalPromptName(name) { return currentSnapshot().promptRoutes.has(name) || knownExternalPromptNames.has(name); },
