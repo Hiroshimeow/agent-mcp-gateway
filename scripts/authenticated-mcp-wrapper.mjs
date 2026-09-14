@@ -35,6 +35,7 @@ import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
+  AUTH_SUPPORTED_SCOPES,
   FileBackedAuthState,
   PasswordProtectedAuthProvider,
   isStaticBearerAuthorization,
@@ -1049,7 +1050,7 @@ function getAuthRouterForBaseUrl(baseUrl) {
         validate: { creationStack: false }
       }
     },
-    scopesSupported: ['mcp:tools'],
+    scopesSupported: AUTH_SUPPORTED_SCOPES,
     resourceName: 'Local Dev MCP'
   });
   authRouters.set(normalizedBaseUrl, router);

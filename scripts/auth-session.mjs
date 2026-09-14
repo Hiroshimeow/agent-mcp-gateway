@@ -4,6 +4,8 @@ const ACCESS_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+export const AUTH_SUPPORTED_SCOPES = Object.freeze(['mcp:tools', 'offline_access']);
+
 export class FileBackedAuthState {
   constructor(filePath) {
     this.filePath = filePath;
