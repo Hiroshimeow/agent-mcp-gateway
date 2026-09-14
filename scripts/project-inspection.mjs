@@ -134,9 +134,11 @@ export function listProjects(context = {}, options = {}) {
   if (offset > matched.length) throw new Error('Invalid or stale cursor: project offset is outside the current result set.');
   const page = matched.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
+  const truncated = nextOffset < matched.length;
   return {
     items: page.map(entry => projectListItem(entry.project, projectRegistry, exposePaths)),
-    nextCursor: nextOffset < matched.length ? encodeCursor('projects', nextOffset, version) : null,
+    truncated,
+    nextCursor: truncated ? encodeCursor('projects', nextOffset, version) : null,
     total: matched.length,
     pathExposure: exposePaths
   };

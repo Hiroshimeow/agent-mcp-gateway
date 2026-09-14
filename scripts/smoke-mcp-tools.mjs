@@ -246,7 +246,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const externalSearch = await callTool(baseUrl, 44, 'external_tool_search', { query: 'missing', limit: 10 });
   const externalSearchPayload = JSON.parse(externalSearch.result.content[0].text);
   assert.equal(externalSearchPayload.ok, true);
-  assert.deepEqual(externalSearchPayload.data, { items: [], nextCursor: null });
+  assert.deepEqual(externalSearchPayload.data, { items: [], truncated: false, nextCursor: null });
 
   const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
   assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
@@ -524,6 +524,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.doesNotMatch(metricsText, /process\.stdout\.write|Tiếng Việt|warning/);
   observedProfiles.yolo = names(tools);
   observedCatalogBytes.yolo = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
+  assert.ok(observedCatalogBytes.yolo <= 32 * 1024, `yolo core catalog exceeded 32 KiB: ${observedCatalogBytes.yolo}`);
 });
 
 await withServer('safe', async ({ baseUrl }) => {

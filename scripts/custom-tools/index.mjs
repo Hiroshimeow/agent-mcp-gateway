@@ -35,7 +35,9 @@ const TOOL_DEFINITIONS = [
       name: {
         type: 'string',
         description: 'Registered skill name or alias. Omit only to discover the compact live skill catalog.'
-      }
+      },
+      cursor: { type: 'string', description: 'Opaque cursor returned by get_skill discovery.' },
+      limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
     }),
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },

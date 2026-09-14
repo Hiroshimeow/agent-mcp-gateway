@@ -49,11 +49,13 @@ test('listProjects paginates with opaque cursors and exact query match first', a
   const first = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2 });
   assert.deepEqual(first.items.map(item => item.projectId), ['alpha', 'alpha-tools']);
   assert.equal(typeof first.nextCursor, 'string');
+  assert.equal(first.truncated, true);
   assert.equal(first.items[0].repoRoot, undefined);
 
   const second = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2, cursor: first.nextCursor });
   assert.deepEqual(second.items.map(item => item.projectId), ['my-alpha']);
   assert.equal(second.nextCursor, null);
+  assert.equal(second.truncated, false);
 
   assert.throws(
     () => listProjects({ projectRegistry: registry }, { cursor: 'not-a-valid-cursor' }),

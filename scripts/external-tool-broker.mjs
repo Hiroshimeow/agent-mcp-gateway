@@ -113,9 +113,11 @@ function searchTools(tools, options, runtimeProfile) {
   if (offset > filtered.length) throw new Error('Invalid or stale cursor: offset is outside the current result set.');
   const page = filtered.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
+  const truncated = nextOffset < filtered.length;
   return {
     items: page.map(publicSearchItem),
-    nextCursor: nextOffset < filtered.length ? encodeCursor(nextOffset, signature) : null
+    truncated,
+    nextCursor: truncated ? encodeCursor(nextOffset, signature) : null
   };
 }
 

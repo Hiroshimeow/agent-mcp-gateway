@@ -599,16 +599,58 @@ function compactSkillDescription(description, maxLength = 96) {
   return firstSentence.length <= maxLength ? firstSentence : `${firstSentence.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+const DEFAULT_SKILL_DISCOVERY_LIMIT = 50;
+const MAX_SKILL_DISCOVERY_LIMIT = 200;
+
+function skillDiscoveryLimit(value) {
+  const limit = value === undefined ? DEFAULT_SKILL_DISCOVERY_LIMIT : Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SKILL_DISCOVERY_LIMIT) {
+    throw new Error(`limit must be an integer between 1 and ${MAX_SKILL_DISCOVERY_LIMIT}`);
+  }
+  return limit;
+}
+
+export function paginateSkillDiscovery(skills, args = {}) {
+  const skillCatalog = (Array.isArray(skills) ? skills : [])
+    .filter(item => item?.modelInvocable)
+    .map(item => ({ name: item.name, description: compactSkillDescription(item.description) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const signature = createHash('sha256').update(JSON.stringify(skillCatalog)).digest('hex').slice(0, 16);
+  let offset = 0;
+  if (args.cursor) {
+    let parsed;
+    try {
+      parsed = JSON.parse(Buffer.from(String(args.cursor), 'base64url').toString('utf8'));
+    } catch {
+      throw new Error('Invalid cursor: expected an opaque cursor returned by get_skill discovery.');
+    }
+    if (parsed?.v !== 1 || parsed?.signature !== signature || !Number.isInteger(parsed?.offset) || parsed.offset < 0) {
+      throw new Error('Invalid or stale cursor: skill catalog changed.');
+    }
+    offset = parsed.offset;
+  }
+  if (offset > skillCatalog.length) throw new Error('Invalid or stale cursor: skill offset is outside the current catalog.');
+  const limit = skillDiscoveryLimit(args.limit);
+  const page = skillCatalog.slice(offset, offset + limit);
+  const nextOffset = offset + page.length;
+  const truncated = nextOffset < skillCatalog.length;
+  return {
+    skillCatalog: page,
+    truncated,
+    nextCursor: truncated
+      ? Buffer.from(JSON.stringify({ v: 1, offset: nextOffset, signature }), 'utf8').toString('base64url')
+      : null,
+    total: skillCatalog.length
+  };
+}
+
 export function getSkillTool(args = {}) {
   const requested = args.name || args.skill;
   if (!requested) {
     return {
       mode: 'discovery',
       routingPolicy: [...SKILL_ROUTING_POLICY],
-      skillCatalog: listSkills().filter(item => item.modelInvocable).map(item => ({
-        name: item.name,
-        description: compactSkillDescription(item.description)
-      }))
+      ...paginateSkillDiscovery(listSkills(), args)
     };
   }
 

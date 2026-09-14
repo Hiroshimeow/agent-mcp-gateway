@@ -48,6 +48,7 @@ import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
+import { listDevicesToolDefinition, paginateDeviceInventory } from './device-inventory.mjs';
 import { createDeviceStore } from './device-store.mjs';
 import { callerAuditId, createDeviceAccessPolicy } from './device-access-policy.mjs';
 import { createDeviceAuditRecorder } from './device-audit.mjs';
@@ -417,11 +418,7 @@ async function listMergedTools() {
     tools.push(...(result.tools || []).filter(tool => FILESYSTEM_TOOL_NAMES.has(tool.name)).map(filesystemToolMeta));
   }
   tools.push(...listCustomTools(customToolContext()));
-  tools.push(applyToolRisk({
-    name: 'list_devices',
-    description: 'List registered device identities and bounded capability/status metadata. Adding or removing devices does not change the MCP tool schema.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
-  }));
+  tools.push(applyToolRisk(listDevicesToolDefinition()));
   if (enableShell) {
     tools.push(stableToolDefinition(applyToolRisk({
       name: 'shell_execute',
@@ -644,7 +641,7 @@ async function routeToolCall(request, context = {}) {
       callerSubject: context.callerSubject || context.callerCategory || 'anonymous',
       callerCategory: context.callerCategory || 'anonymous'
     });
-    return structuredToolText({ ok: true, devices }, { includeStructured: true });
+    return structuredToolText({ ok: true, ...paginateDeviceInventory(devices, request.params.arguments || {}) }, { includeStructured: true });
   }
 
   if (PROCESS_TOOL_NAMES.has(toolName) && enableShell) {
