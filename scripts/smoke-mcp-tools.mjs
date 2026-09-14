@@ -63,6 +63,9 @@ instructions = "Use the six core local coding tools."
 [trusted_roots]
 roots = ["${workspace.replaceAll('\\', '/')}"]
 
+[surface]
+mode = "agent"
+
 [external_mcp]
 enabled = false
 default_enabled = false
@@ -145,6 +148,14 @@ async function listTools(baseUrl) {
   return (await mcpRequest(baseUrl, 2, 'tools/list', {})).result.tools || [];
 }
 
+async function listResources(baseUrl, id) {
+  return (await mcpRequest(baseUrl, id, 'resources/list', {})).result.resources || [];
+}
+
+async function listResourceTemplates(baseUrl, id) {
+  return (await mcpRequest(baseUrl, id, 'resources/templates/list', {})).result.resourceTemplates || [];
+}
+
 async function callTool(baseUrl, id, name, args = {}, extraHeaders = {}) {
   return await mcpRequest(baseUrl, id, 'tools/call', { name, arguments: args }, extraHeaders);
 }
@@ -178,6 +189,13 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const baseConfig = fs.readFileSync(configPath, 'utf8');
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
+  const resources = await listResources(baseUrl, 42);
+  const resourceTemplates = await listResourceTemplates(baseUrl, 43);
+  assert.deepEqual(
+    resources.filter(resource => resource.uri.startsWith('repo://')).map(resource => resource.uri),
+    ['repo://gateway/runtime-profile', 'repo://gateway/tool-manifest']
+  );
+  assert.deepEqual(resourceTemplates, []);
   assert.deepEqual(names(tools), [
     'edit_file',
     'get_skill',

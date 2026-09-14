@@ -7,6 +7,36 @@ import { listSkillResources, readSkillResource } from '../skills/index.mjs';
 
 const MAX_RESOURCE_FILE_BYTES = 1024 * 1024;
 
+const GATEWAY_RESOURCES = Object.freeze([
+  {
+    uri: 'repo://gateway/runtime-profile',
+    name: 'Gateway runtime profile',
+    mimeType: 'application/json',
+    description: 'Current gateway runtime profile.'
+  },
+  {
+    uri: 'repo://gateway/tool-manifest',
+    name: 'Gateway tool manifest',
+    mimeType: 'application/json',
+    description: 'Current gateway tool risk and visibility manifest.'
+  }
+]);
+
+const LEGACY_RESOURCE_TEMPLATES = Object.freeze([
+  { uriTemplate: 'repo://project/{projectId}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
+  { uriTemplate: 'repo://project/{projectId}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{projectId}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' }
+]);
+
+const NATIVE_RESOURCE_TEMPLATES = Object.freeze([
+  { uriTemplate: 'repo://project/{projectId}/summary', name: 'Project summary', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{projectId}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{projectId}/git/status', name: 'Git status', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{projectId}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' },
+  { uriTemplate: 'repo://project/{projectId}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
+  { uriTemplate: 'skill://skills/{skillName}/SKILL.md', name: 'Skill definition', mimeType: 'text/markdown' }
+]);
+
 function looksBinary(buffer) {
   const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
   return sample.includes(0);
@@ -36,18 +66,28 @@ function hasPackageJson(project) {
   return fs.existsSync(path.join(project.repoRoot, 'package.json'));
 }
 
-export function listRepoResources(context = {}) {
+function surfaceMode(surfaceConfig) {
+  return surfaceConfig?.mode || 'legacy';
+}
+
+function currentSkillResources(context) {
+  return typeof context.listSkillResources === 'function' ? context.listSkillResources() : listSkillResources();
+}
+
+export function listRepoResources(context = {}, surfaceConfig = context.surfaceConfig) {
+  const mode = surfaceMode(surfaceConfig);
+  if (mode === 'agent' || mode === 'native') return GATEWAY_RESOURCES.map(resource => ({ ...resource }));
+
   const projects = [...(context.projectRegistry?.projects?.values() || [])];
   const resources = [
-    ...listSkillResources(),
+    ...GATEWAY_RESOURCES.map(resource => ({ ...resource })),
+    ...currentSkillResources(context),
     { uri: 'repo://projects', name: 'Projects', mimeType: 'application/json', description: 'Configured MCP gateway projects.' }
   ];
   for (const p of projects) {
     const base = `repo://project/${encodeURIComponent(p.projectId)}`;
     resources.push(
       { uri: `${base}/summary`, name: `${p.displayName} summary`, mimeType: 'application/json' },
-      { uri: `${base}/runtime-profile`, name: `${p.displayName} runtime profile`, mimeType: 'application/json' },
-      { uri: `${base}/tool-manifest`, name: `${p.displayName} tool manifest`, mimeType: 'application/json' },
       { uri: `${base}/tree`, name: `${p.displayName} directory tree`, mimeType: 'application/json' },
       { uri: `${base}/git/status`, name: `${p.displayName} git status`, mimeType: 'application/json' }
     );
@@ -57,12 +97,11 @@ export function listRepoResources(context = {}) {
   return resources;
 }
 
-export function listRepoResourceTemplates(_context = {}) {
-  return [
-    { uriTemplate: 'repo://project/{projectId}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
-    { uriTemplate: 'repo://project/{projectId}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
-    { uriTemplate: 'repo://project/{projectId}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' }
-  ];
+export function listRepoResourceTemplates(context = {}, surfaceConfig = context.surfaceConfig) {
+  const mode = surfaceMode(surfaceConfig);
+  if (mode === 'agent') return [];
+  if (mode === 'native') return NATIVE_RESOURCE_TEMPLATES.map(template => ({ ...template }));
+  return LEGACY_RESOURCE_TEMPLATES.map(template => ({ ...template }));
 }
 
 function safeRelativePath(project, encodedPath) {
@@ -74,10 +113,22 @@ function safeRelativePath(project, encodedPath) {
   return resolved;
 }
 
+async function readRuntimeProfile(uri, context) {
+  return jsonContent(uri, buildRuntimeProfileStatus(context.env || process.env));
+}
+
+async function readToolManifest(uri, context) {
+  const runtimeProfile = getRuntimeProfile(context.env || process.env);
+  const tools = (context.listTools ? await context.listTools() : []).map(applyToolRisk);
+  return jsonContent(uri, { profile: runtimeProfile.name, tools: buildToolRiskManifest(tools, runtimeProfile) });
+}
+
 export async function readRepoResource(uri, context = {}) {
   const parsed = new URL(uri);
   if (parsed.protocol === 'skill:') return readSkillResource(uri);
   if (parsed.protocol !== 'repo:') throw new Error(`Unsupported resource URI: ${uri}`);
+  if (uri === 'repo://gateway/runtime-profile') return await readRuntimeProfile(uri, context);
+  if (uri === 'repo://gateway/tool-manifest') return await readToolManifest(uri, context);
   if (uri === 'repo://projects') {
     const result = listProjects(context, { limit: 200 });
     return jsonContent(uri, { projects: result.items, pathExposure: result.pathExposure, nextCursor: result.nextCursor });
@@ -89,12 +140,8 @@ export async function readRepoResource(uri, context = {}) {
   const rest = match[2].replace(/[?#].*$/, '');
 
   if (rest === 'summary') return jsonContent(uri, await inspectProject(context, { projectId: project.projectId, view: 'summary' }));
-  if (rest === 'runtime-profile' || rest === 'safety-profile') return jsonContent(uri, buildRuntimeProfileStatus(context.env || process.env));
-  if (rest === 'tool-manifest') {
-    const runtimeProfile = getRuntimeProfile(context.env || process.env);
-    const tools = (context.listTools ? await context.listTools() : []).map(applyToolRisk);
-    return jsonContent(uri, { profile: runtimeProfile.name, tools: buildToolRiskManifest(tools, runtimeProfile) });
-  }
+  if (rest === 'runtime-profile' || rest === 'safety-profile') return await readRuntimeProfile(uri, context);
+  if (rest === 'tool-manifest') return await readToolManifest(uri, context);
   if (rest === 'readme') {
     const result = await inspectProject(context, { projectId: project.projectId, view: 'readme' });
     return textContent(uri, result.text, 'text/markdown');

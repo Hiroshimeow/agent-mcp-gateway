@@ -25,6 +25,7 @@ import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
+import { loadSurfaceConfig } from './surface-config.mjs';
 import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
@@ -119,6 +120,10 @@ const workspaceRegistry = createWorkspaceRegistry({
 
 function workspaceSnapshot() {
   return workspaceRegistry.snapshot();
+}
+
+function currentSurfaceConfig(snapshot = workspaceSnapshot()) {
+  return loadSurfaceConfig(snapshot.rawConfig, process.env);
 }
 
 const processSessions = createProcessSessionManager({ env: process.env });
@@ -217,7 +222,11 @@ async function broadcastCatalogChanges(changes = {}) {
 }
 
 const stopSkillCatalogWatcher = watchSkillCatalog(async () => {
-  await broadcastCatalogChanges({ resourcesChanged: true, promptsChanged: true });
+  const surfaceConfig = currentSurfaceConfig();
+  await broadcastCatalogChanges({
+    resourcesChanged: surfaceConfig.enumerateSkillResources,
+    promptsChanged: surfaceConfig.exposePrompts
+  });
 });
 
 function localToolNamesForCollisionCheck() {
@@ -791,6 +800,7 @@ function currentResourceContext() {
     resolvedRepoRoots: snapshot.roots,
     resolvedRepoRoot: snapshot.roots[0],
     projectRegistry: snapshot.projectRegistry,
+    surfaceConfig: currentSurfaceConfig(snapshot),
     packageRoot,
     env: process.env,
     listTools: listMergedTools

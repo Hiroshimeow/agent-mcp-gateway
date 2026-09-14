@@ -505,7 +505,15 @@ export function createSkillRegistry({ directory = DEFAULT_SKILLS_DIRECTORY, buil
       return skill;
     },
     readSkillResource(uri) {
-      const skill = [...refresh().skills.values()].find(item => item.uri === uri);
+      const current = refresh();
+      let skill = [...current.skills.values()].find(item => item.uri === uri);
+      if (!skill) {
+        const match = String(uri).match(/^skill:\/\/skills\/([^/?#]+)\/SKILL\.md$/);
+        if (match) {
+          const key = resolveSkillAlias(current.aliases, decodeURIComponent(match[1]));
+          skill = key ? current.skills.get(key) : null;
+        }
+      }
       if (!skill) throw new Error(`Unknown skill resource URI: ${uri}`);
       return { contents: [{ uri, mimeType: 'text/markdown', text: skill.body }] };
     },

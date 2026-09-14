@@ -42,6 +42,20 @@ test('repo prompts include skills and return MCP-shaped skill prompt messages', 
   assert.match(prompt.messages[0].content.text, /do not load it again/i);
 });
 
+test('canonical native skill template resolves a skill by name even when its stored URI differs', () => {
+  const builtins = new Map([['custom', {
+    name: 'custom',
+    title: 'Custom',
+    description: 'Custom fixture skill.',
+    uri: 'skill://vendor/custom/SKILL.md',
+    body: '# Custom fixture\n'
+  }]]);
+  const customRegistry = createSkillRegistry({ directory: null, builtins });
+  const result = customRegistry.readSkillResource('skill://skills/custom/SKILL.md');
+  assert.equal(result.contents[0].uri, 'skill://skills/custom/SKILL.md');
+  assert.match(result.contents[0].text, /Custom fixture/);
+});
+
 test('skill resources are listed and readable through repo resources', async () => {
   assert.ok(listSkillResources().some(resource => resource.uri === ponytailUri));
   assert.ok(listSkillResources().some(resource => resource.uri === superpowersUri));
