@@ -8,6 +8,7 @@ import path from 'node:path';
 const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
 const observedProfiles = {};
+const observedCatalogBytes = {};
 const observedResponseBudgets = {};
 
 async function findFreePort() {
@@ -139,8 +140,10 @@ async function initialize(baseUrl) {
   });
   assert.equal(response.result.serverInfo.title, 'Local Coding Gateway');
   assert.match(response.result.serverInfo.description || '', /Local coding workspace/i);
-  assert.match(response.result.instructions || '', /routing policy/i);
-  assert.match(response.result.instructions || '', /do not probe shell_execute first/i);
+  assert.match(response.result.instructions || '', /get_skill\(name\)/i);
+  assert.match(response.result.instructions || '', /project_list.*project_inspect/i);
+  assert.match(response.result.instructions || '', /read_text_file/i);
+  assert.doesNotMatch(response.result.instructions || '', /Routing policy:/i);
   return response;
 }
 
@@ -220,11 +223,10 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const deviceListPayload = JSON.parse(deviceList.result.content[0].text);
   assert.deepEqual(deviceListPayload.devices, []);
 
-  for (const projectToolName of ['project_list', 'project_inspect']) {
-    const projectTool = tools.find(tool => tool.name === projectToolName);
-    assert.equal(projectTool?._meta?.trusted_roots, undefined);
-    assert.equal(projectTool?._meta?.root_repo, undefined);
-    assert.equal(projectTool?._meta?.repo_root, undefined);
+  for (const tool of tools.filter(item => !item?._meta?.upstream)) {
+    assert.equal(tool?._meta?.trusted_roots, undefined, `${tool.name} leaked trusted_roots`);
+    assert.equal(tool?._meta?.root_repo, undefined, `${tool.name} leaked root_repo`);
+    assert.equal(tool?._meta?.repo_root, undefined, `${tool.name} leaked repo_root`);
   }
   const projectList = await callTool(baseUrl, 39, 'project_list', { limit: 10 });
   const projectListPayload = JSON.parse(projectList.result.content[0].text);
@@ -513,6 +515,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.ok(metrics.every(metric => metric.callerCategory === 'static-bearer'));
   assert.doesNotMatch(metricsText, /process\.stdout\.write|Tiếng Việt|warning/);
   observedProfiles.yolo = names(tools);
+  observedCatalogBytes.yolo = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
 });
 
 await withServer('safe', async ({ baseUrl }) => {
@@ -522,6 +525,7 @@ await withServer('safe', async ({ baseUrl }) => {
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
   observedProfiles.safe = names(tools);
+  observedCatalogBytes.safe = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
 });
 
 await withServer('assisted', async ({ baseUrl }) => {
@@ -531,11 +535,13 @@ await withServer('assisted', async ({ baseUrl }) => {
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);
+  observedCatalogBytes.assisted = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
 });
 
 console.log(JSON.stringify({
   ok: true,
   checked: 'exact core catalog, progressive skill advisory, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and final serialized shell response budgets',
   observedProfiles,
+  observedCatalogBytes,
   observedResponseBudgets
 }, null, 2));

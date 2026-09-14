@@ -97,10 +97,10 @@ test('get_skill named load returns only the requested skill with optional workfl
   assert.equal(payload.skillCatalog, undefined);
   assert.equal(payload.routingPolicy, undefined);
   assert.equal(payload.availableSkills, undefined);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /load a matching skill with get_skill\(name\).*materially changes the work/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /routine filesystem and shell operations do not require skill loading/i);
-  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /satisfies bootstrap/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /do not probe shell_execute first/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /get_skill\(name\)/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /project_list.*project_inspect/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /read_text_file/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /Routing policy:/i);
 });
 
 function writeSkill(directory, folder, { description = 'Use for dynamic debugging work.', body = '# Dynamic Debugging\n\nInspect before changing.', extra = '' } = {}) {

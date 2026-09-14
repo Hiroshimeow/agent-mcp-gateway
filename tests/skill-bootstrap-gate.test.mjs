@@ -40,10 +40,12 @@ test('local changing tool descriptions describe optional skill disclosure', () =
   assert.equal(decorateSkillBootstrapDescription('external_create_file', 'Create remotely.'), 'Create remotely.');
 });
 
-test('server instructions make skill loading task-relevant rather than a mutation prerequisite', () => {
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /materially change the work/i);
-  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /Before first use of local write_file/i);
-  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /satisfies bootstrap/i);
+test('server instructions stay compact and route project discovery without embedding the full skill policy', () => {
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /get_skill\(name\)/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /project_list.*project_inspect/i);
+  assert.match(SKILL_AGENT_INSTRUCTIONS, /read_text_file/i);
+  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /Routing policy:/i);
+  assert.ok(SKILL_AGENT_INSTRUCTIONS.length < 400);
 });
 
 test('a successful skill load suppresses further read advice for the caller', () => {

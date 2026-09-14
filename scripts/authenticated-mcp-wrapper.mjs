@@ -26,6 +26,7 @@ import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile 
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
 import { loadSurfaceConfig } from './surface-config.mjs';
+import { LOCAL_COLLISION_TOOL_NAMES, stableToolDefinition, workspaceCatalogChanges } from './tool-surface-stability.mjs';
 import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
@@ -89,7 +90,6 @@ const filesystemEntrypointPath = fileURLToPath(
 );
 const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
 const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'interact_with_process', 'terminate_process']);
-const CORE_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file', 'shell_execute', 'image_preview', 'get_skill', 'list_devices', ...PROCESS_TOOL_NAMES]);
 const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
@@ -230,7 +230,7 @@ const stopSkillCatalogWatcher = watchSkillCatalog(async () => {
 });
 
 function localToolNamesForCollisionCheck() {
-  return [...CORE_TOOL_NAMES];
+  return [...LOCAL_COLLISION_TOOL_NAMES];
 }
 
 const externalMcpManager = await createExternalMcpManager({
@@ -247,7 +247,7 @@ workspaceRegistry.subscribe(async (next, previous) => {
   const { rootsChanged, upstreamChanged } = classifyWorkspaceChange(next, previous);
   if (rootsChanged) {
     await activateFilesystemRoots();
-    await broadcastCatalogChanges({ toolsChanged: true, resourcesChanged: true });
+    await broadcastCatalogChanges(workspaceCatalogChanges({ rootsChanged }, currentSurfaceConfig(next)));
   }
   if (upstreamChanged) {
     const nextExternalConfig = normalizeExternalMcpConfig(next.rawConfig, {
@@ -392,22 +392,15 @@ function withOptionalDeviceId(inputSchema = {}) {
 }
 
 function filesystemToolMeta(tool) {
-  const roots = currentRoots();
   const baseSchema = tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema;
-  return applyToolRisk({
+  return stableToolDefinition(applyToolRisk({
     ...tool,
     inputSchema: withOptionalDeviceId(baseSchema),
     name: tool.name,
     description: decorateSkillBootstrapDescription(tool.name, tool.name === 'edit_file'
       ? `${tool.description} Prefer old_text/new_text with expected_replacements for guarded exact edits; legacy edits[]/dryRun remains supported for compatibility.`
-      : tool.description),
-    _meta: {
-      ...(tool._meta || {}),
-      trusted_roots: roots,
-      root_repo: roots[0],
-      repo_root: roots[0]
-    }
-  });
+      : tool.description)
+  }));
 }
 
 async function listMergedTools() {
@@ -423,15 +416,13 @@ async function listMergedTools() {
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   }));
   if (enableShell) {
-    const roots = currentRoots();
-    tools.push(applyToolRisk({
+    tools.push(stableToolDefinition(applyToolRisk({
       name: 'shell_execute',
       description: buildShellExecuteDescription(),
       inputSchema: shellExecuteSchema,
       outputSchema: shellExecuteOutputSchema,
-      _meta: { trusted_roots: roots, root_repo: roots[0], repo_root: roots[0] },
       annotations: buildShellExecuteAnnotations()
-    }));
+    })));
     tools.push(...listProcessTools());
   }
   tools.push(...await externalMcpManager.listAllToolsUnfiltered());

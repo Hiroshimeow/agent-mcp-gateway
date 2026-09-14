@@ -542,11 +542,7 @@ export const SKILL_ROUTING_POLICY = Object.freeze([
   'Design: general UI, including ordinary audits, redesigns, and screenshot studies -> frontend_design; explicit Hallmark or anti-AI-slop requests -> hallmark; vague Google Stitch prompt -> enhance_prompt; existing frontend to DESIGN.md -> stitch_extract_design_md; complex React/Tailwind/shadcn artifact after visual direction is set -> web_artifacts_builder.'
 ]);
 
-export const SKILL_AGENT_INSTRUCTIONS = [
-  'For specialized workflows, load a matching skill with get_skill(name) when it materially changes the work. Routine filesystem and shell operations do not require skill loading.',
-  'Do not probe shell_execute first.',
-  `Routing policy: ${SKILL_ROUTING_POLICY.join(' ')}`
-].join(' ');
+export const SKILL_AGENT_INSTRUCTIONS = 'Use get_skill(name) only when a task clearly matches a reusable skill. Use project_list and project_inspect for project discovery, and read_text_file for file bodies.';
 
 export function listSkills() {
   return registry.listSkills();
