@@ -48,6 +48,7 @@ import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { prepareGuardedEdit } from './guarded-edit.mjs';
 import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
+import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
 import { listDevicesToolDefinition, paginateDeviceInventory } from './device-inventory.mjs';
 import { installDevicePairingRoutes } from './device-pairing-http.mjs';
@@ -751,7 +752,7 @@ async function routeToolCall(request, context = {}) {
         arguments: toolArguments
       });
       const rendered = result && Array.isArray(result.content)
-        ? result
+        ? normalizeRemoteFilesystemResult(result)
         : structuredToolText(result, { includeStructured: true });
       return appendSkillAdvisory(
         rendered,
