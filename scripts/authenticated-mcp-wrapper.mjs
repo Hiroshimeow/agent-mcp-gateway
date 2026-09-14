@@ -28,6 +28,7 @@ import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
 import { loadSurfaceConfig } from './surface-config.mjs';
 import { LOCAL_COLLISION_TOOL_NAMES, stableToolDefinition, workspaceCatalogChanges } from './tool-surface-stability.mjs';
 import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
+import { createExternalToolBroker } from './external-tool-broker.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
 import { isExternalResourceUri } from './upstreams/resource-uri.mjs';
@@ -242,6 +243,10 @@ const externalMcpManager = await createExternalMcpManager({
     await broadcastCatalogChanges(changes);
   }
 });
+const externalToolBroker = createExternalToolBroker({
+  getTools: () => externalMcpManager.getCachedTools(),
+  invokeTool: (name, args) => externalMcpManager.callTool(name, args)
+});
 
 workspaceRegistry.subscribe(async (next, previous) => {
   const { rootsChanged, upstreamChanged } = classifyWorkspaceChange(next, previous);
@@ -355,6 +360,8 @@ function customToolContext() {
     resolvedRepoRoot: snapshot.roots[0],
     projectRegistry: snapshot.projectRegistry,
     executeDirectShell,
+    externalToolBroker,
+    runtimeProfile,
     packageRoot,
     env: process.env
   };
@@ -745,8 +752,11 @@ async function routeToolCall(request, context = {}) {
     return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
-  if (externalMcpManager.isExternalToolName(toolName)) {
+  if (externalMcpManager.isEagerToolName(toolName)) {
     return await externalMcpManager.callTool(toolName, request.params.arguments || {}, runtimeProfile);
+  }
+  if (externalMcpManager.isExternalToolName(toolName)) {
+    throw new Error(`External MCP tool ${toolName} is deferred; use external_tool_search and the appropriate external_tool_call_* lane.`);
   }
 
   throw new Error(`Unknown or disabled tool: ${toolName}`);

@@ -201,6 +201,9 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.deepEqual(resourceTemplates, []);
   assert.deepEqual(names(tools), [
     'edit_file',
+    'external_tool_call_read',
+    'external_tool_call_write',
+    'external_tool_search',
     'get_skill',
     'image_preview',
     'interact_with_process',
@@ -239,6 +242,11 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const projectTree = await callTool(baseUrl, 41, 'project_inspect', { projectId: smokeProjectId, view: 'tree', depth: 2, limit: 20 });
   const projectTreePayload = JSON.parse(projectTree.result.content[0].text);
   assert.equal(Array.isArray(projectTreePayload.data.entries), true);
+
+  const externalSearch = await callTool(baseUrl, 44, 'external_tool_search', { query: 'missing', limit: 10 });
+  const externalSearchPayload = JSON.parse(externalSearch.result.content[0].text);
+  assert.equal(externalSearchPayload.ok, true);
+  assert.deepEqual(externalSearchPayload.data, { items: [], nextCursor: null });
 
   const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
   assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
@@ -521,7 +529,7 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file']);
+  assert.deepEqual(names(tools), ['external_tool_call_read', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
   observedProfiles.safe = names(tools);
@@ -531,7 +539,7 @@ await withServer('safe', async ({ baseUrl }) => {
 await withServer('assisted', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['edit_file', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file', 'write_file']);
+  assert.deepEqual(names(tools), ['edit_file', 'external_tool_call_read', 'external_tool_call_write', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file', 'write_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);

@@ -461,6 +461,11 @@ export async function createExternalMcpManager({
       const snapshot = await snapshotForCatalogList();
       return [...(snapshot.exposure?.eagerTools ?? snapshot.tools)];
     },
+    getCachedTools() { return [...currentSnapshot().tools]; },
+    isEagerToolName(name) {
+      const snapshot = currentSnapshot();
+      return (snapshot.exposure?.eagerTools ?? snapshot.tools).some(tool => tool.name === name);
+    },
     hasTool(name) { return currentSnapshot().toolRoutes.has(name); },
     isExternalToolName(name) { return currentSnapshot().toolRoutes.has(name) || knownExternalToolNames.has(name); },
     isExternalPromptName(name) { return currentSnapshot().promptRoutes.has(name) || knownExternalPromptNames.has(name); },

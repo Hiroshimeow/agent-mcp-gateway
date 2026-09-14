@@ -30,6 +30,16 @@ const RISK_MAP = new Map(Object.entries({
   get_skill: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   project_list: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   project_inspect: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  external_tool_search: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  external_tool_call_read: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
+  external_tool_call_write: {
+    readOnlyHint: false,
+    idempotentHint: false,
+    destructiveHint: true,
+    openWorldHint: false,
+    riskLevel: 'low',
+    category: TOOL_CATEGORIES.platform
+  },
   list_devices: { ...READ_ONLY, category: TOOL_CATEGORIES.platform },
   shell_execute: {
     readOnlyHint: false,

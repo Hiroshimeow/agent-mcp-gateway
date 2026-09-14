@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createExternalMcpManager, buildExternalCatalog, closeClientWithTimeout } from '../scripts/upstreams/manager.mjs';
 import { loadExternalMcpConfig } from '../scripts/upstreams/config.mjs';
+import { createExternalToolBroker } from '../scripts/external-tool-broker.mjs';
+import { RUNTIME_PROFILES } from '../scripts/runtime-profile.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dynamicServer = path.join(root, 'tests/fixtures/dynamic-mcp-server.mjs');
@@ -139,6 +141,29 @@ test('hybrid defers unannotated external tools while retaining full cached route
     assert.equal(diagnostics.catalog.eager.count, 0);
     assert.equal(diagnostics.catalog.deferred.count, 1);
     assert.equal('tools' in diagnostics.catalog, false);
+  } finally {
+    await manager.shutdown();
+  }
+});
+
+test('deferred dynamic tool is absent from eager list but searchable and callable through broker', async () => {
+  const { manager } = await makeDynamicManager({ exposureMode: 'hybrid' });
+  try {
+    const broker = createExternalToolBroker({
+      getTools: () => manager.getCachedTools(),
+      invokeTool: (name, args) => manager.callTool(name, args)
+    });
+
+    assert.deepEqual(await toolNames(manager), []);
+    assert.equal(manager.isEagerToolName('dyn_a'), false);
+    assert.equal(manager.hasTool('dyn_a'), true);
+
+    const search = broker.search({ query: 'dyn_a' }, RUNTIME_PROFILES.yolo);
+    assert.deepEqual(search.items.map(item => item.name), ['dyn_a']);
+    assert.equal(search.items[0].lane, 'write');
+
+    const call = await broker.call('write', { name: 'dyn_a', arguments: {} }, RUNTIME_PROFILES.yolo);
+    assert.match(call.content[0].text, /dynamic:a/);
   } finally {
     await manager.shutdown();
   }

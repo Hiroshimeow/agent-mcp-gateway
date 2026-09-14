@@ -22,6 +22,11 @@ function structuredOutputSchema() {
   };
 }
 
+function requireExternalToolBroker(context = {}) {
+  if (!context.externalToolBroker) throw new Error('External tool broker is unavailable.');
+  return context.externalToolBroker;
+}
+
 const TOOL_DEFINITIONS = [
   {
     name: 'get_skill',
@@ -77,6 +82,44 @@ const TOOL_DEFINITIONS = [
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: async (args, context) => ok('project_inspect', `Inspected project ${args.projectId}`, await inspectProject(context, args))
+  },
+  {
+    name: 'external_tool_search',
+    description: 'Search the bounded external MCP catalog without exposing full deferred schemas. Results are filtered by runtime profile.',
+    inputSchema: schema({
+      query: { type: 'string', description: 'Optional name/description search text.' },
+      server: { type: 'string', description: 'Optional external MCP server id.' },
+      lane: { type: 'string', enum: ['read', 'write'], description: 'Optional risk lane filter.' },
+      cursor: { type: 'string', description: 'Opaque cursor returned by the previous search page.' },
+      limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
+    }),
+    outputSchema: structuredOutputSchema(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: (args, context) => ok(
+      'external_tool_search',
+      'Searched external MCP tools',
+      requireExternalToolBroker(context).search(args, context.runtimeProfile)
+    )
+  },
+  {
+    name: 'external_tool_call_read',
+    description: 'Invoke one discovered external MCP tool only when its cached annotations place it in the read lane. Arguments are validated against the cached full input schema before forwarding.',
+    inputSchema: schema({
+      name: { type: 'string', minLength: 1 },
+      arguments: { type: 'object', default: {} }
+    }, ['name']),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: (args, context) => requireExternalToolBroker(context).call('read', args, context.runtimeProfile)
+  },
+  {
+    name: 'external_tool_call_write',
+    description: 'Invoke one discovered external MCP tool only when its cached annotations place it in the write lane. Arguments are validated against the cached full input schema before forwarding.',
+    inputSchema: schema({
+      name: { type: 'string', minLength: 1 },
+      arguments: { type: 'object', default: {} }
+    }, ['name']),
+    annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false },
+    handler: (args, context) => requireExternalToolBroker(context).call('write', args, context.runtimeProfile)
   }
 ];
 
