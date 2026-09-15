@@ -98,16 +98,18 @@ Evidence: exact baseline YOLO 15,793 bytes (`shell_execute` 1,928; `edit_file` 1
 Evidence: same `gateway.sqlite` stores bounded per-call, skill-load, catalog/schema, activity-session, and device-status metadata; debug JSONL/NDJSON exports are off by default. OAuth activity IDs persist across refresh and end-session blocks access/refresh. Dashboard integration proves user-only access, Alice/Bob isolation, CSRF, POST-only mutation, own-device rename/revoke, immediate routing cutoff, and own-session termination. Device agent version survives gateway restart/reconnect. Secret payload sentinel is absent from SQLite. Full gateway suite 294/294 plus all three MCP smokes PASS; YOLO remains 16 tools / 15,297 bytes; token/context values are explicitly estimated with `utf8_bytes_div_4_estimate`. Live v2 remains intentionally unchanged until Phase 8.
 
 ## Phase 8 — Live migration
-- [ ] Old Linux v1 endpoint remains untouched.
-- [ ] ThinkBook v2 remains the development host until later g8 migration.
+- [x] Old Linux v1 endpoint remains untouched.
+- [x] ThinkBook v2 remains the development host until later g8 migration.
 - [ ] Local admin is created only on host.
-- [ ] Invite can be generated without exposing server secrets.
-- [ ] User email/password are never invented by automation.
-- [ ] Signup/login exists before legacy shared-password OAuth is disabled.
+- [x] Invite can be generated without exposing server secrets.
+- [x] User email/password are never invented by automation.
+- [x] Signup/login exists before legacy shared-password OAuth is disabled.
 - [ ] ThinkBook is eventually paired under a normal account.
 - [ ] Old pre-account device record is revoked/cleaned.
 - [ ] Access token expiry refreshes silently while refresh token remains valid.
-- [ ] hport/cloudflared health and device WSS health are audited separately.
+- [x] hport/cloudflared health and device WSS health are audited separately.
+
+Checkpoint evidence: gateway HEAD `2d75f3b` passes 295/295 tests plus three MCP smokes. Legacy runtime state was backed up before migration; 2 devices, 2 usage rows, and 4 OAuth clients were imported into `gateway.sqlite`, while old tokens/pairings were deliberately excluded. New account-aware runtime is staged on local canary 8103 beside unchanged public 8102. Canary login/signup/OAuth metadata/dashboard-auth/static-bearer initialize all respond correctly and records schema 16 tools / 15,297 bytes / estimated 3,825 tokens. One unused invite exists only in runtime state. Public v2 tunnel and device WSS were verified independently; v1 stayed healthy. Remaining items require a user-chosen normal-account credential flow and device pairing before public cutover.
 
 ## Phase 9 — Final audit
 - [ ] Gateway full tests green.

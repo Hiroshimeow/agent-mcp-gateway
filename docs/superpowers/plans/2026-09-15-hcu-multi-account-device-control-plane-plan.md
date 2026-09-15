@@ -175,17 +175,19 @@
 
 ## Phase 8 — Live migration without breaking the current v1/v2 split
 
-- [ ] Keep old `mcp.hcu...` Linux v1 endpoint untouched.
-- [ ] Keep `mcp-v2...` on ThinkBook during development.
+- [x] Keep old `mcp.hcu...` Linux v1 endpoint untouched.
+- [x] Keep `mcp-v2...` on ThinkBook during development.
 - [ ] Create local admin via CLI on the v2 host.
-- [ ] Generate at least one invite for normal-account signup, but do not invent the user’s email/password.
-- [ ] Deploy signup/login/dashboard alongside existing live gateway before disabling the legacy shared-password path.
+- [x] Generate at least one invite for normal-account signup, but do not invent the user’s email/password.
+- [x] Deploy signup/login/dashboard alongside existing live gateway before disabling the legacy shared-password path.
 - [ ] Cut over OAuth/device pairing only after a normal account has been created interactively.
 - [ ] Re-pair/re-enroll ThinkBook under the normal account; then revoke stale pre-account device identity/metadata.
 - [ ] Confirm access-token expiry triggers refresh, not interactive login, while valid refresh token remains.
-- [ ] Confirm hport/cloudflared process health separately from device WSS reconnect health.
+- [x] Confirm hport/cloudflared process health separately from device WSS reconnect health.
 
-**Gate:** v2 works through OAuth normal account, account-scoped device call succeeds, unauthorized/cross-account call fails, v1 remains unchanged.
+**Current checkpoint:** pre-cutover state is deliberately split. Existing public v2 remains on port 8102 with the legacy unowned-device runtime, while the new account-aware build runs side-by-side on local canary 8103. `gateway.sqlite` was backed up, then populated from the legacy runtime with 2 device rows, 2 device-usage rows, and 4 OAuth clients; legacy access/refresh tokens and pending pairing grants were intentionally not migrated. Canary verifies login/signup, dashboard auth redirect, OAuth protected-resource metadata with `mcp:tools` + `offline_access`, static-bearer MCP initialization, and the new 16-tool / 15,297-byte schema. One single-use invite exists in SQLite; its plaintext code is intentionally not committed. The old v1 listener remains healthy, the public v2 tunnel remains healthy, and device WSS remains independently online. Public cutover is blocked on the required human step: create a real normal account (and optional local admin) using user-chosen credentials, then pair the device to that account. No user email/password was invented.
+
+**Gate:** not yet closed. After the human credential/pairing step, v2 must work through OAuth normal account, account-scoped device call must succeed, unauthorized/cross-account call must fail, refresh must remain silent while valid, and v1 must remain unchanged.
 
 ---
 
