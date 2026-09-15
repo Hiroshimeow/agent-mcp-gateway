@@ -24,7 +24,8 @@
     "admin:account:delete": "node scripts/admin.mjs account delete",
     "admin:invite:create": "node scripts/admin.mjs invite create",
     "admin:invite:list": "node scripts/admin.mjs invite list",
-    "admin:invite:revoke": "node scripts/admin.mjs invite revoke"
+    "admin:invite:revoke": "node scripts/admin.mjs invite revoke",
+    "admin:migrate-runtime": "node scripts/migrate-runtime-state.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

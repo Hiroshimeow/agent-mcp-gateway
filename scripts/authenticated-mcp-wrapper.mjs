@@ -136,10 +136,9 @@ const processSessions = createProcessSessionManager({ env: process.env });
 const remoteProcessSessions = createRemoteProcessSessionRegistry();
 const gatewayDbPath = path.resolve(process.env.MCP_GATEWAY_DB_PATH || path.join(runtimeDirectory, 'gateway.sqlite'));
 const accountStore = createAccountStore({ dbPath: gatewayDbPath });
-const deviceDbPath = path.join(runtimeDirectory, 'devices.sqlite');
-const deviceStore = createDeviceStore({ dbPath: deviceDbPath });
-const devicePairingStore = createDevicePairingStore({ dbPath: deviceDbPath });
-const deviceUsageStore = createDeviceUsageStore({ dbPath: deviceDbPath });
+const deviceStore = createDeviceStore({ dbPath: gatewayDbPath });
+const devicePairingStore = createDevicePairingStore({ dbPath: gatewayDbPath });
+const deviceUsageStore = createDeviceUsageStore({ dbPath: gatewayDbPath });
 const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
   deviceStore,

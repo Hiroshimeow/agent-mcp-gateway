@@ -5,7 +5,7 @@ import { createDeviceStore } from './device-store.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(packageRoot, '.runtime'));
-const dbPath = path.resolve(process.env.MCP_DEVICE_DB_PATH || path.join(runtimeDirectory, 'devices.sqlite'));
+const dbPath = path.resolve(process.env.MCP_GATEWAY_DB_PATH || path.join(runtimeDirectory, 'gateway.sqlite'));
 const [command, deviceId, firstKeyPath, secondKeyPath] = process.argv.slice(2);
 
 if (

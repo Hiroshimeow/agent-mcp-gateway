@@ -90,7 +90,7 @@
 
 **Gateway additions:** account/invite/session persistence, admin CLI, login/signup routes, auth-provider refactor, pairing ownership.
 
-- [ ] Use one authoritative SQLite runtime DB (`gateway.sqlite`) for account/device/pairing/usage/auth metadata going forward.
+- [x] Use one authoritative SQLite runtime DB (`gateway.sqlite`) for account/device/pairing/usage/auth metadata going forward.
 - [x] Accounts: UUID `account_id`, normalized email, scrypt password hash+salt, role, revoked/deleted timestamps.
 - [x] Invites: hash only, 8-char uppercase unambiguous code, created/used/revoked timestamps, single-use.
 - [x] Config flag `need_invite` defaults to gated production behavior; when false signup does not require an invite.

@@ -28,7 +28,7 @@ test('device admin supports operator pre-enroll, key rotation, then revoke', () 
   assert.equal(rotate.ok, true);
   assert.equal(rotate.deviceId, 'device');
   assert.equal(rotate.enrolledAt, enroll.enrolledAt);
-  const store = createDeviceStore({ dbPath: path.join(runtime, 'devices.sqlite') });
+  const store = createDeviceStore({ dbPath: path.join(runtime, 'gateway.sqlite') });
   assert.equal(store.get('device').publicKeyPem, second.publicKey.export({ type: 'spki', format: 'pem' }).toString());
   store.close();
   const revoke = JSON.parse(execFileSync(process.execPath, [adminScript, 'revoke', 'device'], { cwd: repoRoot, env, encoding: 'utf8' }));
