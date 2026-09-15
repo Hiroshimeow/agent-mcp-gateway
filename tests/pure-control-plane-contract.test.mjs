@@ -6,6 +6,7 @@ const wrapper = fs.readFileSync(new URL('../scripts/authenticated-mcp-wrapper.mj
 const customTools = fs.readFileSync(new URL('../scripts/custom-tools/index.mjs', import.meta.url), 'utf8');
 const projectInspection = fs.readFileSync(new URL('../scripts/project-inspection.mjs', import.meta.url), 'utf8');
 const repoResources = fs.readFileSync(new URL('../scripts/resources/index.mjs', import.meta.url), 'utf8');
+const workspaceRegistry = fs.readFileSync(new URL('../scripts/workspace-registry.mjs', import.meta.url), 'utf8');
 
 test('gateway execution surface requires explicit device routing and has no local execution fallback', () => {
   assert.match(wrapper, /required:\s*\['command',\s*'working_directory',\s*'device_id'\]/);
@@ -55,4 +56,18 @@ test('project inspection keeps filesystem and git execution on the selected devi
 test('project resources do not read project files from the gateway host', () => {
   assert.doesNotMatch(repoResources, /from 'node:fs'|fs\.promises\.|fs\.existsSync/);
   assert.match(repoResources, /readProjectResourceFile/);
+});
+
+test('workspace registry has no runtime trusted-root auto-grant overlay', () => {
+  assert.doesNotMatch(wrapper, /runtimeRootsPath/);
+  for (const deadOverlayPrimitive of [
+    'runtimeRootsPath',
+    'ensureTrustedPath',
+    'persistTrustedRoot',
+    'insertTrustedRootText',
+    'acquireLock',
+    'atomicReplace'
+  ]) {
+    assert.doesNotMatch(workspaceRegistry, new RegExp(deadOverlayPrimitive));
+  }
 });

@@ -104,7 +104,6 @@ const configPath = findUnifiedMcpConfigPath(process.env, packageRoot);
 if (!configPath) throw new Error('config/mcp-servers.toml is required');
 const workspaceRegistry = createWorkspaceRegistry({
   configPath,
-  runtimeRootsPath: path.join(runtimeDirectory, 'trusted-roots.toml'),
   repoRoot: packageRoot,
   env: process.env
 });
