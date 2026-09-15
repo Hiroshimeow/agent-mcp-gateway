@@ -52,7 +52,13 @@ test('project tools route through bounded project inspection service', async () 
   const context = {
     projectRegistry,
     env: { MCP_RUNTIME_PROFILE: 'safe' },
-    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }]
+    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
+    callDeviceTool: async (tool, args) => {
+      assert.equal(tool, 'project_inspect');
+      assert.equal(args.device_id, 'device-a');
+      assert.equal(args.path, root);
+      return { defaultRootName: path.basename(root), hasReadme: true, hasPackageJson: false };
+    }
   };
 
   const listResult = parseToolResult(await callCustomTool('project_list', { device_id: 'device-a', limit: 10 }, context));

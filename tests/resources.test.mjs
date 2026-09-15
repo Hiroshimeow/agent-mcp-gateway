@@ -20,6 +20,22 @@ async function fixture() {
       projectRegistry: registry,
       env: { MCP_SAFETY_PROFILE: 'safe' },
       listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
+      callDeviceTool: async (tool, args) => {
+        assert.equal(tool, 'project_inspect');
+        if (args.view === 'summary') return { defaultRootName: path.basename(root), hasReadme: true, hasPackageJson: true };
+        if (args.view === 'readme') return { fileName: 'README.md', text: await fs.readFile(path.join(root, 'README.md'), 'utf8') };
+        if (args.view === 'package') return { data: JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')) };
+        if (args.view === 'tree') return { rootName: path.basename(root), maxDepth: args.depth, maxEntries: args.limit, entries: [], truncated: false, nextCursor: null };
+        if (args.view === 'file') {
+          const filePath = path.join(root, args.relative_path);
+          const stat = await fs.stat(filePath);
+          if (stat.size > 32 * 1024) throw new Error(`Resource file is too large for text preview: ${stat.size} bytes.`);
+          const buffer = await fs.readFile(filePath);
+          if (buffer.subarray(0, Math.min(buffer.length, 4096)).includes(0)) throw new Error('Resource file appears to be binary; text resources only support textual files.');
+          return { text: buffer.toString('utf8') };
+        }
+        throw new Error(`Unexpected project inspection view: ${args.view}`);
+      },
       listTools: async () => [{ name: 'read_text_file' }, { name: 'shell_execute' }]
     }
   };

@@ -33,6 +33,15 @@ function visibleDevices(...devices) {
   return { listVisibleDevices: () => devices };
 }
 
+function remoteInspector() {
+  return {
+    callDeviceTool: async (tool, args) => {
+      assert.equal(tool, 'project_inspect');
+      return { defaultRootName: path.basename(args.path), hasReadme: true, hasPackageJson: false };
+    }
+  };
+}
+
 test('configured project entries preserve explicit device_id and same project_id may exist on different devices', () => {
   const line = trustedRootEntryToLine({
     path: '/srv/project',
@@ -82,7 +91,8 @@ test('project_inspect requires the exact visible online device/project pair and 
       ...visibleDevices(
         { deviceId: 'linux-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' },
         { deviceId: 'linux-b', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }
-      )
+      ),
+      ...remoteInspector()
     };
 
     await assert.rejects(
@@ -122,7 +132,8 @@ test('project resources use device-scoped URIs and do not retain project-only ro
       ...visibleDevices(
         { deviceId: 'linux-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' },
         { deviceId: 'linux-b', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }
-      )
+      ),
+      ...remoteInspector()
     };
     const templates = listRepoResourceTemplates(context);
     assert.equal(templates.filter(item => item.uriTemplate.startsWith('repo://')).every(item => item.uriTemplate.includes('{device_id}')), true);

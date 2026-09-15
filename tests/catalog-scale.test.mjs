@@ -165,6 +165,10 @@ test('project deep links and old diagnostic aliases remain readable in every sur
       exposeProjectPaths: false
     },
     listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, pathStyle: 'posix' }],
+    callDeviceTool: async (tool, args) => {
+      assert.equal(tool, 'project_inspect');
+      return { defaultRootName: path.basename(args.path), hasReadme: true, hasPackageJson: false };
+    },
     env: { MCP_RUNTIME_PROFILE: 'safe' },
     listTools: async () => []
   };

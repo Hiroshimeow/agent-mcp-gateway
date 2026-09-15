@@ -4,6 +4,8 @@ import fs from 'node:fs';
 
 const wrapper = fs.readFileSync(new URL('../scripts/authenticated-mcp-wrapper.mjs', import.meta.url), 'utf8');
 const customTools = fs.readFileSync(new URL('../scripts/custom-tools/index.mjs', import.meta.url), 'utf8');
+const projectInspection = fs.readFileSync(new URL('../scripts/project-inspection.mjs', import.meta.url), 'utf8');
+const repoResources = fs.readFileSync(new URL('../scripts/resources/index.mjs', import.meta.url), 'utf8');
 
 test('gateway execution surface requires explicit device routing and has no local execution fallback', () => {
   assert.match(wrapper, /required:\s*\['command',\s*'working_directory',\s*'device_id'\]/);
@@ -43,4 +45,14 @@ test('dead gateway-host execution modules are removed from the runtime tree', ()
 test('image_preview is device-routed at the public contract', () => {
   assert.match(customTools, /name:\s*'image_preview'[\s\S]*device_id:[\s\S]*\},\s*\['device_id'\]\)/);
   assert.doesNotMatch(customTools, /handler:\s*imagePreviewTool/);
+});
+
+test('project inspection keeps filesystem and git execution on the selected device', () => {
+  assert.doesNotMatch(projectInspection, /node:fs|node:child_process|execFile\(|readdirSync|readFile\(/);
+  assert.match(projectInspection, /context\.callDeviceTool\('project_inspect'/);
+});
+
+test('project resources do not read project files from the gateway host', () => {
+  assert.doesNotMatch(repoResources, /from 'node:fs'|fs\.promises\.|fs\.existsSync/);
+  assert.match(repoResources, /readProjectResourceFile/);
 });

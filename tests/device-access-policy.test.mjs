@@ -111,6 +111,18 @@ test('remote image preview obeys the same safe-profile path root as filesystem t
   }), error => error.code === 'DEVICE_PATH_DENIED');
 });
 
+test('remote project inspection obeys the same safe-profile project root', () => {
+  const access = policy({ tools: ['project_inspect'], roots: ['E:\\work\\project'] });
+  assert.doesNotThrow(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'project_inspect',
+    arguments: { path: 'E:\\work\\project', project_id: 'fixture', view: 'summary' }
+  }));
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'project_inspect',
+    arguments: { path: 'E:\\work\\other', project_id: 'fixture', view: 'summary' }
+  }), error => error.code === 'DEVICE_PATH_DENIED');
+});
+
 test('remote shell requires an explicitly allowed working directory', () => {
   const access = policy();
   assert.throws(() => access.authorize({

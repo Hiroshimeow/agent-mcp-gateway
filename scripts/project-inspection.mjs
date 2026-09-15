@@ -1,18 +1,10 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { projectRouteKey } from './projects/trusted-roots-projects.mjs';
 
-const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'logs', 'packages', '_zip_temp']);
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
-const DEFAULT_TREE_LIMIT = 200;
-const MAX_TREE_LIMIT = 500;
-const DEFAULT_TREE_DEPTH = 3;
-const MAX_TREE_DEPTH = 10;
 const CURSOR_VERSION = 1;
 
 export const PROJECT_INSPECTION_VIEWS = Object.freeze([
@@ -106,29 +98,6 @@ export function resolveProjectRoute(context = {}, { deviceId, projectId } = {}) 
   return getProject(context.projectRegistry, normalizedDeviceId, projectId);
 }
 
-function hasReadme(project) {
-  return fs.existsSync(path.join(project.repoRoot, 'README.md')) || fs.existsSync(path.join(project.repoRoot, 'README.vi.md'));
-}
-
-function hasPackageJson(project) {
-  return fs.existsSync(path.join(project.repoRoot, 'package.json'));
-}
-
-function projectSummary(project, context = {}) {
-  const data = {
-    device_id: project.deviceId,
-    project_id: project.projectId,
-    displayName: project.displayName,
-    defaultRootName: path.basename(project.repoRoot) || project.projectId,
-    default: context.projectRegistry?.defaultProjectId === project.projectId,
-    hasPackageJson: hasPackageJson(project),
-    hasReadme: hasReadme(project),
-    runtimeProfile: getRuntimeProfile(context.env || process.env).name
-  };
-  if (projectPathExposure(context)) data.repoRoot = project.repoRoot;
-  return data;
-}
-
 function projectListItem(project, projectRegistry, exposePaths) {
   const item = {
     device_id: project.deviceId,
@@ -181,100 +150,63 @@ export function listProjects(context = {}, options = {}) {
   };
 }
 
-function collectTreeEntries(root, maxDepth, stopAfter) {
-  const entries = [];
-  function walk(dir, depth, relativeDir = '') {
-    if (entries.length >= stopAfter || depth > maxDepth) return;
-    const dirEntries = fs.readdirSync(dir, { withFileTypes: true })
-      .filter(entry => !DEFAULT_EXCLUDES.has(entry.name))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of dirEntries) {
-      if (entries.length >= stopAfter) return;
-      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-      const isDirectory = entry.isDirectory();
-      entries.push({ path: relativePath, name: entry.name, type: isDirectory ? 'directory' : 'file', depth });
-      if (isDirectory && depth < maxDepth) walk(path.join(dir, entry.name), depth + 1, relativePath);
-    }
+function projectRelativePath(encodedPath) {
+  const decoded = decodeURIComponent(encodedPath || '');
+  const portable = decoded.replaceAll('\\', '/');
+  if (!decoded || portable.startsWith('/') || /^[A-Za-z]:\//.test(portable) || portable.split('/').includes('..')) {
+    throw new Error('Invalid project-relative resource path.');
   }
-  walk(root, 1);
-  return entries;
+  return decoded;
 }
 
-function readTree(project, options = {}) {
-  const depth = boundedInteger(options.depth, DEFAULT_TREE_DEPTH, 1, MAX_TREE_DEPTH, 'depth');
-  const limit = boundedInteger(options.limit, DEFAULT_TREE_LIMIT, 1, MAX_TREE_LIMIT, 'limit');
-  const version = cursorVersion('project-tree', [project.projectId, String(depth)]);
-  const offset = decodeCursor(options.cursor, { kind: 'project-tree', version });
-  const entries = collectTreeEntries(project.repoRoot, depth, offset + limit + 1);
-  if (offset > entries.length) throw new Error('Invalid or stale cursor: tree offset is outside the current result set.');
-  const page = entries.slice(offset, offset + limit);
-  const truncated = entries.length > offset + page.length;
-  return {
+function remoteInspectionArguments(project, view, options = {}) {
+  const args = {
     device_id: project.deviceId,
+    path: project.repoRoot,
     project_id: project.projectId,
-    rootName: path.basename(project.repoRoot),
-    maxDepth: depth,
-    maxEntries: limit,
-    entries: page,
-    truncated,
-    nextCursor: truncated ? encodeCursor('project-tree', offset + page.length, version) : null
+    view
   };
+  if (view === 'tree') {
+    if (options.depth !== undefined) args.depth = options.depth;
+    if (options.limit !== undefined) args.limit = options.limit;
+    if (options.cursor !== undefined) args.cursor = options.cursor;
+  }
+  if (view === 'git_diff' && options.staged !== undefined) args.staged = options.staged === true;
+  return args;
 }
 
-function execGitRead(cwd, args) {
-  return new Promise(resolve => {
-    execFile('git', args, { cwd, timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      resolve({ ok: !error, stdout, stderr, exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0 });
-    });
+function shapeInspectionResult(project, context, view, remote = {}) {
+  const identity = { device_id: project.deviceId, project_id: project.projectId };
+  if (view === 'summary') {
+    const result = {
+      ...identity,
+      displayName: project.displayName,
+      defaultRootName: remote.defaultRootName || project.projectId,
+      default: context.projectRegistry?.defaultProjectId === project.projectId,
+      hasPackageJson: Boolean(remote.hasPackageJson),
+      hasReadme: Boolean(remote.hasReadme),
+      runtimeProfile: getRuntimeProfile(context.env || process.env).name
+    };
+    if (projectPathExposure(context)) result.repoRoot = project.repoRoot;
+    return result;
+  }
+  return { ...identity, ...remote };
+}
+
+export async function readProjectResourceFile(context = {}, { deviceId, projectId, encodedPath } = {}) {
+  const project = resolveProjectRoute(context, { deviceId, projectId });
+  if (typeof context.callDeviceTool !== 'function') {
+    throw projectLookupError('DEVICE_EXECUTION_UNAVAILABLE', 'Project file access requires device execution routing.');
+  }
+  const remote = await context.callDeviceTool('project_inspect', {
+    device_id: project.deviceId,
+    path: project.repoRoot,
+    project_id: project.projectId,
+    view: 'file',
+    relative_path: projectRelativePath(encodedPath)
   });
-}
-
-async function gitStatus(project) {
-  const result = await execGitRead(project.repoRoot, ['status', '--short', '--branch']);
-  return {
-    device_id: project.deviceId,
-    project_id: project.projectId,
-    ok: result.ok,
-    status: result.stdout,
-    stderr: result.stderr,
-    exitCode: result.exitCode
-  };
-}
-
-async function gitDiff(project, staged = false) {
-  const result = await execGitRead(project.repoRoot, staged ? ['diff', '--staged'] : ['diff']);
-  return {
-    device_id: project.deviceId,
-    project_id: project.projectId,
-    ok: result.ok,
-    staged: Boolean(staged),
-    text: result.ok ? result.stdout : result.stderr,
-    stderr: result.stderr,
-    exitCode: result.exitCode
-  };
-}
-
-async function readReadme(project) {
-  const readme = ['README.md', 'README.vi.md']
-    .map(name => path.join(project.repoRoot, name))
-    .find(file => fs.existsSync(file));
-  if (!readme) throw new Error(`README not found for project_id: ${project.projectId}`);
-  return {
-    device_id: project.deviceId,
-    project_id: project.projectId,
-    fileName: path.basename(readme),
-    text: await fs.promises.readFile(readme, 'utf8')
-  };
-}
-
-async function readPackage(project) {
-  const packagePath = path.join(project.repoRoot, 'package.json');
-  if (!fs.existsSync(packagePath)) throw new Error(`package.json not found for project_id: ${project.projectId}`);
-  return {
-    device_id: project.deviceId,
-    project_id: project.projectId,
-    data: JSON.parse(await fs.promises.readFile(packagePath, 'utf8'))
-  };
+  if (!remote || typeof remote.text !== 'string') throw new Error('Invalid project file response from device.');
+  return remote.text;
 }
 
 export async function inspectProject(context = {}, options = {}) {
@@ -284,11 +216,12 @@ export async function inspectProject(context = {}, options = {}) {
   }
   const deviceId = String(options.deviceId ?? options.device_id ?? '').trim();
   const project = resolveProjectRoute(context, { deviceId, projectId: options.projectId ?? options.project_id });
-  if (view === 'summary') return projectSummary(project, context);
-  if (view === 'tree') return readTree(project, options);
-  if (view === 'git_status') return await gitStatus(project);
-  if (view === 'git_diff') return await gitDiff(project, options.staged === true);
-  if (view === 'readme') return await readReadme(project);
-  if (view === 'package') return await readPackage(project);
-  throw new Error(`Invalid project inspection view: ${view}.`);
+  if (typeof context.callDeviceTool !== 'function') {
+    throw projectLookupError('DEVICE_EXECUTION_UNAVAILABLE', 'Project inspection requires device execution routing.');
+  }
+  const remote = await context.callDeviceTool('project_inspect', remoteInspectionArguments(project, view, options));
+  if (!remote || typeof remote !== 'object' || Array.isArray(remote)) {
+    throw new Error('Invalid project inspection response from device.');
+  }
+  return shapeInspectionResult(project, context, view, remote);
 }

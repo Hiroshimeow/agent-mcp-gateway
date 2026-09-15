@@ -1,11 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { buildRuntimeProfileStatus, getRuntimeProfile } from '../runtime-profile.mjs';
-import { inspectProject, listProjects, resolveProjectRoute } from '../project-inspection.mjs';
+import { inspectProject, listProjects, readProjectResourceFile, resolveProjectRoute } from '../project-inspection.mjs';
 import { applyToolRisk, buildToolRiskManifest } from '../tool-risk.mjs';
 import { listSkillResources, readSkillResource } from '../skills/index.mjs';
-
-const MAX_RESOURCE_FILE_BYTES = 1024 * 1024;
 
 const GATEWAY_RESOURCES = Object.freeze([
   {
@@ -37,25 +33,12 @@ const NATIVE_RESOURCE_TEMPLATES = Object.freeze([
   { uriTemplate: 'skill://skills/{skillName}/SKILL.md', name: 'Skill definition', mimeType: 'text/markdown' }
 ]);
 
-function looksBinary(buffer) {
-  const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
-  return sample.includes(0);
-}
-
 function jsonContent(uri, data) {
   return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(data, null, 2) }] };
 }
 
 function textContent(uri, text, mimeType = 'text/plain') {
   return { contents: [{ uri, mimeType, text }] };
-}
-
-function hasReadme(project) {
-  return fs.existsSync(path.join(project.repoRoot, 'README.md')) || fs.existsSync(path.join(project.repoRoot, 'README.vi.md'));
-}
-
-function hasPackageJson(project) {
-  return fs.existsSync(path.join(project.repoRoot, 'package.json'));
 }
 
 function surfaceMode(surfaceConfig) {
@@ -88,15 +71,15 @@ export function listRepoResources(context = {}, surfaceConfig = context.surfaceC
       description: 'Configured projects for one owned online device.'
     });
   }
-  for (const p of projects) {
-    const base = `repo://device/${encodeURIComponent(p.deviceId)}/project/${encodeURIComponent(p.projectId)}`;
+  for (const project of projects) {
+    const base = `repo://device/${encodeURIComponent(project.deviceId)}/project/${encodeURIComponent(project.projectId)}`;
     resources.push(
-      { uri: `${base}/summary`, name: `${p.displayName} summary`, mimeType: 'application/json' },
-      { uri: `${base}/tree`, name: `${p.displayName} directory tree`, mimeType: 'application/json' },
-      { uri: `${base}/git/status`, name: `${p.displayName} git status`, mimeType: 'application/json' }
+      { uri: `${base}/summary`, name: `${project.displayName} summary`, mimeType: 'application/json' },
+      { uri: `${base}/tree`, name: `${project.displayName} directory tree`, mimeType: 'application/json' },
+      { uri: `${base}/git/status`, name: `${project.displayName} git status`, mimeType: 'application/json' },
+      { uri: `${base}/readme`, name: `${project.displayName} README`, mimeType: 'text/markdown' },
+      { uri: `${base}/package`, name: `${project.displayName} package.json`, mimeType: 'application/json' }
     );
-    if (hasReadme(p)) resources.push({ uri: `${base}/readme`, name: `${p.displayName} README`, mimeType: 'text/markdown' });
-    if (hasPackageJson(p)) resources.push({ uri: `${base}/package`, name: `${p.displayName} package.json`, mimeType: 'application/json' });
   }
   return resources;
 }
@@ -106,15 +89,6 @@ export function listRepoResourceTemplates(context = {}, surfaceConfig = context.
   if (mode === 'agent') return [];
   if (mode === 'native') return NATIVE_RESOURCE_TEMPLATES.map(template => ({ ...template }));
   return LEGACY_RESOURCE_TEMPLATES.map(template => ({ ...template }));
-}
-
-function safeRelativePath(project, encodedPath) {
-  const decoded = decodeURIComponent(encodedPath || '');
-  if (!decoded || path.isAbsolute(decoded) || decoded.split(/[\\/]+/).includes('..')) throw new Error('Invalid project-relative resource path.');
-  const resolved = path.resolve(project.repoRoot, decoded);
-  const rel = path.relative(project.repoRoot, resolved);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Resource path escapes project root.');
-  return resolved;
 }
 
 async function readRuntimeProfile(uri, context) {
@@ -134,8 +108,8 @@ export async function readRepoResource(uri, context = {}) {
   if (uri === 'repo://gateway/runtime-profile') return await readRuntimeProfile(uri, context);
   if (uri === 'repo://gateway/tool-manifest') return await readToolManifest(uri, context);
 
-  // Historical project-scoped diagnostic aliases are harmless because they do
-  // not resolve or execute a project route. Keep them as singleton aliases.
+  // Historical project-scoped diagnostic aliases are singleton gateway
+  // diagnostics; they do not execute against a project path.
   const legacyDiagnosticMatch = uri.match(/^repo:\/\/project\/[^/?#]+\/(runtime-profile|safety-profile|tool-manifest)$/);
   if (legacyDiagnosticMatch?.[1] === 'tool-manifest') return await readToolManifest(uri, context);
   if (legacyDiagnosticMatch) return await readRuntimeProfile(uri, context);
@@ -177,13 +151,12 @@ export async function readRepoResource(uri, context = {}) {
     return textContent(uri, result.text, 'text/plain');
   }
   if (rest.startsWith('file/')) {
-    const filePath = safeRelativePath(project, rest.slice('file/'.length));
-    const stat = await fs.promises.stat(filePath);
-    if (!stat.isFile()) throw new Error('Resource file path must point to a regular file.');
-    if (stat.size > MAX_RESOURCE_FILE_BYTES) throw new Error(`Resource file is too large for text preview: ${stat.size} bytes.`);
-    const buffer = await fs.promises.readFile(filePath);
-    if (looksBinary(buffer)) throw new Error('Resource file appears to be binary; text resources only support textual files.');
-    return textContent(uri, buffer.toString('utf8'), 'text/plain');
+    const text = await readProjectResourceFile(context, {
+      deviceId,
+      projectId: project.projectId,
+      encodedPath: rest.slice('file/'.length)
+    });
+    return textContent(uri, text, 'text/plain');
   }
   throw new Error(`Unknown resource URI: ${uri}`);
 }

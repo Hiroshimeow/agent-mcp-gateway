@@ -5,7 +5,7 @@ const HARD_MAX_OUTPUT_BYTES = 48 * 1024;
 const DEFAULT_INPUT_BYTES = 32 * 1024;
 const DEFAULT_OUTPUT_BYTES = 48 * 1024;
 const DEFAULT_REQUESTS_PER_MINUTE = 60;
-const PATH_TOOLS = new Set(['read_text_file', 'write_file', 'edit_file', 'image_preview']);
+const PATH_TOOLS = new Set(['read_text_file', 'write_file', 'edit_file', 'image_preview', 'project_inspect']);
 const CWD_TOOLS = new Set(['shell_execute', 'start_process']);
 
 export class DeviceAccessError extends Error {

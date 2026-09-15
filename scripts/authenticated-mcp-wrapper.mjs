@@ -654,6 +654,10 @@ function currentResourceContext(callerContext = {}) {
         callerCategory: callerContext.callerCategory || 'anonymous'
       }
     ),
+    callDeviceTool: async (tool, args = {}) => {
+      const { deviceId, toolArguments } = requireDeviceId(args);
+      return await callRemoteDevice({ context: callerContext, deviceId, tool, arguments: toolArguments });
+    },
     packageRoot,
     env: process.env,
     listTools: listMergedTools

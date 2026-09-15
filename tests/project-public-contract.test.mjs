@@ -19,7 +19,11 @@ function fixture() {
     context: {
       projectRegistry,
       env: { MCP_RUNTIME_PROFILE: 'yolo' },
-      listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }]
+      listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
+      callDeviceTool: async (tool, args) => {
+        assert.equal(tool, 'project_inspect');
+        return { defaultRootName: path.basename(args.path), hasReadme: true, hasPackageJson: false };
+      }
     }
   };
 }
