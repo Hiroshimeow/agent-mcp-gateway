@@ -13,9 +13,11 @@ test('unified config is committed and local package artifacts are ignored', () =
   assert.match(gitignore, /^packages\/$/m);
 });
 
-test('runtime dependencies exclude the unused mcp-proxy package', () => {
+test('runtime dependencies exclude test-only or unused MCP helper packages', () => {
   const packageJson = JSON.parse(read('package.json'));
   assert.equal(packageJson.dependencies?.['mcp-proxy'], undefined);
+  assert.equal(packageJson.dependencies?.['@modelcontextprotocol/server-filesystem'], undefined);
+  assert.equal(packageJson.devDependencies?.['@modelcontextprotocol/server-filesystem'], '2026.1.14');
 });
 
 test('.env.example keeps runtime env separate from unified config', () => {
