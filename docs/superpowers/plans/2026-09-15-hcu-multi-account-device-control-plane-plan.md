@@ -56,13 +56,14 @@
 
 **Device files:** `package.json`, `package-lock.json`, `src/remote-device/gateway-identity.ts`, `gateway-channel.ts`, `device-status.ts`, `windows-service.ts`, `device.ts`, tests.
 
-- [ ] Rename package/product-facing device identity toward `@hcu/device` without publishing.
-- [ ] Replace new runtime artifacts `.desktop-commander-device` / `DesktopCommander-MCP-Device-*` / `desktop-commander-gateway-*` with HCU device names.
-- [ ] Because this product is not published yet, migrate the one live installation operationally and remove permanent legacy-path compatibility code afterward.
-- [ ] Generate new IDs as `<sanitized-hostname>-<random8>`; preserve existing persisted IDs until explicit re-enrollment/cutover.
-- [ ] Device hello sends bounded structured metadata: hostname, platform, arch, path_style, agent_version, capabilities.
-- [ ] Gateway persists and `list_devices` returns wire fields `device_id`, `device_name`, `hostname`, `platform`, `arch`, `path_style`, `online`, version/status metadata.
-- [ ] `device_name` can be friendly/renameable; duplicate friendly names in the same account must not silently route.
+- [x] Rename package/product-facing device identity toward `@hcu/device` without publishing.
+- [x] Replace new runtime artifacts `.desktop-commander-device` / `DesktopCommander-MCP-Device-*` / `desktop-commander-gateway-*` with HCU device names.
+- [x] Remove the legacy Desktop Commander Remote transport entirely: Supabase `RemoteChannel`, legacy remote authenticator/session persistence, offline updater, dependency, and dedicated reconnect test. Keep Desktop Commander only as the local execution engine behind the direct Gateway channel.
+- [x] Because this product is not published yet, migrate the one live installation operationally and remove permanent legacy-path compatibility code afterward.
+- [x] Generate new IDs as `<sanitized-hostname>-<random8>`; preserve existing persisted IDs until explicit re-enrollment/cutover.
+- [x] Device hello sends bounded structured metadata: hostname, platform, arch, path_style, agent_version, capabilities.
+- [x] Gateway persists and `list_devices` returns wire fields `device_id`, `device_name`, `hostname`, `platform`, `arch`, `path_style`, `online`, version/status metadata.
+- [x] `device_name` can be friendly/renameable; duplicate friendly names in the same account must not silently route.
 
 **Gate:** device tests/build green; old DesktopCommander runtime branding is absent from new HCU runtime paths/service names except required upstream/legal references; `list_devices` has enough structured metadata for deterministic device selection.
 

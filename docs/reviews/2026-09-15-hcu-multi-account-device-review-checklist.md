@@ -17,6 +17,7 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] `list_devices` exposes those fields in bounded structured output.
 - [x] Duplicate friendly names do not silently route.
 - [x] HCU runtime paths/service names replace new DesktopCommander runtime branding.
+- [x] Legacy Desktop Commander Remote transport is absent: no Supabase `RemoteChannel`, legacy authenticator/session path, offline updater, direct dependency, or legacy reconnect test; Desktop Commander remains only the local execution engine.
 - [x] Legal/upstream attribution is preserved.
 - [x] npm is NOT published in this phase.
 
