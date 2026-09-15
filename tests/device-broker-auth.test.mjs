@@ -371,11 +371,14 @@ test('persisted identity survives broker restart and can authenticate without en
   });
 
   assert.equal(broker2.listDevices()[0].online, false);
+  assert.equal(broker2.listDevices()[0].agentVersion, 'test-1');
   const ws2 = await openSocket(port2);
   t.after(() => ws2.close());
   const ok = await reconnect(ws2, { deviceId: 'restart-device', privateKey: keys.privateKey });
   assert.equal(ok.type, 'auth_ok');
   assert.equal(broker2.listDevices()[0].online, true);
+  assert.equal(broker2.listDevices()[0].agentVersion, 'test-2');
+  assert.equal(store2.get('restart-device').agentVersion, 'test-2');
 });
 
 test('reconnect challenge is invalid after A to B to A authorization generation changes', async t => {

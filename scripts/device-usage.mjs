@@ -3,6 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const TOKEN_ESTIMATION_METHOD = 'utf8_bytes_div_4_estimate';
 
 function normalizeDeviceId(value) {
   const deviceId = String(value || '').trim();
@@ -10,10 +11,31 @@ function normalizeDeviceId(value) {
   return deviceId;
 }
 
+function boundedText(value, max = 128, { required = false } = {}) {
+  const text = String(value || '').trim();
+  if (required && !text) throw new Error('Required usage identifier is missing.');
+  return text ? text.slice(0, max) : null;
+}
+
 function bytes(value) {
   const number = Number(value ?? 0);
   if (!Number.isInteger(number) || number < 0 || number > 64 * 1024 * 1024) throw new Error('Usage byte count must be a bounded non-negative integer.');
   return number;
+}
+
+function duration(value) {
+  const number = Math.max(0, Math.floor(Number(value) || 0));
+  if (number > 24 * 60 * 60 * 1000) throw new Error('Usage duration is outside the bounded range.');
+  return number;
+}
+
+function timestampMs(value, fallback) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (value) {
+    const parsed = Date.parse(String(value));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number(fallback());
 }
 
 function rowToUsage(row) {
@@ -43,6 +65,29 @@ function rowToUsage(row) {
   };
 }
 
+function rowToActivity(row) {
+  if (!row) return null;
+  return {
+    activitySessionId: row.activity_session_id,
+    accountId: row.account_id,
+    clientId: row.client_id || null,
+    startedAt: Number(row.started_at),
+    lastSeenAt: Number(row.last_seen_at),
+    endedAt: row.ended_at === null ? null : Number(row.ended_at)
+  };
+}
+
+function rowToSchema(row) {
+  if (!row) return { toolCount: 0, schemaBytes: 0, estimatedTokens: 0, estimationMethod: TOKEN_ESTIMATION_METHOD, updatedAt: null };
+  return {
+    toolCount: Number(row.tool_count),
+    schemaBytes: Number(row.schema_bytes),
+    estimatedTokens: Number(row.estimated_tokens),
+    estimationMethod: row.estimation_method,
+    updatedAt: Number(row.updated_at)
+  };
+}
+
 export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) {
   if (!dbPath) throw new Error('dbPath is required for device usage store.');
   const resolved = path.resolve(dbPath);
@@ -64,6 +109,77 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       last_seen_at INTEGER NOT NULL,
       last_error_code TEXT
     );
+    CREATE TABLE IF NOT EXISTS tool_call_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_at INTEGER NOT NULL,
+      account_id TEXT,
+      activity_session_id TEXT,
+      device_id TEXT,
+      tool TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('success','error')),
+      error_code TEXT,
+      input_bytes INTEGER NOT NULL,
+      output_bytes INTEGER NOT NULL,
+      truncated INTEGER NOT NULL DEFAULT 0,
+      spill INTEGER NOT NULL DEFAULT 0,
+      caller_category TEXT,
+      upstream TEXT
+    );
+    CREATE INDEX IF NOT EXISTS tool_call_events_account_time_idx ON tool_call_events(account_id, event_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS tool_call_events_activity_idx ON tool_call_events(activity_session_id, event_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS tool_call_events_account_tool_idx ON tool_call_events(account_id, tool);
+    CREATE TABLE IF NOT EXISTS skill_load_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_at INTEGER NOT NULL,
+      account_id TEXT,
+      activity_session_id TEXT,
+      skill_name TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('success','error')),
+      error_code TEXT,
+      output_bytes INTEGER NOT NULL,
+      estimated_tokens INTEGER NOT NULL,
+      estimation_method TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS skill_load_events_account_time_idx ON skill_load_events(account_id, event_at DESC, id DESC);
+    CREATE TABLE IF NOT EXISTS activity_sessions (
+      activity_session_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      client_id TEXT,
+      started_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      ended_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS activity_sessions_account_idx ON activity_sessions(account_id, started_at DESC);
+    CREATE TABLE IF NOT EXISTS catalog_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_at INTEGER NOT NULL,
+      account_id TEXT,
+      activity_session_id TEXT,
+      tool_count INTEGER NOT NULL,
+      schema_bytes INTEGER NOT NULL,
+      estimated_tokens INTEGER NOT NULL,
+      estimation_method TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS catalog_events_account_time_idx ON catalog_events(account_id, event_at DESC, id DESC);
+    CREATE TABLE IF NOT EXISTS gateway_schema_snapshot (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      tool_count INTEGER NOT NULL,
+      schema_bytes INTEGER NOT NULL,
+      estimated_tokens INTEGER NOT NULL,
+      estimation_method TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS device_status_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_at INTEGER NOT NULL,
+      account_id TEXT,
+      device_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('online','offline','revoked')),
+      connection_epoch INTEGER NOT NULL DEFAULT 0,
+      agent_version TEXT
+    );
+    CREATE INDEX IF NOT EXISTS device_status_events_account_time_idx ON device_status_events(account_id, event_at DESC, id DESC);
   `);
 
   const getStatement = db.prepare('SELECT * FROM device_usage WHERE device_id = ?');
@@ -107,6 +223,95 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     ON CONFLICT(device_id) DO UPDATE SET last_seen_at = excluded.last_seen_at
   `);
 
+  const insertToolCall = db.prepare(`
+    INSERT INTO tool_call_events (
+      event_at, account_id, activity_session_id, device_id, tool, duration_ms, status, error_code,
+      input_bytes, output_bytes, truncated, spill, caller_category, upstream
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertSkillLoad = db.prepare(`
+    INSERT INTO skill_load_events (
+      event_at, account_id, activity_session_id, skill_name, status, error_code,
+      output_bytes, estimated_tokens, estimation_method
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertActivity = db.prepare(`
+    INSERT INTO activity_sessions (activity_session_id, account_id, client_id, started_at, last_seen_at, ended_at)
+    VALUES (?, ?, ?, ?, ?, NULL)
+  `);
+  const getActivity = db.prepare('SELECT * FROM activity_sessions WHERE activity_session_id = ?');
+  const touchActivity = db.prepare(`
+    UPDATE activity_sessions SET last_seen_at = ?
+    WHERE activity_session_id = ? AND account_id = ? AND ended_at IS NULL
+  `);
+  const endActivity = db.prepare(`
+    UPDATE activity_sessions SET ended_at = ?, last_seen_at = ?
+    WHERE activity_session_id = ? AND account_id = ? AND ended_at IS NULL
+  `);
+  const listActivities = db.prepare(`
+    SELECT * FROM activity_sessions WHERE account_id = ?
+    ORDER BY started_at DESC, activity_session_id DESC LIMIT ?
+  `);
+  const insertCatalog = db.prepare(`
+    INSERT INTO catalog_events (event_at, account_id, activity_session_id, tool_count, schema_bytes, estimated_tokens, estimation_method)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const setSchema = db.prepare(`
+    INSERT INTO gateway_schema_snapshot (singleton, tool_count, schema_bytes, estimated_tokens, estimation_method, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?)
+    ON CONFLICT(singleton) DO UPDATE SET
+      tool_count = excluded.tool_count,
+      schema_bytes = excluded.schema_bytes,
+      estimated_tokens = excluded.estimated_tokens,
+      estimation_method = excluded.estimation_method,
+      updated_at = excluded.updated_at
+  `);
+  const getSchema = db.prepare('SELECT * FROM gateway_schema_snapshot WHERE singleton = 1');
+  const insertDeviceStatus = db.prepare(`
+    INSERT INTO device_status_events (event_at, account_id, device_id, status, connection_epoch, agent_version)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const totalsForAccount = db.prepare(`
+    SELECT COUNT(*) AS tool_calls,
+      COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0) AS succeeded,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failed,
+      COALESCE(SUM(input_bytes),0) AS input_bytes,
+      COALESCE(SUM(output_bytes),0) AS output_bytes
+    FROM tool_call_events WHERE account_id = ?
+  `);
+  const topToolsForAccount = db.prepare(`
+    SELECT tool, COUNT(*) AS calls,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failures,
+      COALESCE(SUM(input_bytes),0) AS input_bytes,
+      COALESCE(SUM(output_bytes),0) AS output_bytes
+    FROM tool_call_events WHERE account_id = ?
+    GROUP BY tool ORDER BY calls DESC, tool ASC LIMIT 10
+  `);
+  const recentErrorsForAccount = db.prepare(`
+    SELECT event_at, device_id, tool, error_code
+    FROM tool_call_events WHERE account_id = ? AND status='error'
+    ORDER BY event_at DESC, id DESC LIMIT 20
+  `);
+  const skillLoadsForAccount = db.prepare(`
+    SELECT skill_name, COUNT(*) AS loads,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failures,
+      COALESCE(SUM(output_bytes),0) AS output_bytes,
+      COALESCE(SUM(estimated_tokens),0) AS estimated_tokens,
+      MAX(estimation_method) AS estimation_method
+    FROM skill_load_events WHERE account_id = ?
+    GROUP BY skill_name ORDER BY loads DESC, skill_name ASC LIMIT 20
+  `);
+  const catalogCountForAccount = db.prepare('SELECT COUNT(*) AS calls FROM catalog_events WHERE account_id = ?');
+  const latestCatalogForAccount = db.prepare(`
+    SELECT tool_count, schema_bytes, estimated_tokens, estimation_method, event_at
+    FROM catalog_events WHERE account_id = ? ORDER BY event_at DESC, id DESC LIMIT 1
+  `);
+  const deviceStatusForAccount = db.prepare(`
+    SELECT event_at, device_id, status, connection_epoch, agent_version
+    FROM device_status_events WHERE account_id = ? ORDER BY event_at DESC, id DESC LIMIT 50
+  `);
+
   function get(deviceId) {
     return rowToUsage(getStatement.get(normalizeDeviceId(deviceId)));
   }
@@ -137,9 +342,166 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     return get(deviceId);
   }
 
+  function recordToolCall(metric = {}) {
+    const eventAt = timestampMs(metric.timestamp, now);
+    const accountId = boundedText(metric.accountId, 128);
+    const activitySessionId = boundedText(metric.activitySessionId, 128);
+    const deviceId = metric.deviceId ? normalizeDeviceId(metric.deviceId) : null;
+    const tool = boundedText(metric.tool, 128, { required: true });
+    const success = metric.success === true;
+    const errorCode = success ? null : boundedText(metric.errorCode || metric.error || 'TOOL_ERROR', 64);
+    const inputBytes = bytes(metric.inputBytes);
+    const outputBytes = bytes(metric.outputBytes);
+    insertToolCall.run(
+      eventAt, accountId, activitySessionId, deviceId, tool, duration(metric.durationMs), success ? 'success' : 'error', errorCode,
+      inputBytes, outputBytes, metric.truncated ? 1 : 0, metric.spill ? 1 : 0,
+      boundedText(metric.callerCategory, 32), boundedText(metric.upstream, 128)
+    );
+    const skillName = tool === 'get_skill' ? boundedText(metric.skillName, 128) : null;
+    if (skillName) {
+      insertSkillLoad.run(
+        eventAt, accountId, activitySessionId, skillName, success ? 'success' : 'error', errorCode,
+        outputBytes, Math.ceil(outputBytes / 4), TOKEN_ESTIMATION_METHOD
+      );
+    }
+  }
+
+  function openActivitySession({ activitySessionId, accountId, clientId = null } = {}) {
+    const id = boundedText(activitySessionId, 128, { required: true });
+    const owner = boundedText(accountId, 128, { required: true });
+    const client = boundedText(clientId, 256);
+    const current = getActivity.get(id);
+    if (current) {
+      if (current.account_id !== owner) throw new Error('Activity session is owned by another account.');
+      if (current.ended_at !== null) throw new Error('Activity session has ended.');
+      return rowToActivity(current);
+    }
+    const time = Number(now());
+    insertActivity.run(id, owner, client, time, time);
+    return rowToActivity(getActivity.get(id));
+  }
+
+  function touchActivitySession({ activitySessionId, accountId } = {}) {
+    const id = boundedText(activitySessionId, 128, { required: true });
+    const owner = boundedText(accountId, 128, { required: true });
+    const current = getActivity.get(id);
+    if (!current || current.account_id !== owner) throw new Error('Activity session not found for this account.');
+    if (current.ended_at !== null) throw new Error('Activity session has ended and is inactive.');
+    touchActivity.run(Number(now()), id, owner);
+    return rowToActivity(getActivity.get(id));
+  }
+
+  function endActivitySession({ activitySessionId, accountId } = {}) {
+    const id = boundedText(activitySessionId, 128, { required: true });
+    const owner = boundedText(accountId, 128, { required: true });
+    const current = getActivity.get(id);
+    if (!current || current.account_id !== owner) throw new Error('Activity session not found for this account.');
+    if (current.ended_at === null) {
+      const time = Number(now());
+      endActivity.run(time, time, id, owner);
+    }
+    return rowToActivity(getActivity.get(id));
+  }
+
+  function listActivitySessions(accountId, { limit = 50 } = {}) {
+    const owner = boundedText(accountId, 128, { required: true });
+    const boundedLimit = Math.max(1, Math.min(200, Number.isInteger(Number(limit)) ? Number(limit) : 50));
+    return listActivities.all(owner, boundedLimit).map(rowToActivity);
+  }
+
+  function recordCatalogList({ accountId = null, activitySessionId = null, toolCount = 0, schemaBytes = 0, estimatedTokens, estimationMethod = TOKEN_ESTIMATION_METHOD } = {}) {
+    const count = Math.max(0, Math.floor(Number(toolCount) || 0));
+    const size = bytes(schemaBytes);
+    const estimate = estimatedTokens === undefined ? Math.ceil(size / 4) : Math.max(0, Math.floor(Number(estimatedTokens) || 0));
+    insertCatalog.run(
+      Number(now()), boundedText(accountId, 128), boundedText(activitySessionId, 128), count, size, estimate,
+      boundedText(estimationMethod, 64, { required: true })
+    );
+  }
+
+  function setSchemaSnapshot({ toolCount = 0, schemaBytes = 0, estimatedTokens, estimationMethod = TOKEN_ESTIMATION_METHOD } = {}) {
+    const count = Math.max(0, Math.floor(Number(toolCount) || 0));
+    const size = bytes(schemaBytes);
+    const estimate = estimatedTokens === undefined ? Math.ceil(size / 4) : Math.max(0, Math.floor(Number(estimatedTokens) || 0));
+    const method = boundedText(estimationMethod, 64, { required: true });
+    setSchema.run(count, size, estimate, method, Number(now()));
+    return getSchemaSnapshot();
+  }
+
+  function getSchemaSnapshot() {
+    return rowToSchema(getSchema.get());
+  }
+
+  function recordDeviceStatus(deviceId, { accountId = null, status, connectionEpoch = 0, agentVersion = null } = {}) {
+    const state = String(status || '').trim();
+    if (!['online', 'offline', 'revoked'].includes(state)) throw new Error('Invalid device status event.');
+    const epoch = Math.max(0, Math.floor(Number(connectionEpoch) || 0));
+    insertDeviceStatus.run(
+      Number(now()), boundedText(accountId, 128), normalizeDeviceId(deviceId), state, epoch, boundedText(agentVersion, 64)
+    );
+  }
+
+  function getAccountUsage(accountId) {
+    const owner = boundedText(accountId, 128, { required: true });
+    const totalsRow = totalsForAccount.get(owner);
+    const latestCatalog = latestCatalogForAccount.get(owner);
+    return {
+      totals: {
+        toolCalls: Number(totalsRow.tool_calls),
+        succeeded: Number(totalsRow.succeeded),
+        failed: Number(totalsRow.failed),
+        inputBytes: Number(totalsRow.input_bytes),
+        outputBytes: Number(totalsRow.output_bytes)
+      },
+      topTools: topToolsForAccount.all(owner).map(row => ({
+        tool: row.tool, calls: Number(row.calls), failures: Number(row.failures),
+        inputBytes: Number(row.input_bytes), outputBytes: Number(row.output_bytes)
+      })),
+      recentErrors: recentErrorsForAccount.all(owner).map(row => ({
+        eventAt: Number(row.event_at), deviceId: row.device_id || null, tool: row.tool, errorCode: row.error_code || null
+      })),
+      skillLoads: skillLoadsForAccount.all(owner).map(row => ({
+        skillName: row.skill_name, loads: Number(row.loads), failures: Number(row.failures),
+        outputBytes: Number(row.output_bytes), estimatedTokens: Number(row.estimated_tokens), estimationMethod: row.estimation_method
+      })),
+      catalog: {
+        listCalls: Number(catalogCountForAccount.get(owner).calls),
+        lastToolCount: latestCatalog ? Number(latestCatalog.tool_count) : null,
+        lastSchemaBytes: latestCatalog ? Number(latestCatalog.schema_bytes) : null,
+        estimatedTokens: latestCatalog ? Number(latestCatalog.estimated_tokens) : null,
+        estimationMethod: latestCatalog?.estimation_method || null,
+        lastSeenAt: latestCatalog ? Number(latestCatalog.event_at) : null
+      },
+      schema: getSchemaSnapshot(),
+      activitySessions: listActivitySessions(owner),
+      deviceStatusEvents: deviceStatusForAccount.all(owner).map(row => ({
+        eventAt: Number(row.event_at), deviceId: row.device_id, status: row.status,
+        connectionEpoch: Number(row.connection_epoch), agentVersion: row.agent_version || null
+      }))
+    };
+  }
+
   function close() {
     db.close();
   }
 
-  return { get, recordConnection, recordToolStarted, recordToolSucceeded, recordToolFailed, touch, close };
+  return {
+    get,
+    recordConnection,
+    recordToolStarted,
+    recordToolSucceeded,
+    recordToolFailed,
+    touch,
+    recordToolCall,
+    openActivitySession,
+    touchActivitySession,
+    endActivitySession,
+    listActivitySessions,
+    recordCatalogList,
+    setSchemaSnapshot,
+    getSchemaSnapshot,
+    recordDeviceStatus,
+    getAccountUsage,
+    close
+  };
 }

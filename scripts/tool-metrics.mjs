@@ -12,6 +12,10 @@ export function buildToolMetric({
   result,
   durationMs,
   callerCategory = null,
+  accountId = null,
+  activitySessionId = null,
+  deviceId = null,
+  skillName = null,
   upstream = null,
   error = null
 } = {}) {
@@ -27,8 +31,13 @@ export function buildToolMetric({
     outputBytes: byteSize(result),
     truncated: Boolean(structured.stdoutTruncated || structured.stderrTruncated),
     spill: Boolean(structured.stdoutSpillPath || structured.stderrSpillPath),
-    callerCategory: callerCategory || null,
-    upstream: upstream || null
+    callerCategory: callerCategory ? String(callerCategory).slice(0, 32) : null,
+    accountId: accountId ? String(accountId).slice(0, 128) : null,
+    activitySessionId: activitySessionId ? String(activitySessionId).slice(0, 128) : null,
+    deviceId: deviceId ? String(deviceId).slice(0, 64) : null,
+    skillName: skillName ? String(skillName).slice(0, 128) : null,
+    errorCode: error ? String(error.code || 'EXCEPTION').slice(0, 64) : (result?.isError === true ? String(structured.code || 'TOOL_ERROR').slice(0, 64) : null),
+    upstream: upstream ? String(upstream).slice(0, 128) : null
   };
 }
 

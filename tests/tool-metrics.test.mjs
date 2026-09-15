@@ -20,7 +20,11 @@ test('tool metrics keep only bounded metadata and never payload bodies', () => {
       }
     },
     durationMs: 12,
-    callerCategory: 'static-bearer'
+    callerCategory: 'oauth',
+    accountId: 'alice',
+    activitySessionId: 'activity-a',
+    deviceId: 'device-a',
+    skillName: null
   });
   const json = JSON.stringify(metric);
   assert.doesNotMatch(json, /SECRET_COMMAND_PAYLOAD|SECRET_OUTPUT_BODY/);
@@ -28,9 +32,30 @@ test('tool metrics keep only bounded metadata and never payload bodies', () => {
   assert.equal(metric.success, true);
   assert.equal(metric.truncated, true);
   assert.equal(metric.spill, true);
-  assert.equal(metric.callerCategory, 'static-bearer');
+  assert.equal(metric.callerCategory, 'oauth');
+  assert.equal(metric.accountId, 'alice');
+  assert.equal(metric.activitySessionId, 'activity-a');
+  assert.equal(metric.deviceId, 'device-a');
+  assert.equal(metric.errorCode, null);
   assert.ok(metric.inputBytes > 0);
   assert.ok(metric.outputBytes > 0);
+});
+
+test('tool metrics capture bounded error code and skill name without payload bodies', () => {
+  const metric = buildToolMetric({
+    toolName: 'get_skill',
+    args: { name: 'mcp_builder', hidden: 'SECRET_INPUT' },
+    durationMs: 3,
+    callerCategory: 'oauth',
+    accountId: 'alice',
+    activitySessionId: 'activity-a',
+    skillName: 'mcp_builder',
+    error: Object.assign(new Error('SECRET_ERROR_BODY'), { code: 'UNKNOWN_SKILL' })
+  });
+  assert.equal(metric.success, false);
+  assert.equal(metric.errorCode, 'UNKNOWN_SKILL');
+  assert.equal(metric.skillName, 'mcp_builder');
+  assert.doesNotMatch(JSON.stringify(metric), /SECRET_INPUT|SECRET_ERROR_BODY/);
 });
 
 test('tool metrics recorder appends one NDJSON object per call', () => {

@@ -46,7 +46,8 @@ test('device store persists bounded machine metadata independently from friendly
     hostname: 'g8',
     platform: 'linux',
     arch: 'x64',
-    pathStyle: 'posix'
+    pathStyle: 'posix',
+    agentVersion: '1.2.3'
   });
   const stored = store.get('g8-a1b2c3d4');
   assert.equal(stored.deviceName, 'Linux Build Box');
@@ -54,6 +55,9 @@ test('device store persists bounded machine metadata independently from friendly
   assert.equal(stored.platform, 'linux');
   assert.equal(stored.arch, 'x64');
   assert.equal(stored.pathStyle, 'posix');
+  assert.equal(stored.agentVersion, '1.2.3');
+  store.updateMetadata({ deviceId: 'g8-a1b2c3d4', agentVersion: '1.2.4' });
+  assert.equal(store.get('g8-a1b2c3d4').agentVersion, '1.2.4');
 });
 
 test('device store refuses silent public-key replacement', t => {

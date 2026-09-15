@@ -208,6 +208,44 @@ test('account ownership filters inventory and is rechecked at every device dispa
   );
 });
 
+test('normal account can rename and revoke only its own device with immediate routing cutoff', async t => {
+  const f = await fixture(t);
+  const keys = keyPair();
+  const grant = approvedGrant(f.pairingStore, {
+    deviceId: 'self-service-device', deviceName: 'Before Rename', publicKeyPem: keys.publicKeyPem
+  });
+  const ws = await openSocket(f.port, grant.enrollmentGrant);
+  t.after(() => ws.close());
+  const challenge = await sendEnrollHello(ws, { deviceId: 'self-service-device', publicKeyPem: keys.publicKeyPem });
+  await answerChallenge(ws, { deviceId: 'self-service-device', privateKey: keys.privateKey, challenge });
+
+  assert.throws(
+    () => f.broker.renameOwnedDevice({ accountId: 'account-bob', deviceId: 'self-service-device', deviceName: 'Stolen' }),
+    /DEVICE_ACCESS_DENIED/
+  );
+  const renamed = f.broker.renameOwnedDevice({
+    accountId: 'account-example', deviceId: 'self-service-device', deviceName: 'Renamed Device'
+  });
+  assert.equal(renamed.deviceName, 'Renamed Device');
+  assert.equal(f.deviceStore.get('self-service-device').deviceName, 'Renamed Device');
+
+  assert.throws(
+    () => f.broker.revokeOwnedDevice({ accountId: 'account-bob', deviceId: 'self-service-device' }),
+    /DEVICE_ACCESS_DENIED/
+  );
+  const revoked = f.broker.revokeOwnedDevice({ accountId: 'account-example', deviceId: 'self-service-device' });
+  assert.equal(revoked.revoked, true);
+  await assert.rejects(
+    () => f.broker.callDevice({ accountId: 'account-example', deviceId: 'self-service-device', tool: 'ping' }),
+    error => error.code === 'DEVICE_OFFLINE'
+  );
+
+  const events = f.usageStore.getAccountUsage('account-example').deviceStatusEvents;
+  assert.equal(events[0].status, 'revoked');
+  assert.ok(events.some(event => event.status === 'online'));
+  assert.equal(f.usageStore.getAccountUsage('account-bob').deviceStatusEvents.length, 0);
+});
+
 test('usage counters survive reconnect and account metadata returns without another pairing grant', async t => {
   const f = await fixture(t);
   const keys = keyPair();

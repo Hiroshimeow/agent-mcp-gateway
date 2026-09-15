@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
@@ -84,7 +85,9 @@ default_enabled = false
     ENABLE_FILESYSTEM: 'true',
     ENABLE_SHELL: 'true',
     MCP_STATEFUL_SESSIONS: 'false',
-    MCP_RUNTIME_DIR: runtimeDirectory
+    MCP_RUNTIME_DIR: runtimeDirectory,
+    MCP_METRICS_ENABLED: 'false',
+    MCP_DEVICE_AUDIT_ENABLED: 'false'
   };
 
   const child = spawn(process.execPath, ['scripts/authenticated-mcp-wrapper.mjs'], {
@@ -315,12 +318,27 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
   assert.equal(discoveryPayload.data.body, undefined);
   assert.deepEqual(discovery.result.structuredContent, discoveryPayload);
 
-  const metricsText = fs.readFileSync(path.join(runtimeDirectory, 'mcp-calls.ndjson'), 'utf8');
-  const metrics = metricsText.trim().split('\n').filter(Boolean).map(JSON.parse);
-  assert.ok(metrics.some(metric => metric.tool === 'read_text_file' && metric.success === false));
-  assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.success === false));
-  assert.ok(metrics.every(metric => metric.callerCategory === 'static-bearer'));
-  assert.doesNotMatch(metricsText, /must-not-run|must-not-be-read-by-gateway-host/);
+  const usageDb = new DatabaseSync(path.join(runtimeDirectory, 'gateway.sqlite'));
+  const metrics = usageDb.prepare(`
+    SELECT tool, status, caller_category, account_id, activity_session_id, input_bytes, output_bytes
+    FROM tool_call_events ORDER BY id
+  `).all();
+  const catalog = usageDb.prepare('SELECT COUNT(*) AS calls, MAX(tool_count) AS tool_count, MAX(schema_bytes) AS schema_bytes FROM catalog_events').get();
+  const schema = usageDb.prepare('SELECT tool_count, schema_bytes, estimated_tokens, estimation_method FROM gateway_schema_snapshot WHERE singleton=1').get();
+  usageDb.close();
+  assert.ok(metrics.some(metric => metric.tool === 'read_text_file' && metric.status === 'error'));
+  assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.status === 'error'));
+  assert.ok(metrics.every(metric => metric.caller_category === 'static-bearer'));
+  assert.ok(metrics.every(metric => metric.account_id === null && metric.activity_session_id === null));
+  assert.ok(Number(catalog.calls) >= 1);
+  assert.equal(Number(catalog.tool_count), tools.length);
+  assert.equal(Number(catalog.schema_bytes), Buffer.byteLength(JSON.stringify({ tools }), 'utf8'));
+  assert.equal(Number(schema.tool_count), tools.length);
+  assert.equal(Number(schema.schema_bytes), Buffer.byteLength(JSON.stringify({ tools }), 'utf8'));
+  assert.equal(schema.estimation_method, 'utf8_bytes_div_4_estimate');
+  assert.equal(fs.existsSync(path.join(runtimeDirectory, 'mcp-calls.ndjson')), false);
+  assert.equal(fs.existsSync(path.join(runtimeDirectory, 'device-audit.jsonl')), false);
+  assert.doesNotMatch(JSON.stringify(metrics), /must-not-run|must-not-be-read-by-gateway-host/);
   observedProfiles.yolo = names(tools);
   observedCatalogBytes.yolo = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
   observedToolBytes.shell_execute = Buffer.byteLength(JSON.stringify(tools.find(tool => tool.name === 'shell_execute')), 'utf8');

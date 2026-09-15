@@ -77,7 +77,7 @@ function publicDevice(device, { stored = null, usage = null, schema = null } = {
     online: Boolean(device.online),
     revoked: Boolean(device.revoked),
     connectionEpoch: device.connectionEpoch || 0,
-    agentVersion: device.agentVersion || 'unknown',
+    agentVersion: device.agentVersion || stored?.agentVersion || 'unknown',
     capabilities: [...(device.capabilities || [])],
     connectedAt: device.connectedAt || null,
     lastSeenAt: device.lastSeenAt || null,
@@ -135,6 +135,17 @@ export function createDeviceBroker(options = {}) {
     return publicDevice(device, { stored, usage, schema: schemaSnapshot });
   }
 
+  function recordDeviceStatus(device, status) {
+    if (!usageStore || !device?.deviceId) return;
+    const stored = durableAuth ? deviceStore.get(device.deviceId) : null;
+    usageStore.recordDeviceStatus(device.deviceId, {
+      accountId: stored?.ownerAccountId || null,
+      status,
+      connectionEpoch: device.connectionEpoch || 0,
+      agentVersion: device.agentVersion || null
+    });
+  }
+
   function statusPayload(device) {
     const status = statusForDevice(device);
     return {
@@ -173,7 +184,7 @@ export function createDeviceBroker(options = {}) {
         online: false,
         revoked: Boolean(stored.revokedAt),
         connectionEpoch: 0,
-        agentVersion: 'unknown',
+        agentVersion: stored.agentVersion || 'unknown',
         hostname: stored.hostname || null,
         platform: stored.platform || null,
         arch: stored.arch || null,
@@ -247,6 +258,7 @@ export function createDeviceBroker(options = {}) {
     device.lastSeenAt = Date.now();
     device.authenticatedPublicKeyPem = null;
     device.authenticatedAuthorizationGeneration = null;
+    recordDeviceStatus(device, revoked ? 'revoked' : 'offline');
     if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
   }
 
@@ -367,7 +379,8 @@ export function createDeviceBroker(options = {}) {
           hostname: state.hostname,
           platform: state.platform,
           arch: state.arch,
-          pathStyle: state.pathStyle
+          pathStyle: state.pathStyle,
+          agentVersion: state.agentVersion
         });
         authorizedPublicKeyPem = enrolled.publicKeyPem;
         authorizationGeneration = enrolled.authorizationGeneration;
@@ -393,7 +406,8 @@ export function createDeviceBroker(options = {}) {
             hostname: state.hostname,
             platform: state.platform,
             arch: state.arch,
-            pathStyle: state.pathStyle
+            pathStyle: state.pathStyle,
+            agentVersion: state.agentVersion
           });
         } else {
           if (current.revokedAt || current.publicKeyPem !== state.publicKeyPem) throw new Error('device authorization changed');
@@ -404,7 +418,8 @@ export function createDeviceBroker(options = {}) {
             hostname: state.hostname,
             platform: state.platform,
             arch: state.arch,
-            pathStyle: state.pathStyle
+            pathStyle: state.pathStyle,
+            agentVersion: state.agentVersion
           });
           updated = deviceStore.assignOwner({
             deviceId: state.deviceId,
@@ -427,10 +442,15 @@ export function createDeviceBroker(options = {}) {
         { deviceId: state.deviceId, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration },
         () => registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration })
       );
+      if (state.agentVersion !== undefined && typeof deviceStore.updateMetadata === 'function') {
+        try { deviceStore.updateMetadata({ deviceId: state.deviceId, agentVersion: state.agentVersion }); }
+        catch (error) { console.error(`[device-broker] agent version persist failed: ${error.message}`); }
+      }
       ws.authState = null;
       if (usageStore) {
         const previousUsage = usageStore.get(current.deviceId);
         usageStore.recordConnection(current.deviceId, { reconnect: previousUsage.connections > 0 });
+        recordDeviceStatus(current, 'online');
       }
       ws.send(JSON.stringify({
         protocol_version: DEVICE_PROTOCOL_VERSION,
@@ -484,6 +504,9 @@ export function createDeviceBroker(options = {}) {
     if (message.type === 'capability_sync') {
       device.capabilities = normalizeCapabilities(message.payload?.capabilities);
       device.agentVersion = String(message.payload?.agent_version || device.agentVersion);
+      if (durableAuth && message.payload?.agent_version !== undefined) {
+        deviceStore.updateMetadata({ deviceId: device.deviceId, agentVersion: device.agentVersion });
+      }
       usageStore?.touch(device.deviceId);
       sendStatusSnapshot(ws, device);
       return;
@@ -563,6 +586,7 @@ export function createDeviceBroker(options = {}) {
       current.online = false;
       current.socket = null;
       current.lastSeenAt = Date.now();
+      recordDeviceStatus(current, 'offline');
       rejectPendingForConnection(ws.deviceId, ws.connectionEpoch, 'Device disconnected before the request result was known; the request was not replayed.');
     });
   });
@@ -601,6 +625,28 @@ export function createDeviceBroker(options = {}) {
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
+  function requireOwnedDevice(accountId, deviceId) {
+    if (!durableAuth) throw new Error('Durable device store is required for account-owned device operations.');
+    const owner = String(accountId || '').trim();
+    const normalized = normalizeDeviceId(deviceId);
+    if (!owner) throw deviceBrokerError('ACCOUNT_ID_REQUIRED: account_id is required for device management.', 'ACCOUNT_ID_REQUIRED');
+    const stored = deviceStore.get(normalized);
+    if (!stored || !stored.ownerAccountId || stored.ownerAccountId !== owner) {
+      throw deviceBrokerError('DEVICE_ACCESS_DENIED: device is not owned by the caller account.', 'DEVICE_ACCESS_DENIED');
+    }
+    return stored;
+  }
+
+  function renameOwnedDevice({ accountId, deviceId, deviceName }) {
+    const stored = requireOwnedDevice(accountId, deviceId);
+    const name = String(deviceName || '').trim();
+    if (!name || name.length > 128) throw new Error('device_name must be between 1 and 128 characters.');
+    deviceStore.updateMetadata({ deviceId: stored.deviceId, deviceName: name });
+    const current = devices.get(stored.deviceId) || { deviceId: stored.deviceId, connectionEpoch: 0, capabilities: [] };
+    if (current.online) sendStatusSnapshot(current.socket, current);
+    return statusForDevice(current);
+  }
+
   function revokeDevice(deviceId) {
     if (!durableAuth) throw new Error('Durable device store is required for revocation.');
     const normalized = normalizeDeviceId(deviceId);
@@ -620,7 +666,13 @@ export function createDeviceBroker(options = {}) {
     current.authenticatedPublicKeyPem = null;
     current.authenticatedAuthorizationGeneration = null;
     devices.set(normalized, current);
+    recordDeviceStatus(current, 'revoked');
     return statusForDevice(current);
+  }
+
+  function revokeOwnedDevice({ accountId, deviceId }) {
+    const stored = requireOwnedDevice(accountId, deviceId);
+    return revokeDevice(stored.deviceId);
   }
 
   async function callDevice({ requestId: requestedRequestId, accountId = null, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
@@ -728,5 +780,5 @@ export function createDeviceBroker(options = {}) {
     return schemaSnapshot;
   }
 
-  return { attach, listDevices, revokeDevice, callDevice, setSchemaSnapshot, shutdown };
+  return { attach, listDevices, renameOwnedDevice, revokeDevice, revokeOwnedDevice, callDevice, setSchemaSnapshot, shutdown };
 }

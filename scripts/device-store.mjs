@@ -28,6 +28,7 @@ function rowToDevice(row) {
     platform: row.platform || null,
     arch: row.arch || null,
     pathStyle: row.path_style || null,
+    agentVersion: row.agent_version || null,
     publicKeyPem: row.public_key_pem,
     enrolledAt: row.enrolled_at,
     revokedAt: row.revoked_at,
@@ -54,7 +55,8 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       hostname TEXT,
       platform TEXT,
       arch TEXT,
-      path_style TEXT
+      path_style TEXT,
+      agent_version TEXT
     );
   `);
   const columns = db.prepare(`PRAGMA table_info(devices)`).all();
@@ -70,24 +72,24 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   if (!columns.some(column => column.name === 'account_label')) {
     db.exec('ALTER TABLE devices ADD COLUMN account_label TEXT');
   }
-  for (const column of ['hostname', 'platform', 'arch', 'path_style']) {
+  for (const column of ['hostname', 'platform', 'arch', 'path_style', 'agent_version']) {
     if (!columns.some(entry => entry.name === column)) db.exec(`ALTER TABLE devices ADD COLUMN ${column} TEXT`);
   }
   db.exec('PRAGMA busy_timeout = 5000');
 
   const getStatement = db.prepare(`
-    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     WHERE device_id = ?
   `);
   const listStatement = db.prepare(`
-    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     ORDER BY device_id
   `);
   const insertStatement = db.prepare(`
-    INSERT INTO devices (device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)
+    INSERT INTO devices (device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)
   `);
   const rotateStatement = db.prepare(`
     UPDATE devices
@@ -101,7 +103,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   `);
   const metadataStatement = db.prepare(`
     UPDATE devices
-    SET device_name = ?, account_label = ?, hostname = ?, platform = ?, arch = ?, path_style = ?
+    SET device_name = ?, account_label = ?, hostname = ?, platform = ?, arch = ?, path_style = ?, agent_version = ?
     WHERE device_id = ? AND revoked_at IS NULL
   `);
   const ownerStatement = db.prepare(`
@@ -118,7 +120,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return listStatement.all().map(rowToDevice);
   }
 
-  function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null }) {
+  function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null, agentVersion = null }) {
     const normalizedId = normalizeDeviceId(deviceId);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
     const normalizedName = String(deviceName || '').trim().slice(0, 128) || normalizedId;
@@ -128,9 +130,10 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     const normalizedPlatform = String(platform || '').trim().slice(0, 32) || null;
     const normalizedArch = String(arch || '').trim().slice(0, 32) || null;
     const normalizedPathStyle = ['windows', 'posix'].includes(String(pathStyle || '').trim()) ? String(pathStyle).trim() : null;
+    const normalizedAgentVersion = String(agentVersion || '').trim().slice(0, 64) || null;
     if (getStatement.get(normalizedId)) throw new Error(`Device ${normalizedId} is already enrolled.`);
     const enrolledAt = now();
-    insertStatement.run(normalizedId, normalizedName, normalizedOwner, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedKey, enrolledAt);
+    insertStatement.run(normalizedId, normalizedName, normalizedOwner, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedAgentVersion, normalizedKey, enrolledAt);
     return {
       deviceId: normalizedId,
       deviceName: normalizedName,
@@ -140,6 +143,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       platform: normalizedPlatform,
       arch: normalizedArch,
       pathStyle: normalizedPathStyle,
+      agentVersion: normalizedAgentVersion,
       publicKeyPem: normalizedKey,
       enrolledAt,
       revokedAt: null,
@@ -161,7 +165,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
-  function updateMetadata({ deviceId, deviceName, accountLabel, hostname, platform, arch, pathStyle }) {
+  function updateMetadata({ deviceId, deviceName, accountLabel, hostname, platform, arch, pathStyle, agentVersion }) {
     const normalizedId = normalizeDeviceId(deviceId);
     const current = get(normalizedId);
     if (!current) throw new Error(`Unknown device ${normalizedId}.`);
@@ -173,7 +177,8 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     const nextArch = arch === undefined ? current.arch : (String(arch || '').trim().slice(0, 32) || null);
     const pathValue = String(pathStyle || '').trim();
     const nextPathStyle = pathStyle === undefined ? current.pathStyle : (['windows', 'posix'].includes(pathValue) ? pathValue : null);
-    const result = metadataStatement.run(nextName, nextAccount, nextHostname, nextPlatform, nextArch, nextPathStyle, normalizedId);
+    const nextAgentVersion = agentVersion === undefined ? current.agentVersion : (String(agentVersion || '').trim().slice(0, 64) || null);
+    const result = metadataStatement.run(nextName, nextAccount, nextHostname, nextPlatform, nextArch, nextPathStyle, nextAgentVersion, normalizedId);
     if (Number(result.changes) !== 1) throw new Error(`Device ${normalizedId} metadata update failed.`);
     return get(normalizedId);
   }

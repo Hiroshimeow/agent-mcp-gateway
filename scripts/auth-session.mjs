@@ -103,16 +103,35 @@ function redirectToAccountLogin(res) {
 }
 
 export class AccountAuthProvider {
-  constructor({ stateStore = null, accountStore, accountFromRequest } = {}) {
+  constructor({ stateStore = null, accountStore, accountFromRequest, activityStore = null } = {}) {
     if (!accountStore) throw new Error('accountStore is required for AccountAuthProvider.');
     if (typeof accountFromRequest !== 'function') throw new Error('accountFromRequest is required for AccountAuthProvider.');
     this.stateStore = stateStore;
     this.accountStore = accountStore;
     this.accountFromRequest = accountFromRequest;
+    this.activityStore = activityStore;
     this.clientsStore = new ClientsStore(stateStore);
     this.codes = new Map();
     this.tokens = new Map();
     this.refreshTokens = new Map();
+  }
+
+  ensureActivitySession(tokenData, { token = null, refreshToken = null } = {}) {
+    let activitySessionId = String(tokenData.activitySessionId || '').trim();
+    if (!activitySessionId) {
+      activitySessionId = crypto.randomUUID();
+      tokenData.activitySessionId = activitySessionId;
+      this.activityStore?.openActivitySession({
+        activitySessionId,
+        accountId: tokenData.accountId,
+        clientId: tokenData.clientId
+      });
+      if (token) this.stateStore?.setToken(token, tokenData);
+      if (refreshToken) this.stateStore?.setRefreshToken(refreshToken, tokenData);
+      return activitySessionId;
+    }
+    this.activityStore?.touchActivitySession({ activitySessionId, accountId: tokenData.accountId });
+    return activitySessionId;
   }
 
   async authorize(client, params, res) {
@@ -148,11 +167,18 @@ export class AccountAuthProvider {
     this.codes.delete(authorizationCode);
     const token = crypto.randomUUID();
     const refreshToken = crypto.randomUUID();
+    const activitySessionId = crypto.randomUUID();
     const scopes = codeData.params.scopes || [];
+    this.activityStore?.openActivitySession({
+      activitySessionId,
+      accountId: codeData.accountId,
+      clientId: client.client_id
+    });
     const tokenData = {
       token,
       accountId: codeData.accountId,
       clientId: client.client_id,
+      activitySessionId,
       scopes,
       expiresAt: Date.now() + ACCESS_TOKEN_TTL_MS,
       resource: codeData.params.resource
@@ -161,6 +187,7 @@ export class AccountAuthProvider {
       refreshToken,
       accountId: codeData.accountId,
       clientId: client.client_id,
+      activitySessionId,
       scopes,
       expiresAt: Date.now() + REFRESH_TOKEN_TTL_MS,
       resource: codeData.params.resource
@@ -184,6 +211,7 @@ export class AccountAuthProvider {
     if (!refreshTokenData || refreshTokenData.expiresAt < Date.now()) throw new Error('Invalid or expired refresh token');
     if (client?.client_id && refreshTokenData.clientId !== client.client_id) throw new Error('Refresh token was not issued to this client');
     activeAccount(this.accountStore, refreshTokenData.accountId);
+    const activitySessionId = this.ensureActivitySession(refreshTokenData, { refreshToken });
 
     this.refreshTokens.delete(refreshToken);
     this.stateStore?.deleteRefreshToken?.(refreshToken);
@@ -194,6 +222,7 @@ export class AccountAuthProvider {
       token: nextAccessToken,
       accountId: refreshTokenData.accountId,
       clientId: refreshTokenData.clientId,
+      activitySessionId,
       scopes: refreshTokenData.scopes,
       expiresAt: Date.now() + ACCESS_TOKEN_TTL_MS,
       resource: refreshTokenData.resource
@@ -202,6 +231,7 @@ export class AccountAuthProvider {
       refreshToken: nextRefreshToken,
       accountId: refreshTokenData.accountId,
       clientId: refreshTokenData.clientId,
+      activitySessionId,
       scopes: refreshTokenData.scopes,
       expiresAt: Date.now() + REFRESH_TOKEN_TTL_MS,
       resource: refreshTokenData.resource
@@ -224,10 +254,12 @@ export class AccountAuthProvider {
     const tokenData = this.tokens.get(token) || this.stateStore?.getToken(token);
     if (!tokenData || tokenData.expiresAt < Date.now()) throw new Error('Invalid or expired token');
     activeAccount(this.accountStore, tokenData.accountId);
+    const activitySessionId = this.ensureActivitySession(tokenData, { token });
     return {
       token,
       accountId: tokenData.accountId,
       clientId: tokenData.clientId,
+      activitySessionId,
       scopes: tokenData.scopes,
       expiresAt: Math.floor(tokenData.expiresAt / 1000),
       resource: tokenData.resource

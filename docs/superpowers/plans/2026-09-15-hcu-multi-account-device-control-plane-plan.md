@@ -158,18 +158,18 @@
 
 ## Phase 7 — Usage/audit persistence and account dashboard
 
-- [ ] SQLite becomes authoritative for bounded per-call metadata; JSONL/NDJSON are optional exports/debug only, not a competing source of truth.
-- [ ] Store `tool_call_events`: time, account_id, activity_session_id, device_id, tool, duration, status/error code, exact input/output bytes, truncation/spill flags; do not store command/file/payload bodies by default.
-- [ ] Track `get_skill` loads by skill name, success/failure, exact bytes, estimated tokens.
-- [ ] Track exact tool-call counts, tools/list counts, schema bytes/count, device connection/status changes.
-- [ ] Introduce an `activity_session_id` bound to the account/OAuth lifecycle for aggregation; do not pretend stateless HTTP connections are durable MCP sessions.
-- [ ] Token/context figures are named `estimated_*` and document their method; exact billing/model tokens are not claimed.
-- [ ] Dashboard is account-authenticated, dark, compact, and shows endpoint health, devices, online/last-seen/version, tool/schema counts, call success/failure, bytes, estimated MCP context tokens, top tools, skill loads/failures, recent error codes, and activity sessions.
-- [ ] Normal account may rename/revoke its own devices and end its own sessions from the dashboard.
-- [ ] Admin account management remains local CLI-only.
-- [ ] Revoke actions are POST/mutation actions with CSRF-safe/session-safe handling, never GET side effects.
+- [x] SQLite becomes authoritative for bounded per-call metadata; JSONL/NDJSON are optional exports/debug only, not a competing source of truth.
+- [x] Store `tool_call_events`: time, account_id, activity_session_id, device_id, tool, duration, status/error code, exact input/output bytes, truncation/spill flags; do not store command/file/payload bodies by default.
+- [x] Track `get_skill` loads by skill name, success/failure, exact bytes, estimated tokens.
+- [x] Track exact tool-call counts, tools/list counts, schema bytes/count, device connection/status changes.
+- [x] Introduce an `activity_session_id` bound to the account/OAuth lifecycle for aggregation; do not pretend stateless HTTP connections are durable MCP sessions.
+- [x] Token/context figures are named `estimated_*` and document their method; exact billing/model tokens are not claimed.
+- [x] Dashboard is account-authenticated, dark, compact, and shows endpoint health, devices, online/last-seen/version, tool/schema counts, call success/failure, bytes, estimated MCP context tokens, top tools, skill loads/failures, recent error codes, and activity sessions.
+- [x] Normal account may rename/revoke its own devices and end its own sessions from the dashboard.
+- [x] Admin account management remains local CLI-only.
+- [x] Revoke actions are POST/mutation actions with CSRF-safe/session-safe handling, never GET side effects.
 
-**Gate:** Alice dashboard cannot observe Bob metadata; revoke immediately blocks routing; counters reconcile with generated test calls; dashboard never labels estimates as exact tokens and does not expose payload bodies.
+**Gate:** PASS. `gateway.sqlite` now owns per-call, skill-load, catalog/schema, activity-session, and device-status metadata; file telemetry is explicit opt-in debug export and smoke proves the default files are absent. OAuth creates one logical `activity_session_id`, preserves it across refresh, and ending it blocks both access-token verification and refresh. Dashboard integration tests prove Alice cannot observe or mutate Bob metadata, admin has no product dashboard access, CSRF is required, own-device revoke immediately cuts routing, and GET has no mutation route. Device version persists across gateway restart/reconnect. Generated usage fixtures reconcile exact calls/bytes while a secret payload sentinel is absent from the DB. Fresh verification: 294/294 gateway tests plus all three MCP smokes; YOLO remains 16 tools / 15,297 bytes. Estimated context values use `utf8_bytes_div_4_estimate` and are labeled estimate/not billing. Live v2 remains untouched until Phase 8.
 
 ---
 

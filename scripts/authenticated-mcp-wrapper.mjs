@@ -51,6 +51,7 @@ import { callerAuditId, createDeviceAccessPolicy } from './device-access-policy.
 import { createDeviceAuditRecorder } from './device-audit.mjs';
 import { createAccountStore } from './account-store.mjs';
 import { installAccountRoutes } from './account-http.mjs';
+import { installDashboardRoutes } from './dashboard-http.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -74,7 +75,7 @@ const debugAuth = envFlag(process.env.MCP_DEBUG_AUTH, false);
 const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 5000);
 const toolMetrics = createToolMetricsRecorder({
   metricsPath: path.resolve(process.env.MCP_METRICS_PATH || path.join(runtimeDirectory, 'mcp-calls.ndjson')),
-  enabled: envFlag(process.env.MCP_METRICS_ENABLED, true)
+  enabled: envFlag(process.env.MCP_METRICS_ENABLED, false)
 });
 const skillBootstrapGate = createSkillBootstrapGate({
   ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
@@ -134,7 +135,7 @@ const deviceAccessPolicy = createDeviceAccessPolicy({
 });
 const deviceAudit = createDeviceAuditRecorder({
   auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
-  enabled: process.env.MCP_DEVICE_AUDIT_ENABLED !== 'false'
+  enabled: envFlag(process.env.MCP_DEVICE_AUDIT_ENABLED, false)
 });
 
 async function broadcastCatalogChanges(changes = {}) {
@@ -388,15 +389,28 @@ async function listMergedTools() {
   return tools.filter(tool => shouldExposeToolForProfile(tool, runtimeProfile));
 }
 
-async function refreshDeviceSchemaSnapshot() {
-  const tools = await listMergedTools();
+function persistSchemaSnapshot(tools) {
   const toolSchemaBytes = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
-  return deviceBroker.setSchemaSnapshot({
+  const estimatedTokens = Math.ceil(toolSchemaBytes / 4);
+  const estimationMethod = 'utf8_bytes_div_4_estimate';
+  deviceUsageStore.setSchemaSnapshot({
+    toolCount: tools.length,
+    schemaBytes: toolSchemaBytes,
+    estimatedTokens,
+    estimationMethod
+  });
+  deviceBroker.setSchemaSnapshot({
     toolCount: tools.length,
     toolSchemaBytes,
-    toolSchemaTokenEstimate: Math.ceil(toolSchemaBytes / 4),
-    tokenEstimateMethod: 'utf8_bytes_div_4_estimate'
+    toolSchemaTokenEstimate: estimatedTokens,
+    tokenEstimateMethod: estimationMethod
   });
+  return { toolSchemaBytes, estimatedTokens, estimationMethod };
+}
+
+async function refreshDeviceSchemaSnapshot() {
+  const tools = await listMergedTools();
+  return persistSchemaSnapshot(tools);
 }
 
 function structuredToolText(value, { includeStructured = false } = {}) {
@@ -432,6 +446,22 @@ function requireDeviceId(args = {}) {
   const error = new Error('DEVICE_ID_REQUIRED: device_id is required for execution tools.');
   error.code = 'DEVICE_ID_REQUIRED';
   throw error;
+}
+
+function metricDeviceId(toolName, args = {}, context = {}) {
+  const explicit = String(args.device_id || '').trim();
+  if (explicit) return explicit;
+  if (!PROCESS_TOOL_NAMES.has(toolName) || toolName === 'start_process' || !args.session_id) return null;
+  try {
+    return remoteProcessSessions.resolve({ sessionId: args.session_id, ownerKey: context.callerKey || 'anonymous' }).deviceId;
+  } catch {
+    return null;
+  }
+}
+
+function metricSkillName(toolName, args = {}) {
+  if (toolName !== 'get_skill') return null;
+  return String(args.name || '').trim() || null;
 }
 
 async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args = {}, timeoutMs }) {
@@ -575,8 +605,20 @@ async function routeToolCall(request, context = {}) {
   throw new Error(`Unknown or disabled tool: ${toolName}`);
 }
 
+function recordToolUsage(metric) {
+  try {
+    deviceUsageStore.recordToolCall(metric);
+  } catch (error) {
+    console.error(`[usage-store] tool event persist failed: ${error.message}`);
+  }
+  toolMetrics.record(metric);
+}
+
 async function routeObservedToolCall(request, context) {
   const toolName = request.params?.name || 'unknown';
+  const args = request.params?.arguments || {};
+  const deviceId = metricDeviceId(toolName, args, context);
+  const skillName = metricSkillName(toolName, args);
   const startedAt = Date.now();
   console.log(`[tool-call:start] ${toolName}`);
   try {
@@ -584,26 +626,36 @@ async function routeObservedToolCall(request, context) {
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:finish] ${toolName} durationMs=${durationMs}`);
     if (durationMs > slowToolThresholdMs) console.log(`[tool-call:slow] ${toolName} durationMs=${durationMs}`);
-    toolMetrics.record(buildToolMetric({
+    const metric = buildToolMetric({
       toolName,
-      args: request.params?.arguments || {},
+      args,
       result,
       durationMs,
       callerCategory: context?.callerCategory,
+      accountId: context?.accountId,
+      activitySessionId: context?.activitySessionId,
+      deviceId,
+      skillName,
       upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null
-    }));
+    });
+    recordToolUsage(metric);
     return result;
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     console.log(`[tool-call:error] ${toolName} durationMs=${durationMs}`);
-    toolMetrics.record(buildToolMetric({
+    const metric = buildToolMetric({
       toolName,
-      args: request.params?.arguments || {},
+      args,
       durationMs,
       callerCategory: context?.callerCategory,
+      accountId: context?.accountId,
+      activitySessionId: context?.activitySessionId,
+      deviceId,
+      skillName,
       upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null,
       error
-    }));
+    });
+    recordToolUsage(metric);
     throw error;
   }
 }
@@ -633,7 +685,7 @@ function currentResourceContext(callerContext = {}) {
   };
 }
 
-function createProxyServer({ accountId, callerKey, callerCategory, callerSubject }) {
+function createProxyServer({ accountId, activitySessionId, callerKey, callerCategory, callerSubject }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -652,9 +704,21 @@ function createProxyServer({ accountId, callerKey, callerCategory, callerSubject
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { accountId, callerKey, callerCategory, callerSubject }));
-  const callerContext = { accountId, callerKey, callerCategory, callerSubject };
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = await listMergedTools();
+    const { toolSchemaBytes, estimatedTokens, estimationMethod } = persistSchemaSnapshot(tools);
+    deviceUsageStore.recordCatalogList({
+      accountId,
+      activitySessionId,
+      toolCount: tools.length,
+      schemaBytes: toolSchemaBytes,
+      estimatedTokens,
+      estimationMethod
+    });
+    return { tools };
+  });
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { accountId, activitySessionId, callerKey, callerCategory, callerSubject }));
+  const callerContext = { accountId, activitySessionId, callerKey, callerCategory, callerSubject };
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const context = currentResourceContext(callerContext);
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
@@ -750,11 +814,17 @@ const accountHttp = installAccountRoutes(app, {
   accountStore,
   needInvite: () => workspaceSnapshot().rawConfig?.auth?.need_invite !== false
 });
+installDashboardRoutes(app, {
+  accountFromRequest: accountHttp.accountFromRequest,
+  usageStore: deviceUsageStore,
+  deviceBroker
+});
 const oauthStateStore = new SQLiteAuthState(gatewayDbPath);
 const provider = new AccountAuthProvider({
   stateStore: oauthStateStore,
   accountStore,
-  accountFromRequest: accountHttp.accountFromRequest
+  accountFromRequest: accountHttp.accountFromRequest,
+  activityStore: deviceUsageStore
 });
 app.use((req, res, next) => {
   if (req.path !== '/mcp') {
@@ -919,6 +989,7 @@ async function createTransport(req) {
   let transport;
   const server = createProxyServer({
     accountId: req.auth?.accountId || null,
+    activitySessionId: req.auth?.activitySessionId || null,
     callerKey: skillCallerKeyFromRequest(req),
     callerCategory: callerCategoryFromRequest(req),
     callerSubject: callerSubjectFromRequest(req)

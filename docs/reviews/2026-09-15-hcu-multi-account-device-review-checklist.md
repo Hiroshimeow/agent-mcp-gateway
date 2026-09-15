@@ -82,18 +82,20 @@ Evidence: isolated real-WebSocket disconnect/reconnect gate returns `DEVICE_OFFL
 Evidence: exact baseline YOLO 15,793 bytes (`shell_execute` 1,928; `edit_file` 1,678), after cleanup YOLO 15,297 bytes (`shell_execute` 1,856; `edit_file` 1,254). Strict MCP SDK validation accepts all schema-bearing gateway output shapes tested and rejects malformed structured output. Gateway full suite 285/285 plus three smokes PASS; device full suite 52/52 PASS; implementation grep finds no legacy edit branch. Live v2 remains intentionally unchanged until Phase 8.
 
 ## Phase 7 — Usage / audit / dashboard
-- [ ] SQLite is authoritative for audit/usage metadata.
-- [ ] JSONL/NDJSON, if retained, are optional export/debug only.
-- [ ] Per-call metadata includes account/session/device/tool/duration/status/bytes without payload bodies.
-- [ ] Skill loads record name/success/bytes/estimated tokens.
-- [ ] Dashboard shows endpoint health, device status/version/last-seen, tool/schema counts, calls, failures, bytes, estimated context tokens, top tools, skills, errors, sessions.
-- [ ] Estimated token values are explicitly labeled estimates.
-- [ ] No claim of exact ChatGPT billing/context tokens is made.
-- [ ] `activity_session_id` is used for logical session aggregation; stateless HTTP is not mislabeled as a durable connection.
-- [ ] A normal account can rename/revoke only its own devices and end only its own sessions.
-- [ ] Admin management remains local CLI-only.
-- [ ] Mutating dashboard actions use POST/session/CSRF-safe semantics, not GET links.
-- [ ] Alice cannot see Bob's usage/dashboard metadata.
+- [x] SQLite is authoritative for audit/usage metadata.
+- [x] JSONL/NDJSON, if retained, are optional export/debug only.
+- [x] Per-call metadata includes account/session/device/tool/duration/status/bytes without payload bodies.
+- [x] Skill loads record name/success/bytes/estimated tokens.
+- [x] Dashboard shows endpoint health, device status/version/last-seen, tool/schema counts, calls, failures, bytes, estimated context tokens, top tools, skills, errors, sessions.
+- [x] Estimated token values are explicitly labeled estimates.
+- [x] No claim of exact ChatGPT billing/context tokens is made.
+- [x] `activity_session_id` is used for logical session aggregation; stateless HTTP is not mislabeled as a durable connection.
+- [x] A normal account can rename/revoke only its own devices and end only its own sessions.
+- [x] Admin management remains local CLI-only.
+- [x] Mutating dashboard actions use POST/session/CSRF-safe semantics, not GET links.
+- [x] Alice cannot see Bob's usage/dashboard metadata.
+
+Evidence: same `gateway.sqlite` stores bounded per-call, skill-load, catalog/schema, activity-session, and device-status metadata; debug JSONL/NDJSON exports are off by default. OAuth activity IDs persist across refresh and end-session blocks access/refresh. Dashboard integration proves user-only access, Alice/Bob isolation, CSRF, POST-only mutation, own-device rename/revoke, immediate routing cutoff, and own-session termination. Device agent version survives gateway restart/reconnect. Secret payload sentinel is absent from SQLite. Full gateway suite 294/294 plus all three MCP smokes PASS; YOLO remains 16 tools / 15,297 bytes; token/context values are explicitly estimated with `utf8_bytes_div_4_estimate`. Live v2 remains intentionally unchanged until Phase 8.
 
 ## Phase 8 — Live migration
 - [ ] Old Linux v1 endpoint remains untouched.
