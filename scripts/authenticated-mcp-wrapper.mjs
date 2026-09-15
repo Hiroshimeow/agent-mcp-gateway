@@ -265,8 +265,6 @@ const shellExecuteOutputSchema = {
     exitCode: { type: 'number' },
     stdout: { type: 'string' },
     stderr: { type: 'string' },
-    stderrClassification: { type: 'string' },
-    durationMs: { type: 'number' },
     timedOut: { type: 'boolean' },
     stdoutTruncated: { type: 'boolean' },
     stderrTruncated: { type: 'boolean' },
@@ -299,26 +297,6 @@ function customToolContext(callerContext = {}) {
     runtimeProfile,
     packageRoot,
     env: process.env
-  };
-}
-
-function buildEditFileInputSchema(inputSchema = {}) {
-  return {
-    ...inputSchema,
-    type: 'object',
-    properties: {
-      ...(inputSchema.properties || {}),
-      old_text: { type: 'string', minLength: 1, description: 'Exact text to replace. No fuzzy matching is applied.' },
-      new_text: { type: 'string', description: 'Replacement text.' },
-      expected_replacements: { type: 'integer', minimum: 1, default: 1, description: 'Required exact occurrence count before mutation.' },
-      dry_run: { type: 'boolean', default: false, description: 'Validate and preview without writing.' }
-    },
-    required: ['path'],
-    anyOf: [
-      { required: ['edits'] },
-      { required: ['old_text', 'new_text'] }
-    ],
-    additionalProperties: false
   };
 }
 
@@ -363,23 +341,17 @@ const FILESYSTEM_TOOL_DEFINITIONS = [
   },
   {
     name: 'edit_file',
-    description: 'Make exact guarded edits to a text file on one explicit owned online device.',
+    description: 'Make one exact guarded text replacement on one explicit owned online device.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string' },
-        edits: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: { oldText: { type: 'string' }, newText: { type: 'string' } },
-            required: ['oldText', 'newText'],
-            additionalProperties: false
-          }
-        },
-        dryRun: { type: 'boolean', default: false }
+        old_text: { type: 'string', minLength: 1, description: 'Exact text to replace. No fuzzy matching is applied.' },
+        new_text: { type: 'string', description: 'Replacement text.' },
+        expected_replacements: { type: 'integer', minimum: 1, default: 1, description: 'Required exact occurrence count before mutation.' },
+        dry_run: { type: 'boolean', default: false, description: 'Validate without writing.' }
       },
-      required: ['path'],
+      required: ['path', 'old_text', 'new_text'],
       additionalProperties: false
     },
     outputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'], additionalProperties: false }
@@ -387,14 +359,11 @@ const FILESYSTEM_TOOL_DEFINITIONS = [
 ];
 
 function filesystemToolMeta(tool) {
-  const baseSchema = tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema;
   return stableToolDefinition(applyToolRisk({
     ...tool,
-    inputSchema: withRequiredDeviceId(baseSchema),
+    inputSchema: withRequiredDeviceId(tool.inputSchema),
     name: tool.name,
-    description: decorateSkillBootstrapDescription(tool.name, tool.name === 'edit_file'
-      ? `${tool.description} Prefer old_text/new_text with expected_replacements for guarded exact edits; legacy edits[]/dryRun remains supported for compatibility.`
-      : tool.description)
+    description: decorateSkillBootstrapDescription(tool.name, tool.description)
   }));
 }
 

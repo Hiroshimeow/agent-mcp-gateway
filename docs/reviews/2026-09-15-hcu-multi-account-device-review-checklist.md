@@ -68,16 +68,18 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 Evidence: isolated real-WebSocket disconnect/reconnect gate returns `DEVICE_OFFLINE` while disconnected and resumes after reconnect; `pure-control-plane-contract` finds no host execution path in the model-facing gateway; full gateway 287/287 plus three smokes PASS; full device 52/52 PASS; YOLO catalog remains 16 tools / 15,793 bytes. Live v2 cutover is intentionally Phase 8.
 
 ## Phase 6 — Tool/debt cleanup
-- [ ] `edit_file` exposes one contract only: path/old_text/new_text/expected_replacements/dry_run/device_id.
-- [ ] `edits[]`, `dryRun`, and dual-contract `anyOf` are gone from public schema.
-- [ ] No dead legacy edit implementation remains after internal consumers are migrated.
-- [ ] `device_id` remains on multi-device filesystem/shell/start-process tools.
-- [ ] Redundant `device_id` is absent from process follow-up tools.
-- [ ] `shell_execute` schema is measured before/after any trim.
-- [ ] Runtime-output reduction is not confused with schema reduction.
-- [ ] Strict MCP structured output validation still passes.
-- [ ] Skills remain on-demand; no skill bodies are preloaded.
-- [ ] Routine filesystem/shell calls are not forced through `get_skill`.
+- [x] `edit_file` exposes one contract only: path/old_text/new_text/expected_replacements/dry_run/device_id.
+- [x] `edits[]`, `dryRun`, and dual-contract `anyOf` are gone from public schema.
+- [x] No dead legacy edit implementation remains after internal consumers are migrated.
+- [x] `device_id` remains on multi-device filesystem/shell/start-process tools.
+- [x] Redundant `device_id` is absent from process follow-up tools.
+- [x] `shell_execute` schema is measured before/after any trim.
+- [x] Runtime-output reduction is not confused with schema reduction.
+- [x] Strict MCP structured output validation still passes.
+- [x] Skills remain on-demand; no skill bodies are preloaded.
+- [x] Routine filesystem/shell calls are not forced through `get_skill`.
+
+Evidence: exact baseline YOLO 15,793 bytes (`shell_execute` 1,928; `edit_file` 1,678), after cleanup YOLO 15,297 bytes (`shell_execute` 1,856; `edit_file` 1,254). Strict MCP SDK validation accepts all schema-bearing gateway output shapes tested and rejects malformed structured output. Gateway full suite 285/285 plus three smokes PASS; device full suite 52/52 PASS; implementation grep finds no legacy edit branch. Live v2 remains intentionally unchanged until Phase 8.
 
 ## Phase 7 — Usage / audit / dashboard
 - [ ] SQLite is authoritative for audit/usage metadata.

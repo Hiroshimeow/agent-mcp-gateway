@@ -9,6 +9,7 @@ const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
 const observedProfiles = {};
 const observedCatalogBytes = {};
+const observedToolBytes = {};
 
 async function findFreePort() {
   return await new Promise((resolve, reject) => {
@@ -226,10 +227,13 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
   assert.deepEqual(externalSearchPayload.data, { items: [], truncated: false, nextCursor: null });
 
   const editInputSchema = tools.find(tool => tool.name === 'edit_file')?.inputSchema;
+  assert.deepEqual(Object.keys(editInputSchema?.properties || {}).sort(), [
+    'device_id', 'dry_run', 'expected_replacements', 'new_text', 'old_text', 'path'
+  ]);
+  assert.deepEqual(editInputSchema?.required, ['path', 'old_text', 'new_text', 'device_id']);
   assert.equal(editInputSchema?.properties?.expected_replacements?.default, 1);
   assert.equal(editInputSchema?.properties?.old_text?.minLength, 1);
-  assert.ok(editInputSchema?.anyOf?.some(entry => entry.required?.includes('edits')));
-  assert.ok(editInputSchema?.anyOf?.some(entry => entry.required?.includes('old_text') && entry.required?.includes('new_text')));
+  assert.equal(editInputSchema?.anyOf, undefined);
   const shellOutputSchema = tools.find(tool => tool.name === 'shell_execute')?.outputSchema;
   assert.equal(shellOutputSchema?.type, 'object');
   const shellInputSchema = tools.find(tool => tool.name === 'shell_execute')?.inputSchema;
@@ -264,6 +268,8 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
     'workingDirectoryResolvedBytes',
     'returnedWorkingDirectoryResolvedBytes',
     'workingDirectoryResolvedTruncated',
+    'durationMs',
+    'stderrClassification',
     'returnedStdoutBytes',
     'returnedStderrBytes',
     'stdoutHeadBytes',
@@ -317,6 +323,8 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
   assert.doesNotMatch(metricsText, /must-not-run|must-not-be-read-by-gateway-host/);
   observedProfiles.yolo = names(tools);
   observedCatalogBytes.yolo = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
+  observedToolBytes.shell_execute = Buffer.byteLength(JSON.stringify(tools.find(tool => tool.name === 'shell_execute')), 'utf8');
+  observedToolBytes.edit_file = Buffer.byteLength(JSON.stringify(tools.find(tool => tool.name === 'edit_file')), 'utf8');
   assert.ok(observedCatalogBytes.yolo <= 32 * 1024, `yolo core catalog exceeded 32 KiB: ${observedCatalogBytes.yolo}`);
 });
 
@@ -344,5 +352,6 @@ console.log(JSON.stringify({
   ok: true,
   checked: 'exact core catalog, progressive skill advisory, profile filtering, explicit device routing, and no gateway-host execution fallback',
   observedProfiles,
-  observedCatalogBytes
+  observedCatalogBytes,
+  observedToolBytes
 }, null, 2));

@@ -67,10 +67,7 @@ test('official filesystem hot-activates a persisted path before the same operati
     const target = path.join(addedRoot, 'new.txt');
     await registry.ensureTrustedPath(target, 'file');
     await client.callTool({ name: 'write_file', arguments: { path: target, content: 'first' } });
-    await client.callTool({
-      name: 'edit_file',
-      arguments: { path: target, edits: [{ oldText: 'first', newText: 'second' }], dryRun: false }
-    });
+    await client.callTool({ name: 'write_file', arguments: { path: target, content: 'second' } });
     const read = await client.callTool({ name: 'read_text_file', arguments: { path: target } });
     assert.equal(read.content[0].text, 'second');
 

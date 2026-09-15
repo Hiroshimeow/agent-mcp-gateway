@@ -141,18 +141,18 @@
 
 ## Phase 6 — Tool contract/debt cleanup
 
-- [ ] `edit_file` exposes one guarded contract only: `path`, `old_text`, `new_text`, `expected_replacements`, `dry_run`, `device_id`.
-- [ ] Remove model-facing `edits[]`, `dryRun`, dual `anyOf`, and dead legacy compatibility code/tests once no internal consumer remains.
-- [ ] Device adapter translates the one HCU guarded-edit contract into the upstream DC execution primitive internally.
-- [ ] Keep `device_id` on filesystem/shell/start-process tools; it is necessary for multi-device routing.
-- [ ] Keep process follow-up tools free of redundant `device_id` because `session_id` is already bound.
-- [ ] Benchmark `shell_execute` schema contribution before trimming.
-- [ ] Keep input `command`, `working_directory`, `timeout_ms`, `device_id` unless evidence shows one is redundant.
-- [ ] Move purely audit-oriented shell result metadata out of the model-facing schema when safe; retain enough recovery data for truncation/spill and strict MCP structured-output validity.
-- [ ] Do not rely on `rg`/RTK to solve tool-schema bloat; runtime-output optimization and schema optimization are separate.
-- [ ] Confirm skill loading remains on-demand; no skill-body preload and no forced skill gate for routine file/shell calls.
+- [x] `edit_file` exposes one guarded contract only: `path`, `old_text`, `new_text`, `expected_replacements`, `dry_run`, `device_id`.
+- [x] Remove model-facing `edits[]`, `dryRun`, dual `anyOf`, and dead legacy compatibility code/tests once no internal consumer remains.
+- [x] Device adapter translates the one HCU guarded-edit contract into the upstream DC execution primitive internally.
+- [x] Keep `device_id` on filesystem/shell/start-process tools; it is necessary for multi-device routing.
+- [x] Keep process follow-up tools free of redundant `device_id` because `session_id` is already bound.
+- [x] Benchmark `shell_execute` schema contribution before trimming.
+- [x] Keep input `command`, `working_directory`, `timeout_ms`, `device_id`; no input field had evidence for removal.
+- [x] Move purely audit-oriented shell result metadata out of the model-facing schema when safe; retain enough recovery data for truncation/spill and strict MCP structured-output validity.
+- [x] Do not rely on `rg`/RTK to solve tool-schema bloat; runtime-output optimization and schema optimization are separate.
+- [x] Confirm skill loading remains on-demand; no skill-body preload and no forced skill gate for routine file/shell calls.
 
-**Gate:** exact tool schema smoke passes; schema byte/token estimate is recorded before/after; grep finds no dead legacy edit contract; strict MCP client accepts every structured result.
+**Gate:** PASS. Exact smoke baseline was YOLO 16 tools / 15,793 bytes, `shell_execute` 1,928 bytes, `edit_file` 1,678 bytes. After cleanup: YOLO 15,297 bytes, `shell_execute` 1,856 bytes, `edit_file` 1,254 bytes (496 bytes total reduction). The edit schema contains only the six guarded fields; implementation grep finds no legacy edit branch. The strict MCP SDK in-memory client accepts filesystem, shell, and custom structured-output shapes and rejects a malformed output-schema control. Fresh gateway verification is 285/285 plus all three MCP smokes; fresh device verification is 52/52. Skill-routing tests remain green and confirm on-demand, non-mandatory loading. Live v2 remains untouched until Phase 8.
 
 ---
 
