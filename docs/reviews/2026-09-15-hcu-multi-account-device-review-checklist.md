@@ -112,24 +112,26 @@ Evidence: same `gateway.sqlite` stores bounded per-call, skill-load, catalog/sch
 Checkpoint evidence: gateway commit `82359b6` was the documented pre-cutover checkpoint and the account-aware build is now live on public port 8102; temporary canary 8103 has been removed. Runtime migration preserved 2 devices, 2 usage rows, and 4 OAuth clients in `gateway.sqlite`, while old tokens/pairings were deliberately excluded. Public login/signup/OAuth metadata/dashboard auth and the 16-tool / 15,297-byte / estimated 3,825-token schema are live. One unused invite exists only in runtime state. Both migrated device rows remain unowned and no normal account exists yet, so execution is intentionally fail-closed until the user creates an account and pairs a device. A cutover reconnect storm was independently traced to four stale `remote --help` processes starting real device runtimes; device commit `4bb56c4dc6b820b3227f101f99b2b85546de7bda` fixes the CLI behavior, full device regression is 52/52, rogue process count is zero, and reconnect counters stayed unchanged across repeated 10–15 second checks. v1 remains healthy. Remaining Phase 8 gates require user-chosen credentials, pairing, live account-scoped call/denial verification, refresh verification, and stale-device cleanup.
 
 ## Phase 9 — Final audit
-- [ ] Gateway full tests green.
-- [ ] Gateway MCP endpoint/schema/tools/upstream smokes green.
-- [ ] Device full tests/build green.
-- [ ] Package tarball smoke works from renamed repo.
-- [ ] No secrets/personal paths accidentally entered tracked source.
-- [ ] Legal attribution remains.
-- [ ] Dead compatibility/debt scan completed.
-- [ ] Over-engineering review completed; speculative abstractions removed.
-- [ ] Final tool count/schema bytes/schema token estimate recorded.
+- [x] Gateway full tests green.
+- [x] Gateway MCP endpoint/schema/tools/upstream smokes green.
+- [x] Device full tests/build green.
+- [x] Package tarball smoke works from renamed repo.
+- [x] No secrets/personal paths accidentally entered tracked source.
+- [x] Legal attribution remains.
+- [x] Dead compatibility/debt scan completed.
+- [x] Over-engineering review completed; speculative abstractions removed.
+- [x] Final tool count/schema bytes/schema token estimate recorded.
 - [ ] Working trees intentionally clean or every dirty file explained.
 - [ ] Remote SHAs match intended local commits after push.
 
+Evidence: gateway `708fed3a75fdf6459768b467f2b8c33b62e0107a` verified 294/294 plus three MCP smokes. Device `05821fb766b256160a38855fb0648dc469aa821f` verified 52/52 plus build PASS. Real npm-pack lifecycle smoke: 727,759-byte / 244-file tarball, HCU help exit 0, no runtime start, zero legacy setup/install-telemetry/release/MCPB artifacts. Both repos scanned 0 tracked personal-path and 0 secret-like files. MIT/legal attribution remains. Debt review removed completed migration code, stale runtime aliases/defaults, package marketing/release/setup baggage, and inherited install telemetry; HCU remote mode also forces the Desktop Commander telemetry environment kill-switch in parent and child. No speculative HA/watcher infrastructure was added. Final stable model surface: 16 tools / 15,297 bytes / ~3,825 estimated tokens versus 16 / 16,225 / ~4,057 baseline.
+
 ## Explicit deferrals — reviewer must ensure they were NOT accidentally implemented
-- [ ] Email verification is deferred.
-- [ ] Email invite-request/accept/reject automation is deferred.
-- [ ] Password-reset email is deferred.
-- [ ] HA/failover implementation is deferred; no empty HA abstraction/placeholders were added.
-- [ ] GitHub Actions upstream watcher is deferred.
-- [ ] npm publication is deferred.
-- [ ] Linux g8 production cutover is deferred.
-- [ ] Private/per-account skill catalogs are deferred; all users share HCU/Superpowers skills.
+- [x] Email verification is deferred.
+- [x] Email invite-request/accept/reject automation is deferred.
+- [x] Password-reset email is deferred.
+- [x] HA/failover implementation is deferred; no empty HA abstraction/placeholders were added.
+- [x] GitHub Actions upstream watcher is deferred.
+- [x] npm publication is deferred.
+- [x] Linux g8 production cutover is deferred.
+- [x] Private/per-account skill catalogs are deferred; all users share HCU/Superpowers skills.

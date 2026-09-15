@@ -193,16 +193,18 @@
 
 ## Phase 9 — Final cleanup and release-readiness audit (no CDPA in this phase)
 
-- [ ] Run full gateway suite and all MCP smokes.
-- [ ] Run full device suite/build and package tarball smoke from the renamed repo.
-- [ ] Secret/personal-path scan both repos.
-- [ ] Dead-code/legacy grep and whole-repo over-engineering/debt review.
-- [ ] Verify legal attribution remains intact.
-- [ ] Verify tool count/schema bytes/estimated schema tokens and compare with baseline 16 tools / 16,225 bytes / ~4,057 estimate.
+- [x] Run full gateway suite and all MCP smokes.
+- [x] Run full device suite/build and package tarball smoke from the renamed repo.
+- [x] Secret/personal-path scan both repos.
+- [x] Dead-code/legacy grep and whole-repo over-engineering/debt review.
+- [x] Verify legal attribution remains intact.
+- [x] Verify tool count/schema bytes/estimated schema tokens and compare with baseline 16 tools / 16,225 bytes / ~4,057 estimate.
 - [ ] Verify working trees and remote SHAs intentionally match after commits/pushes.
-- [ ] Review the companion checklist `docs/reviews/2026-09-15-hcu-multi-account-device-review-checklist.md` line-by-line.
+- [x] Review the companion checklist `docs/reviews/2026-09-15-hcu-multi-account-device-review-checklist.md` line-by-line.
 
-**Gate:** no unresolved P0/P1 checklist item; no hidden ID fallback; no cross-account routing; no legacy edit surface; runtime and dashboard acceptance green.
+**Evidence:** gateway source verification at `708fed3a75fdf6459768b467f2b8c33b62e0107a` is 294/294 tests plus all three MCP smokes. Device source verification at `05821fb766b256160a38855fb0648dc469aa821f` is 52/52 tests plus build PASS. A real package lifecycle smoke produced a 727,759-byte tarball with 244 files; `hcu-device --help` exited 0 without starting a runtime and no legacy setup/install-telemetry/release/MCPB artifacts were packaged. Tracked-source scans in both repos found 0 personal-path files and 0 secret-like files. Desktop Commander MIT attribution remains in the device LICENSE and HCU README links upstream. Whole-repo debt/over-engineering review removed stale migration code, legacy-default/profile aliases, package marketing bloat, Desktop Commander release/MCPB/setup/install-telemetry baggage, and hard-disables inherited Desktop Commander analytics on the HCU remote execution path; speculative HA/watcher abstractions were not added. Final tool surface is still 16 tools / 15,297 bytes / ~3,825 estimated schema tokens versus baseline 16 / 16,225 / ~4,057, a 928-byte reduction. Runtime device reconnect counters remained unchanged across a fresh 15-second post-restart check.
+
+**Gate:** release-readiness cleanup is verified, but overall completion remains blocked by the open Phase 8 human-account gates: normal-account signup/pairing, live account-scoped success/denial, refresh behavior, and stale pre-account device cleanup.
 
 ---
 
