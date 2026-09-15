@@ -121,8 +121,8 @@ Checkpoint evidence: gateway commit `82359b6` was the documented pre-cutover che
 - [x] Dead compatibility/debt scan completed.
 - [x] Over-engineering review completed; speculative abstractions removed.
 - [x] Final tool count/schema bytes/schema token estimate recorded.
-- [ ] Working trees intentionally clean or every dirty file explained.
-- [ ] Remote SHAs match intended local commits after push.
+- [x] Working trees intentionally clean or every dirty file explained.
+- [x] Remote SHAs match intended local commits after push.
 
 Evidence: gateway `708fed3a75fdf6459768b467f2b8c33b62e0107a` verified 294/294 plus three MCP smokes. Device `05821fb766b256160a38855fb0648dc469aa821f` verified 52/52 plus build PASS. Real npm-pack lifecycle smoke: 727,759-byte / 244-file tarball, HCU help exit 0, no runtime start, zero legacy setup/install-telemetry/release/MCPB artifacts. Both repos scanned 0 tracked personal-path and 0 secret-like files. MIT/legal attribution remains. Debt review removed completed migration code, stale runtime aliases/defaults, package marketing/release/setup baggage, and inherited install telemetry; HCU remote mode also forces the Desktop Commander telemetry environment kill-switch in parent and child. No speculative HA/watcher infrastructure was added. Final stable model surface: 16 tools / 15,297 bytes / ~3,825 estimated tokens versus 16 / 16,225 / ~4,057 baseline.
 
