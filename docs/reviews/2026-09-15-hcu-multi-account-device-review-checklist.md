@@ -39,14 +39,14 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] Login abuse control does not permit easy global victim-account lockout.
 - [x] Admin is local CLI-only; no public admin login.
 - [ ] The author uses a normal account for MCP usage.
-- [ ] OAuth access/refresh token human subject is `account_id`, not merely `client_id`.
-- [ ] `offline_access` remains supported.
-- [ ] Device approval binds `owner_account_id`.
-- [ ] `list_devices` returns only the caller account's devices.
-- [ ] Every remote dispatch rechecks caller-account vs device owner.
-- [ ] Static bearer cannot bypass tenant ownership accidentally.
-- [ ] Account revoke invalidates/blocks future access.
-- [ ] Alice knowing Bob's `device_id` is insufficient to call Bob's device.
+- [x] OAuth access/refresh token human subject is `account_id`, not merely `client_id`.
+- [x] `offline_access` remains supported.
+- [x] Device approval binds `owner_account_id`.
+- [x] `list_devices` returns only the caller account's devices.
+- [x] Every remote dispatch rechecks caller-account vs device owner.
+- [x] Static bearer cannot bypass tenant ownership accidentally.
+- [x] Account revoke invalidates/blocks future access.
+- [x] Alice knowing Bob's `device_id` is insufficient to call Bob's device.
 
 ## Phase 4 — Device/project association
 - [ ] Every configured project is associated with an explicit `device_id`.

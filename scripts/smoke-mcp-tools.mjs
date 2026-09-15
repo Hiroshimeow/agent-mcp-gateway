@@ -80,7 +80,6 @@ default_enabled = false
     MCP_ADVERTISE_HOST: '127.0.0.1',
     MCP_GATEWAY_PORT: String(port),
     MCP_BEARER_TOKEN: smokeCredential,
-    MCP_AUTH_PASSWORD: `placeholder_mcp_password_${process.pid}`,
     MCP_RUNTIME_PROFILE: profile,
     ENABLE_FILESYSTEM: 'true',
     ENABLE_SHELL: 'true',

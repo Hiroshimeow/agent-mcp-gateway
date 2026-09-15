@@ -13,8 +13,8 @@ export function decorateSkillBootstrapDescription(toolName, description = '') {
     : text;
 }
 
-export function buildSkillCallerKey({ oauthClientId = '', staticBearer = false, sessionId = '' } = {}) {
-  const identity = oauthClientId ? `oauth:${oauthClientId}` : staticBearer ? 'static-bearer' : 'anonymous';
+export function buildSkillCallerKey({ accountId = '', oauthClientId = '', staticBearer = false, sessionId = '' } = {}) {
+  const identity = accountId ? `account:${accountId}` : oauthClientId ? `oauth:${oauthClientId}` : staticBearer ? 'static-bearer' : 'anonymous';
   const digest = createHash('sha256')
     .update(sessionId ? `${identity}\nsession:${sessionId}` : identity)
     .digest('hex')

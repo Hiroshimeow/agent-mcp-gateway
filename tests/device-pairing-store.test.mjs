@@ -81,7 +81,8 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
       codeVerifier: p.verifier
     }), { status: 'authorization_pending' });
 
-    const approved = f.store.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' });
+    const approved = f.store.approve({ userCode: started.userCode, accountId: 'account-example', accountLabel: 'Example Gateway' });
+    assert.equal(approved.accountId, 'account-example');
     assert.equal(approved.accountLabel, 'Example Gateway');
 
     assert.throws(() => f.store.poll({
@@ -97,7 +98,7 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
     });
     assert.equal(polled.status, 'approved');
     assert.match(polled.enrollmentGrant, /^[A-Za-z0-9_-]{32,}$/);
-    assert.deepEqual(polled.account, { connected: true, label: 'Example Gateway' });
+    assert.deepEqual(polled.account, { connected: true, account_id: 'account-example', label: 'Example Gateway' });
     assert.equal(polled.deviceId, 'device-test');
 
     assert.throws(() => f.store.consumeGrant({
@@ -111,7 +112,7 @@ test('approval plus PKCE poll issues a key-bound single-use enrollment grant', (
       deviceId: 'device-test',
       publicKeyPem
     });
-    assert.deepEqual(consumed.account, { connected: true, label: 'Example Gateway' });
+    assert.deepEqual(consumed.account, { connected: true, account_id: 'account-example', label: 'Example Gateway' });
     assert.equal(consumed.deviceId, 'device-test');
 
     assert.throws(() => f.store.consumeGrant({
@@ -136,7 +137,7 @@ test('pairing expires closed before approval, polling, or grant consumption', ()
     });
     f.advance(10 * 60_000 + 1);
 
-    assert.throws(() => f.store.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' }), /expired/i);
+    assert.throws(() => f.store.approve({ userCode: started.userCode, accountId: 'account-example', accountLabel: 'Example Gateway' }), /expired/i);
     assert.throws(() => f.store.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier }), /expired/i);
   } finally { f.close(); }
 });

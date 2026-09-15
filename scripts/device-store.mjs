@@ -22,6 +22,7 @@ function rowToDevice(row) {
   return {
     deviceId: row.device_id,
     deviceName: row.device_name || row.device_id,
+    ownerAccountId: row.owner_account_id || null,
     accountLabel: row.account_label || null,
     hostname: row.hostname || null,
     platform: row.platform || null,
@@ -48,6 +49,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       revoked_at TEXT,
       authorization_generation INTEGER NOT NULL DEFAULT 1,
       device_name TEXT,
+      owner_account_id TEXT,
       account_label TEXT,
       hostname TEXT,
       platform TEXT,
@@ -62,6 +64,9 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   if (!columns.some(column => column.name === 'device_name')) {
     db.exec('ALTER TABLE devices ADD COLUMN device_name TEXT');
   }
+  if (!columns.some(column => column.name === 'owner_account_id')) {
+    db.exec('ALTER TABLE devices ADD COLUMN owner_account_id TEXT');
+  }
   if (!columns.some(column => column.name === 'account_label')) {
     db.exec('ALTER TABLE devices ADD COLUMN account_label TEXT');
   }
@@ -71,18 +76,18 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   db.exec('PRAGMA busy_timeout = 5000');
 
   const getStatement = db.prepare(`
-    SELECT device_id, device_name, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     WHERE device_id = ?
   `);
   const listStatement = db.prepare(`
-    SELECT device_id, device_name, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation
     FROM devices
     ORDER BY device_id
   `);
   const insertStatement = db.prepare(`
-    INSERT INTO devices (device_id, device_name, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)
+    INSERT INTO devices (device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, public_key_pem, enrolled_at, revoked_at, authorization_generation)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)
   `);
   const rotateStatement = db.prepare(`
     UPDATE devices
@@ -99,6 +104,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     SET device_name = ?, account_label = ?, hostname = ?, platform = ?, arch = ?, path_style = ?
     WHERE device_id = ? AND revoked_at IS NULL
   `);
+  const ownerStatement = db.prepare(`
+    UPDATE devices
+    SET owner_account_id = ?, account_label = ?, authorization_generation = authorization_generation + 1
+    WHERE device_id = ? AND revoked_at IS NULL
+  `);
 
   function get(deviceId) {
     return rowToDevice(getStatement.get(normalizeDeviceId(deviceId)));
@@ -108,10 +118,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return listStatement.all().map(rowToDevice);
   }
 
-  function enroll({ deviceId, publicKeyPem, deviceName = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null }) {
+  function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null }) {
     const normalizedId = normalizeDeviceId(deviceId);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
     const normalizedName = String(deviceName || '').trim().slice(0, 128) || normalizedId;
+    const normalizedOwner = String(ownerAccountId || '').trim().slice(0, 64) || null;
     const normalizedAccount = String(accountLabel || '').trim().slice(0, 128) || null;
     const normalizedHostname = String(hostname || '').trim().slice(0, 128) || null;
     const normalizedPlatform = String(platform || '').trim().slice(0, 32) || null;
@@ -119,10 +130,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     const normalizedPathStyle = ['windows', 'posix'].includes(String(pathStyle || '').trim()) ? String(pathStyle).trim() : null;
     if (getStatement.get(normalizedId)) throw new Error(`Device ${normalizedId} is already enrolled.`);
     const enrolledAt = now();
-    insertStatement.run(normalizedId, normalizedName, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedKey, enrolledAt);
+    insertStatement.run(normalizedId, normalizedName, normalizedOwner, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedKey, enrolledAt);
     return {
       deviceId: normalizedId,
       deviceName: normalizedName,
+      ownerAccountId: normalizedOwner,
       accountLabel: normalizedAccount,
       hostname: normalizedHostname,
       platform: normalizedPlatform,
@@ -166,6 +178,19 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
+  function assignOwner({ deviceId, ownerAccountId, accountLabel = null }) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    const current = get(normalizedId);
+    if (!current) throw new Error(`Unknown device ${normalizedId}.`);
+    if (current.revokedAt) throw new Error(`Device ${normalizedId} is revoked.`);
+    const owner = String(ownerAccountId || '').trim().slice(0, 64) || null;
+    const label = String(accountLabel || '').trim().slice(0, 128) || null;
+    if (current.ownerAccountId === owner && current.accountLabel === label) return current;
+    const result = ownerStatement.run(owner, label, normalizedId);
+    if (Number(result.changes) !== 1) throw new Error(`Device ${normalizedId} owner update failed.`);
+    return get(normalizedId);
+  }
+
   function revoke(deviceId) {
     const normalizedId = normalizeDeviceId(deviceId);
     const result = revokeStatement.run(now(), normalizedId);
@@ -200,5 +225,5 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function close() { db.close(); }
 
-  return { get, list, enroll, rotate, updateMetadata, revoke, withCurrentAuthorization, close };
+  return { get, list, enroll, rotate, updateMetadata, assignOwner, revoke, withCurrentAuthorization, close };
 }

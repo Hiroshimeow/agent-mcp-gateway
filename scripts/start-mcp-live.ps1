@@ -74,7 +74,7 @@ function Ensure-DotEnv {
     }
 
     Copy-Item -LiteralPath $ExamplePath -Destination $Path -ErrorAction Stop
-    Write-Host "Created .env from .env.example. Edit MCP_AUTH_PASSWORD after this run if it is still change-me-now."
+    Write-Host "Created .env from .env.example. Configure optional operator bearer/device settings as needed."
 }
 
 function Get-ListeningOwningProcessIds {
@@ -205,31 +205,14 @@ $defaultProjectIdValue = $envValues["MCP_DEFAULT_PROJECT_ID"]
 $requireProjectIdValue = $envValues["MCP_REQUIRE_PROJECT_ID"]
 $enableProjectPathInferenceValue = $envValues["MCP_ENABLE_PROJECT_PATH_INFERENCE"]
 $exposeProjectPathsValue = $envValues["MCP_EXPOSE_PROJECT_PATHS"]
-$authPassword = $envValues["MCP_AUTH_PASSWORD"]
 $bearerToken = $envValues["MCP_BEARER_TOKEN"]
-if (-not $authPassword) {
-    $authPassword = $env:MCP_AUTH_PASSWORD
-}
 if (-not $bearerToken) {
     $bearerToken = $env:MCP_BEARER_TOKEN
-}
-if (-not $authPassword -and $bearerToken) {
-    $authPassword = $bearerToken
-}
-if (-not $bearerToken -and $authPassword) {
-    $bearerToken = $authPassword
 }
 
 if (-not $enableFilesystem) {
     throw "ENABLE_FILESYSTEM=false is not supported in v1."
 }
-if (-not $authPassword) {
-    throw "MCP_AUTH_PASSWORD is missing. Set it in .env or current environment before running start-mcp-live.bat."
-}
-if ($authPassword -eq "change-me-now") {
-    throw "MCP_AUTH_PASSWORD is still change-me-now in .env. Set a real password/token before exposing MCP."
-}
-
 Write-Section "Prerequisites"
 $prereqs = & (Join-Path $projectRoot "scripts\check-prereqs.ps1")
 $prereqs | Format-List | Out-String | Write-Host
@@ -281,7 +264,6 @@ $gatewayEnv = @(
     "set `"MCP_REQUIRE_PROJECT_ID=$requireProjectIdValue`"",
     "set `"MCP_ENABLE_PROJECT_PATH_INFERENCE=$enableProjectPathInferenceValue`"",
     "set `"MCP_EXPOSE_PROJECT_PATHS=$exposeProjectPathsValue`"",
-    "set `"MCP_AUTH_PASSWORD=$authPassword`"",
     "set `"MCP_BEARER_TOKEN=$bearerToken`"",
     "set `"ENABLE_FILESYSTEM=$enableFilesystemValue`"",
     "set `"ENABLE_SHELL=$enableShellValue`"",

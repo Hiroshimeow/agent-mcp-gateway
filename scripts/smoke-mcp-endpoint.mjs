@@ -1,7 +1,7 @@
 const endpoint = process.env.MCP_SMOKE_URL || `http://${process.env.MCP_GATEWAY_HOST || '127.0.0.1'}:${process.env.MCP_GATEWAY_PORT || '8101'}/mcp`;
-const token = process.env.MCP_BEARER_TOKEN || process.env.MCP_AUTH_PASSWORD;
+const token = process.env.MCP_BEARER_TOKEN;
 
-if (!token) throw new Error('MCP_BEARER_TOKEN or MCP_AUTH_PASSWORD is required for smoke:mcp');
+if (!token) throw new Error('MCP_BEARER_TOKEN is required for smoke:mcp');
 
 function parseMcpResponse(text) {
   const trimmed = text.trim();

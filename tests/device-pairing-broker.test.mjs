@@ -105,7 +105,7 @@ function approvedGrant(pairingStore, { deviceId, deviceName, publicKeyPem }) {
   const started = pairingStore.start({
     clientId: 'mcp-device', deviceId, deviceName, publicKeyPem, codeChallenge: p.challenge
   });
-  pairingStore.approve({ userCode: started.userCode, accountLabel: 'Example Gateway' });
+  pairingStore.approve({ userCode: started.userCode, accountId: 'account-example', accountLabel: 'Example Gateway' });
   const polled = pairingStore.poll({ deviceCode: started.deviceCode, clientId: 'mcp-device', codeVerifier: p.verifier });
   return { ...polled, userCode: started.userCode };
 }
@@ -161,7 +161,7 @@ test('pairing grant is consumed only after key proof and persists account/device
   const challenge = await sendEnrollHello(ws, { deviceId: 'paired-device', publicKeyPem: keys.publicKeyPem });
   const ok = await answerChallenge(ws, { deviceId: 'paired-device', privateKey: keys.privateKey, challenge });
   assert.equal(ok.type, 'auth_ok');
-  assert.deepEqual(ok.payload.account, { connected: true, label: 'Example Gateway' });
+  assert.deepEqual(ok.payload.account, { connected: true, account_id: 'account-example', label: 'Example Gateway' });
   assert.equal(ok.payload.device.name, 'Workstation A');
   assert.equal(ok.payload.schema.toolCount, 16);
   assert.equal(ok.payload.schema.toolSchemaTokenEstimate, 4057);
@@ -170,17 +170,42 @@ test('pairing grant is consumed only after key proof and persists account/device
 
   const stored = f.deviceStore.get('paired-device');
   assert.equal(stored.deviceName, 'Workstation A');
+  assert.equal(stored.ownerAccountId, 'account-example');
   assert.equal(stored.accountLabel, 'Example Gateway');
   assert.equal(stored.hostname, 'g8');
   assert.equal(stored.platform, 'linux');
   assert.equal(stored.arch, 'x64');
   assert.equal(stored.pathStyle, 'posix');
 
-  const [listed] = f.broker.listDevices();
+  const [listed] = f.broker.listDevices({ accountId: 'account-example' });
   assert.equal(listed.hostname, 'g8');
   assert.equal(listed.platform, 'linux');
   assert.equal(listed.arch, 'x64');
   assert.equal(listed.pathStyle, 'posix');
+});
+
+test('account ownership filters inventory and is rechecked at every device dispatch', async t => {
+  const f = await fixture(t);
+  const keys = keyPair();
+  const grant = approvedGrant(f.pairingStore, {
+    deviceId: 'owned-device', deviceName: 'Owned Device', publicKeyPem: keys.publicKeyPem
+  });
+  const ws = await openSocket(f.port, grant.enrollmentGrant);
+  t.after(() => ws.close());
+  const challenge = await sendEnrollHello(ws, { deviceId: 'owned-device', publicKeyPem: keys.publicKeyPem });
+  await answerChallenge(ws, { deviceId: 'owned-device', privateKey: keys.privateKey, challenge });
+
+  assert.deepEqual(f.broker.listDevices({ accountId: 'account-example' }).map(item => item.deviceId), ['owned-device']);
+  assert.deepEqual(f.broker.listDevices({ accountId: 'account-bob' }), []);
+  assert.deepEqual(f.broker.listDevices(), []);
+  await assert.rejects(
+    () => f.broker.callDevice({ deviceId: 'owned-device', tool: 'ping' }),
+    /ACCOUNT_ID_REQUIRED/
+  );
+  await assert.rejects(
+    () => f.broker.callDevice({ accountId: 'account-bob', deviceId: 'owned-device', tool: 'ping' }),
+    /DEVICE_ACCESS_DENIED/
+  );
 });
 
 test('usage counters survive reconnect and account metadata returns without another pairing grant', async t => {
@@ -206,7 +231,7 @@ test('usage counters survive reconnect and account metadata returns without anot
       payload: { ok: true, pong: true }
     }));
   });
-  const result = await f.broker.callDevice({ deviceId: 'usage-paired', tool: 'ping', arguments: { hello: 'world' } });
+  const result = await f.broker.callDevice({ accountId: 'account-example', deviceId: 'usage-paired', tool: 'ping', arguments: { hello: 'world' } });
   assert.deepEqual(result, { ok: true, pong: true });
   ws.close();
   await new Promise(resolve => setTimeout(resolve, 40));
@@ -215,7 +240,7 @@ test('usage counters survive reconnect and account metadata returns without anot
   t.after(() => reconnecting.close());
   const reauth = await reconnect(reconnecting, { deviceId: 'usage-paired', privateKey: keys.privateKey });
   assert.equal(reauth.type, 'auth_ok');
-  assert.deepEqual(reauth.payload.account, { connected: true, label: 'Example Gateway' });
+  assert.deepEqual(reauth.payload.account, { connected: true, account_id: 'account-example', label: 'Example Gateway' });
   assert.equal(reauth.payload.usage.connections, 2);
   assert.equal(reauth.payload.usage.reconnects, 1);
   assert.equal(reauth.payload.usage.toolCallsStarted, 1);
@@ -224,7 +249,7 @@ test('usage counters survive reconnect and account metadata returns without anot
   assert.ok(reauth.payload.usage.requestBytes > 0);
   assert.ok(reauth.payload.usage.responseBytes > 0);
 
-  const [listed] = f.broker.listDevices();
+  const [listed] = f.broker.listDevices({ accountId: 'account-example' });
   assert.equal(listed.account.connected, true);
   assert.equal(listed.usage.toolCallsSucceeded, 1);
   assert.equal(listed.schema.tokenUsageKind, 'schema_estimate_not_billing');

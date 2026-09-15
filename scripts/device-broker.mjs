@@ -70,7 +70,8 @@ function publicDevice(device, { stored = null, usage = null, schema = null } = {
     arch: device.arch || stored?.arch || null,
     pathStyle: device.pathStyle || stored?.pathStyle || null,
     account: {
-      connected: Boolean(stored?.accountLabel),
+      connected: Boolean(stored?.ownerAccountId),
+      account_id: stored?.ownerAccountId || null,
       label: stored?.accountLabel || null
     },
     online: Boolean(device.online),
@@ -95,6 +96,7 @@ export function createDeviceBroker(options = {}) {
   const pairingStore = options.pairingStore || null;
   const usageStore = options.usageStore || null;
   const durableAuth = Boolean(deviceStore);
+  const requireAccountOwnership = options.requireAccountOwnership !== false;
   let schemaSnapshot = normalizeSchemaSnapshot(options.schemaSnapshot);
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
@@ -354,6 +356,7 @@ export function createDeviceBroker(options = {}) {
           deviceId: state.deviceId,
           publicKeyPem: state.publicKeyPem,
           deviceName: pairing?.deviceName || state.deviceId,
+          ownerAccountId: pairing?.account?.account_id || null,
           accountLabel: pairing?.account?.label || null,
           hostname: state.hostname,
           platform: state.platform,
@@ -379,6 +382,7 @@ export function createDeviceBroker(options = {}) {
             deviceId: state.deviceId,
             publicKeyPem: state.publicKeyPem,
             deviceName: pairing.deviceName,
+            ownerAccountId: pairing.account?.account_id || null,
             accountLabel: pairing.account?.label || null,
             hostname: state.hostname,
             platform: state.platform,
@@ -391,11 +395,15 @@ export function createDeviceBroker(options = {}) {
           updated = deviceStore.updateMetadata({
             deviceId: state.deviceId,
             deviceName: pairing.deviceName,
-            accountLabel: pairing.account?.label || null,
             hostname: state.hostname,
             platform: state.platform,
             arch: state.arch,
             pathStyle: state.pathStyle
+          });
+          updated = deviceStore.assignOwner({
+            deviceId: state.deviceId,
+            ownerAccountId: pairing.account?.account_id || null,
+            accountLabel: pairing.account?.label || null
           });
         }
         authorizedPublicKeyPem = updated.publicKeyPem;
@@ -456,7 +464,8 @@ export function createDeviceBroker(options = {}) {
     device.lastSeenAt = Date.now();
     if (message.type === 'account_logout') {
       if (!durableAuth) return;
-      deviceStore.updateMetadata({ deviceId: device.deviceId, accountLabel: null });
+      const updated = deviceStore.assignOwner({ deviceId: device.deviceId, ownerAccountId: null, accountLabel: null });
+      device.authenticatedAuthorizationGeneration = updated.authorizationGeneration;
       usageStore?.touch(device.deviceId);
       sendStatusSnapshot(ws, device);
       return;
@@ -574,11 +583,16 @@ export function createDeviceBroker(options = {}) {
     server.on('upgrade', upgradeHandler);
   }
 
-  function listDevices() {
+  function listDevices({ accountId = null } = {}) {
     for (const device of devices.values()) {
       if (device.online) refreshAuthorization(device);
     }
-    return [...devices.values()].map(statusForDevice).sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    const owner = String(accountId || '').trim();
+    if (durableAuth && requireAccountOwnership && !owner) return [];
+    return [...devices.values()]
+      .map(statusForDevice)
+      .filter(device => !owner || device.account.account_id === owner)
+      .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
   function revokeDevice(deviceId) {
@@ -603,10 +617,16 @@ export function createDeviceBroker(options = {}) {
     return statusForDevice(current);
   }
 
-  async function callDevice({ requestId: requestedRequestId, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
+  async function callDevice({ requestId: requestedRequestId, accountId = null, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
     const device = devices.get(String(deviceId || ''));
     if (device?.online && !refreshAuthorization(device)) throw new Error(`Device ${deviceId} authorization changed or was revoked; it is offline.`);
     if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) throw new Error(`Device ${deviceId} is offline or unknown.`);
+    if (durableAuth && requireAccountOwnership) {
+      const owner = String(accountId || '').trim();
+      const stored = deviceStore.get(device.deviceId);
+      if (!owner) throw new Error('ACCOUNT_ID_REQUIRED: account_id is required for remote device dispatch.');
+      if (!stored?.ownerAccountId || stored.ownerAccountId !== owner) throw new Error('DEVICE_ACCESS_DENIED: device is not owned by the caller account.');
+    }
     if (!device.capabilities.includes(tool)) throw new Error(`Device ${deviceId} does not advertise capability ${tool}.`);
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error('Device request timeout must be an integer between 1 and 30000 ms.');
     const requestId = requestedRequestId === undefined ? randomUUID() : String(requestedRequestId).trim();

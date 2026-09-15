@@ -36,8 +36,8 @@ import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './sh
 import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-tools/index.mjs';
 import {
   AUTH_SUPPORTED_SCOPES,
+  AccountAuthProvider,
   FileBackedAuthState,
-  PasswordProtectedAuthProvider,
   isStaticBearerAuthorization,
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
@@ -77,7 +77,6 @@ const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() |
 const advertisedHost = String(process.env.MCP_ADVERTISE_HOST || '').trim() || (gatewayHost === '0.0.0.0' ? '127.0.0.1' : gatewayHost);
 const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
 const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
-const authPassword = process.env.MCP_AUTH_PASSWORD;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const runtimeProfile = getRuntimeProfile(process.env);
 const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
@@ -102,7 +101,6 @@ const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'int
 const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
-if (!authPassword) throw new Error('MCP_AUTH_PASSWORD is required');
 if (!enableFilesystem && !enableShell) throw new Error('At least one local execution primitive must be enabled');
 
 function envFlag(value, defaultValue = false) {
@@ -578,6 +576,7 @@ async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args 
     });
     const result = await deviceBroker.callDevice({
       requestId,
+      accountId: context.accountId || null,
       deviceId,
       tool,
       arguments: args,
@@ -664,7 +663,7 @@ async function routeToolCall(request, context = {}) {
   }
 
   if (toolName === 'list_devices') {
-    const devices = deviceAccessPolicy.filterDevices(deviceBroker.listDevices(), {
+    const devices = deviceAccessPolicy.filterDevices(deviceBroker.listDevices({ accountId: context.accountId || null }), {
       callerSubject: context.callerSubject || context.callerCategory || 'anonymous',
       callerCategory: context.callerCategory || 'anonymous'
     });
@@ -913,6 +912,7 @@ function fingerprint(value) {
 
 function skillCallerKeyFromRequest(req) {
   return buildSkillCallerKey({
+    accountId: req.auth?.accountId || '',
     oauthClientId: req.auth?.clientId || '',
     staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
     sessionId: useStatefulMcpSessions ? req.headers['mcp-session-id'] || '' : ''
@@ -927,7 +927,7 @@ function callerCategoryFromRequest(req) {
 
 function callerSubjectFromRequest(req) {
   if (isStaticBearerAuthorization(req.headers.authorization, staticBearerToken)) return 'static-bearer';
-  if (req.auth?.clientId) return `oauth:${req.auth.clientId}`;
+  if (req.auth?.accountId) return `account:${req.auth.accountId}`;
   return 'anonymous';
 }
 
@@ -942,7 +942,6 @@ function getProvidedAuthorizationToken(authorizationHeader) {
 }
 
 await refreshDeviceSchemaSnapshot();
-const provider = new PasswordProtectedAuthProvider(authPassword, new FileBackedAuthState(authStatePath));
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
@@ -950,6 +949,11 @@ app.use(express.urlencoded({ extended: false }));
 const accountHttp = installAccountRoutes(app, {
   accountStore,
   needInvite: () => workspaceSnapshot().rawConfig?.auth?.need_invite !== false
+});
+const provider = new AccountAuthProvider({
+  stateStore: new FileBackedAuthState(authStatePath),
+  accountStore,
+  accountFromRequest: accountHttp.accountFromRequest
 });
 app.use((req, res, next) => {
   if (req.path !== '/mcp') {
@@ -1015,8 +1019,7 @@ function requestBaseUrl(req) {
 
 installDevicePairingRoutes(app, {
   pairingStore: devicePairingStore,
-  authProvider: provider,
-  accountLabel: process.env.MCP_ACCOUNT_LABEL || 'Local Dev MCP',
+  accountFromRequest: accountHttp.accountFromRequest,
   baseUrlFromRequest: requestBaseUrl
 });
 
@@ -1114,6 +1117,7 @@ const transports = {};
 async function createTransport(req) {
   let transport;
   const server = createProxyServer({
+    accountId: req.auth?.accountId || null,
     callerKey: skillCallerKeyFromRequest(req),
     callerCategory: callerCategoryFromRequest(req),
     callerSubject: callerSubjectFromRequest(req)

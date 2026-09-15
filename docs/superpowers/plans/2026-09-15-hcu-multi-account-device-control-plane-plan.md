@@ -99,14 +99,14 @@
 - [x] Product login uses the minimal dark progressive UI without account-enumeration signaling; signup/OUT remains available independently of whether the typed email exists.
 - [x] Login failures use generic responses and simple source+account-key cooldown/rate limiting; no global three-strikes lockout DoS.
 - [x] Browser account session is bound to `account_id`.
-- [ ] OAuth authorization requires an authenticated normal account session and tokens/refresh tokens carry `account_id` as the human subject.
-- [ ] Keep `offline_access`; access token 12h and refresh behavior remain durable unless intentionally revised/tested.
-- [ ] Device verify requires the same account session, then pairing approval writes `owner_account_id`.
-- [ ] Device table stores `owner_account_id`; existing account_label-only semantics are removed.
-- [ ] `list_devices` filters by authenticated `account_id`.
-- [ ] Every remote dispatch rechecks `caller.account_id === device.owner_account_id` in memory/authoritative state.
-- [ ] Static bearer cannot become a cross-tenant bypass; remote device calls require an explicit bound account or are denied.
-- [ ] Account revoke invalidates active account sessions/OAuth authorization and denies owned-device dispatch.
+- [x] OAuth authorization requires an authenticated normal account session and tokens/refresh tokens carry `account_id` as the human subject.
+- [x] Keep `offline_access`; access token 12h and refresh behavior remain durable unless intentionally revised/tested.
+- [x] Device verify requires the same account session, then pairing approval writes `owner_account_id`.
+- [x] Device table stores `owner_account_id`; existing account_label-only semantics are removed.
+- [x] `list_devices` filters by authenticated `account_id`.
+- [x] Every remote dispatch rechecks `caller.account_id === device.owner_account_id` in memory/authoritative state.
+- [x] Static bearer cannot become a cross-tenant bypass; remote device calls require an explicit bound account or are denied.
+- [x] Account revoke invalidates active account sessions/OAuth authorization and denies owned-device dispatch.
 
 **Gate:** two-account tests prove Alice cannot list/call/revoke Bob’s device even when she knows Bob’s `device_id`; OAuth refresh preserves account identity; invite single-use/revoke tests pass; admin cannot log in through the public product UI.
 

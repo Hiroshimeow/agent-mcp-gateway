@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 
-import { FileBackedAuthState, PasswordProtectedAuthProvider } from '../scripts/auth-session.mjs';
+import { createAccountStore } from '../scripts/account-store.mjs';
+import { installAccountRoutes } from '../scripts/account-http.mjs';
 import { createDevicePairingStore } from '../scripts/device-pairing-store.mjs';
 import { installDevicePairingRoutes } from '../scripts/device-pairing-http.mjs';
 
@@ -23,18 +24,18 @@ function publicKeyPem() {
 
 async function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-pair-http-'));
-  const store = createDevicePairingStore({ dbPath: path.join(dir, 'devices.sqlite') });
-  const provider = new PasswordProtectedAuthProvider(
-    'gateway-password',
-    new FileBackedAuthState(path.join(dir, 'auth-state.json'))
-  );
+  const dbPath = path.join(dir, 'gateway.sqlite');
+  const store = createDevicePairingStore({ dbPath });
+  const accountStore = createAccountStore({ dbPath });
+  const account = accountStore.createAccount({ email: 'user@example.com', password: 'user-password' });
+  const session = accountStore.createSession(account.accountId);
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+  const accountHttp = installAccountRoutes(app, { accountStore, needInvite: true });
   installDevicePairingRoutes(app, {
     pairingStore: store,
-    authProvider: provider,
-    accountLabel: 'Example Gateway',
+    accountFromRequest: accountHttp.accountFromRequest,
     baseUrlFromRequest: () => 'https://mcp-v2.example.test'
   });
   const server = await new Promise(resolve => {
@@ -45,10 +46,13 @@ async function fixture() {
   return {
     base,
     store,
-    provider,
+    accountStore,
+    account,
+    cookie: `hcu_account_session=${encodeURIComponent(session.sessionId)}`,
     close: async () => {
       await new Promise(resolve => server.close(resolve));
       store.close();
+      accountStore.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   };
@@ -91,35 +95,31 @@ test('device start returns browser verification URLs and poll stays pending befo
   } finally { await f.close(); }
 });
 
-test('browser verification reuses gateway human auth session and poll returns account-connected grant', async () => {
+test('device verification requires account login and approval binds account_id', async () => {
   const f = await fixture();
   try {
     const { p, data } = await startPairing(f);
-    const page = await fetch(`${f.base}/device/verify?user_code=${encodeURIComponent(data.user_code)}`);
+    const anonymous = await fetch(`${f.base}/device/verify?user_code=${encodeURIComponent(data.user_code)}`, { redirect: 'manual' });
+    assert.equal(anonymous.status, 302);
+    assert.match(anonymous.headers.get('location') || '', /^\/login\?return_to=/);
+
+    const page = await fetch(`${f.base}/device/verify?user_code=${encodeURIComponent(data.user_code)}`, {
+      headers: { cookie: f.cookie }
+    });
     const html = await page.text();
     assert.equal(page.status, 200);
     assert.match(html, /ThinkBook HTTP/);
-    assert.match(html, /password/i);
-
-    const denied = await fetch(`${f.base}/device/verify`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ user_code: data.user_code, password: 'wrong' }),
-      redirect: 'manual'
-    });
-    assert.equal(denied.status, 200);
-    assert.match(await denied.text(), /invalid|incorrect|wrong/i);
+    assert.match(html, /user@example\.com/);
+    assert.doesNotMatch(html, /type="password"/i);
 
     const approved = await fetch(`${f.base}/device/verify`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ user_code: data.user_code, password: 'gateway-password' }),
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: f.cookie },
+      body: new URLSearchParams({ user_code: data.user_code }),
       redirect: 'manual'
     });
     assert.equal(approved.status, 200);
     assert.match(await approved.text(), /approved/i);
-    const cookie = approved.headers.get('set-cookie');
-    assert.match(cookie || '', /mcp_auth_session=/);
 
     const poll = await fetch(`${f.base}/device/poll`, {
       method: 'POST',
@@ -129,15 +129,11 @@ test('browser verification reuses gateway human auth session and poll returns ac
     assert.equal(poll.status, 200);
     const payload = await poll.json();
     assert.match(payload.enrollment_grant, /^[A-Za-z0-9_-]{32,}$/);
-    assert.deepEqual(payload.account, { connected: true, label: 'Example Gateway' });
+    assert.deepEqual(payload.account, { connected: true, account_id: f.account.accountId, label: 'user@example.com' });
     assert.equal(payload.device_id, 'device-http');
 
-    const second = await startPairing(f);
-    const connectedPage = await fetch(`${f.base}/device/verify?user_code=${encodeURIComponent(second.data.user_code)}`, {
-      headers: { cookie }
-    });
-    const connectedHtml = await connectedPage.text();
-    assert.doesNotMatch(connectedHtml, /type="password"/i);
-    assert.match(connectedHtml, /Example Gateway/);
+    const status = f.store.getStatusByUserCode(data.user_code);
+    assert.equal(status.accountId, f.account.accountId);
+    assert.equal(status.accountLabel, 'user@example.com');
   } finally { await f.close(); }
 });

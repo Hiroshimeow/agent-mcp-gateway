@@ -55,6 +55,7 @@ function statusFromRow(row, nowMs) {
     status,
     expiresAt: Number(row.expires_at),
     approvedAt: row.approved_at ? Number(row.approved_at) : null,
+    accountId: row.owner_account_id || null,
     accountLabel: row.account_label || null
   };
 }
@@ -87,6 +88,7 @@ export function createDevicePairingStore({
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL,
       approved_at INTEGER,
+      owner_account_id TEXT,
       account_label TEXT,
       grant_hash TEXT UNIQUE,
       grant_issued_at INTEGER,
@@ -95,6 +97,11 @@ export function createDevicePairingStore({
     CREATE INDEX IF NOT EXISTS device_pairings_user_code_idx ON device_pairings(user_code);
     CREATE INDEX IF NOT EXISTS device_pairings_grant_hash_idx ON device_pairings(grant_hash);
   `);
+
+  const columns = db.prepare('PRAGMA table_info(device_pairings)').all();
+  if (!columns.some(column => column.name === 'owner_account_id')) {
+    db.exec('ALTER TABLE device_pairings ADD COLUMN owner_account_id TEXT');
+  }
 
   const getByUserCodeStatement = db.prepare('SELECT * FROM device_pairings WHERE user_code = ?');
   const getByDeviceCodeStatement = db.prepare('SELECT * FROM device_pairings WHERE device_code = ?');
@@ -107,7 +114,7 @@ export function createDevicePairingStore({
   `);
   const approveStatement = db.prepare(`
     UPDATE device_pairings
-    SET approved_at = ?, account_label = ?
+    SET approved_at = ?, owner_account_id = ?, account_label = ?
     WHERE user_code = ? AND approved_at IS NULL
   `);
   const grantStatement = db.prepare(`
@@ -169,15 +176,16 @@ export function createDevicePairingStore({
     return statusFromRow(row, Number(now()));
   }
 
-  function approve({ userCode, accountLabel }) {
+  function approve({ userCode, accountId, accountLabel }) {
     const normalized = requiredText(userCode, 'user_code', 16).toUpperCase();
+    const owner = requiredText(accountId, 'account_id', 64);
     const label = requiredText(accountLabel, 'account_label', 128);
     const row = getByUserCodeStatement.get(normalized);
     if (!row) throw new Error('Unknown pairing code.');
     const nowMs = Number(now());
     if (Number(row.expires_at) < nowMs) throw new Error('Pairing code expired.');
     if (row.grant_consumed_at) throw new Error('Pairing code was already consumed.');
-    if (!row.approved_at) approveStatement.run(nowMs, label, normalized);
+    if (!row.approved_at) approveStatement.run(nowMs, owner, label, normalized);
     const updated = getByUserCodeStatement.get(normalized);
     return statusFromRow(updated, nowMs);
   }
@@ -204,7 +212,7 @@ export function createDevicePairingStore({
       status: 'approved',
       enrollmentGrant,
       deviceId: row.device_id,
-      account: { connected: true, label: row.account_label }
+      account: { connected: true, account_id: row.owner_account_id, label: row.account_label }
     };
   }
 
@@ -225,7 +233,7 @@ export function createDevicePairingStore({
     return {
       deviceId: row.device_id,
       deviceName: row.device_name,
-      account: { connected: true, label: row.account_label }
+      account: { connected: true, account_id: row.owner_account_id, label: row.account_label }
     };
   }
 

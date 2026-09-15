@@ -111,7 +111,7 @@ async function reconnect(ws, { deviceId, privateKey }) {
 async function createHarness(t, dbPath) {
   const store = createDeviceStore({ dbPath });
   const server = http.createServer((_req, res) => res.end('ok'));
-  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store, requestTimeoutMs: 1000 });
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store, requestTimeoutMs: 1000, requireAccountOwnership: false });
   broker.attach(server);
   const port = await listen(server);
   t.after(async () => {
@@ -348,7 +348,7 @@ test('persisted identity survives broker restart and can authenticate without en
 
   const store1 = createDeviceStore({ dbPath });
   const server1 = http.createServer((_req, res) => res.end('ok'));
-  const broker1 = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store1 });
+  const broker1 = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store1, requireAccountOwnership: false });
   broker1.attach(server1);
   const port1 = await listen(server1);
   const ws1 = await openSocket(port1, 'dev-secret');
@@ -360,7 +360,7 @@ test('persisted identity survives broker restart and can authenticate without en
 
   const store2 = createDeviceStore({ dbPath });
   const server2 = http.createServer((_req, res) => res.end('ok'));
-  const broker2 = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store2 });
+  const broker2 = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store2, requireAccountOwnership: false });
   broker2.attach(server2);
   const port2 = await listen(server2);
   t.after(async () => {
@@ -469,7 +469,7 @@ test('dispatch rechecks authorization under serialization after a stale prefligh
     close: () => baseStore.close()
   };
   const server = http.createServer((_req, res) => res.end('ok'));
-  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore, requestTimeoutMs: 50 });
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore, requestTimeoutMs: 50, requireAccountOwnership: false });
   broker.attach(server);
   const port = await listen(server);
   t.after(async () => {
@@ -516,7 +516,7 @@ test('enrollment cannot bind an externally rotated key it did not prove', async 
     close: () => baseStore.close()
   };
   const server = http.createServer((_req, res) => res.end('ok'));
-  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore });
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore, requireAccountOwnership: false });
   broker.attach(server);
   const port = await listen(server);
   t.after(async () => {
@@ -563,7 +563,7 @@ test('result acceptance rechecks authorization under serialization after a stale
     close: () => baseStore.close()
   };
   const server = http.createServer((_req, res) => res.end('ok'));
-  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore, requestTimeoutMs: 1000 });
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: brokerStore, requestTimeoutMs: 1000, requireAccountOwnership: false });
   broker.attach(server);
   const port = await listen(server);
   t.after(async () => {

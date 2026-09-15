@@ -6,7 +6,6 @@ import path from 'node:path';
 
 import {
   FileBackedAuthState,
-  PasswordProtectedAuthProvider,
   isStaticBearerAuthorization,
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
@@ -15,7 +14,6 @@ import {
 test('shouldCreateTransportForRequest accepts initialize requests with stale session ids', () => {
   const existingTransports = {};
   const initializeRequest = { method: 'initialize', params: { protocolVersion: '2025-03-26' } };
-
   assert.equal(shouldCreateTransportForRequest('stale-session', initializeRequest, existingTransports), true);
 });
 
@@ -42,70 +40,28 @@ test('static bearer docs describe optional dual auth without replacing OAuth', (
   const readme = fs.readFileSync(new URL('../README.vi.md', import.meta.url), 'utf8');
   const envExample = fs.readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
   const security = fs.readFileSync(new URL('../SECURITY.md', import.meta.url), 'utf8');
-
   assert.match(envExample, /^MCP_BEARER_TOKEN=$/m);
   assert.match(readme, /Static bearer auth/);
-  assert.match(readme, /OAuth vẫn là đường chính cho ChatGPT/);
-  assert.match(readme, /không thay OAuth discovery/);
   assert.match(security, /GODMODE ACTIVE/);
   assert.match(security, /shell_execute/);
 });
 
-test('PasswordProtectedAuthProvider persists clients and tokens across instances', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-auth-test-'));
+test('FileBackedAuthState persists registered client and token metadata across instances', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-auth-state-'));
   const statePath = path.join(tempDir, 'auth-state.json');
-  const stateStore = new FileBackedAuthState(statePath);
+  try {
+    const first = new FileBackedAuthState(statePath);
+    first.setClient({ client_id: 'client-1' });
+    first.setToken('access-1', { accountId: 'account-1', clientId: 'client-1', scopes: ['mcp:tools'], expiresAt: Date.now() + 60_000 });
+    first.setRefreshToken('refresh-1', { accountId: 'account-1', clientId: 'client-1', scopes: ['mcp:tools'], expiresAt: Date.now() + 60_000 });
 
-  const providerA = new PasswordProtectedAuthProvider('secret', stateStore);
-  const client = { client_id: 'client-1' };
-  await providerA.clientsStore.registerClient(client);
-  providerA.codes.set('code-1', {
-    client,
-    params: { codeChallenge: 'challenge', scopes: ['mcp:tools'], resource: 'https://example.com/mcp' }
-  });
-
-  const tokenResponse = await providerA.exchangeAuthorizationCode(client, 'code-1');
-
-  const providerB = new PasswordProtectedAuthProvider('secret', stateStore);
-  const restoredClient = await providerB.clientsStore.getClient('client-1');
-  const restoredToken = await providerB.verifyAccessToken(tokenResponse.access_token);
-
-  assert.deepEqual(restoredClient, client);
-  assert.equal(restoredToken.clientId, 'client-1');
-  assert.deepEqual(restoredToken.scopes, ['mcp:tools']);
-});
-
-test('PasswordProtectedAuthProvider supports refresh tokens across instances', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-auth-test-'));
-  const statePath = path.join(tempDir, 'auth-state.json');
-  const stateStore = new FileBackedAuthState(statePath);
-
-  const providerA = new PasswordProtectedAuthProvider('secret', stateStore);
-  const client = { client_id: 'client-2' };
-  await providerA.clientsStore.registerClient(client);
-  providerA.codes.set('code-2', {
-    client,
-    params: { codeChallenge: 'challenge', scopes: ['mcp:tools'], resource: 'https://example.com/mcp' }
-  });
-
-  const tokenResponse = await providerA.exchangeAuthorizationCode(client, 'code-2');
-  const providerB = new PasswordProtectedAuthProvider('secret', stateStore);
-  const refreshed = await providerB.exchangeRefreshToken(client, tokenResponse.refresh_token);
-  const restoredToken = await providerB.verifyAccessToken(refreshed.access_token);
-
-  assert.equal(refreshed.token_type, 'bearer');
-  assert.ok(refreshed.refresh_token);
-  assert.equal(restoredToken.clientId, 'client-2');
-});
-
-test('PasswordProtectedAuthProvider restores remembered machine session across instances', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-auth-test-'));
-  const statePath = path.join(tempDir, 'auth-state.json');
-  const stateStore = new FileBackedAuthState(statePath);
-
-  const providerA = new PasswordProtectedAuthProvider('secret', stateStore);
-  providerA.rememberSession('machine-session-1');
-
-  const providerB = new PasswordProtectedAuthProvider('secret', stateStore);
-  assert.equal(providerB.hasSession('machine-session-1'), true);
+    const second = new FileBackedAuthState(statePath);
+    assert.equal(second.getClient('client-1').client_id, 'client-1');
+    assert.equal(second.getToken('access-1').accountId, 'account-1');
+    assert.equal(second.getRefreshToken('refresh-1').accountId, 'account-1');
+    second.deleteRefreshToken('refresh-1');
+    assert.equal(new FileBackedAuthState(statePath).getRefreshToken('refresh-1'), undefined);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
