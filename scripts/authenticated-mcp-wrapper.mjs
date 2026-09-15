@@ -57,6 +57,8 @@ import { createDeviceStore } from './device-store.mjs';
 import { createDeviceUsageStore } from './device-usage.mjs';
 import { callerAuditId, createDeviceAccessPolicy } from './device-access-policy.mjs';
 import { createDeviceAuditRecorder } from './device-audit.mjs';
+import { createAccountStore } from './account-store.mjs';
+import { installAccountRoutes } from './account-http.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -135,6 +137,7 @@ function currentSurfaceConfig(snapshot = workspaceSnapshot()) {
 
 const processSessions = createProcessSessionManager({ env: process.env });
 const remoteProcessSessions = createRemoteProcessSessionRegistry();
+const accountStore = createAccountStore({ dbPath: path.join(runtimeDirectory, 'gateway.sqlite') });
 const deviceDbPath = path.join(runtimeDirectory, 'devices.sqlite');
 const deviceStore = createDeviceStore({ dbPath: deviceDbPath });
 const devicePairingStore = createDevicePairingStore({ dbPath: deviceDbPath });
@@ -944,6 +947,10 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
+const accountHttp = installAccountRoutes(app, {
+  accountStore,
+  needInvite: () => workspaceSnapshot().rawConfig?.auth?.need_invite !== false
+});
 app.use((req, res, next) => {
   if (req.path !== '/mcp') {
     next();
@@ -1238,6 +1245,7 @@ async function shutdown() {
   deviceAudit.close();
   await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
+  try { accountStore.close(); } catch {}
   try { deviceUsageStore.close(); } catch {}
   try { devicePairingStore.close(); } catch {}
   try { deviceStore.close(); } catch {}

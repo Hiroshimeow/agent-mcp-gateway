@@ -93,12 +93,12 @@
 - [ ] Use one authoritative SQLite runtime DB (`gateway.sqlite`) for account/device/pairing/usage/auth metadata going forward.
 - [x] Accounts: UUID `account_id`, normalized email, scrypt password hash+salt, role, revoked/deleted timestamps.
 - [x] Invites: hash only, 8-char uppercase unambiguous code, created/used/revoked timestamps, single-use.
-- [ ] Config flag `need_invite` defaults to gated production behavior; when false signup does not require an invite.
+- [x] Config flag `need_invite` defaults to gated production behavior; when false signup does not require an invite.
 - [x] Local CLI creates admin, lists/revokes/deletes accounts, creates/revokes invite codes. Admin has no public web login.
-- [ ] Product signup accepts email/password/invite; email verification is intentionally absent in this phase.
-- [ ] Product login uses the minimal dark progressive UI without account-enumeration signaling; signup/OUT remains available independently of whether the typed email exists.
-- [ ] Login failures use generic responses and simple source+account-key cooldown/rate limiting; no global three-strikes lockout DoS.
-- [ ] Browser account session is bound to `account_id`.
+- [x] Product signup accepts email/password/invite; email verification is intentionally absent in this phase.
+- [x] Product login uses the minimal dark progressive UI without account-enumeration signaling; signup/OUT remains available independently of whether the typed email exists.
+- [x] Login failures use generic responses and simple source+account-key cooldown/rate limiting; no global three-strikes lockout DoS.
+- [x] Browser account session is bound to `account_id`.
 - [ ] OAuth authorization requires an authenticated normal account session and tokens/refresh tokens carry `account_id` as the human subject.
 - [ ] Keep `offline_access`; access token 12h and refresh behavior remain durable unless intentionally revised/tested.
 - [ ] Device verify requires the same account session, then pairing approval writes `owner_account_id`.

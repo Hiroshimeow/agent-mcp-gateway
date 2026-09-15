@@ -69,6 +69,28 @@ test('requireInvite controls signup and invite consumption is atomic with accoun
   }
 });
 
+test('browser sessions are hash-at-rest, expire, and die when the account is revoked', () => {
+  let now = 1_000_000;
+  const f = fixture(() => now);
+  try {
+    const user = f.store.createAccount({ email: 'session@example.com', password: 'session-password' });
+    const session = f.store.createSession(user.accountId, { ttlMs: 60_000 });
+    assert.equal(typeof session.sessionId, 'string');
+    assert.equal(f.store.getSessionAccount(session.sessionId)?.accountId, user.accountId);
+    assert.equal(fs.readFileSync(f.dbPath).includes(session.sessionId), false);
+
+    now += 60_001;
+    assert.equal(f.store.getSessionAccount(session.sessionId), null);
+
+    const next = f.store.createSession(user.accountId, { ttlMs: 60_000 });
+    f.store.revokeAccount(user.accountId);
+    assert.equal(f.store.getSessionAccount(next.sessionId), null);
+  } finally {
+    f.store.close();
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test('admin role can only be assigned by local store API and accounts can be revoked or deleted', () => {
   const f = fixture();
   try {

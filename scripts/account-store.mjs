@@ -65,8 +65,18 @@ function verifyPasswordHash(password, encoded) {
   }
 }
 
+const DUMMY_PASSWORD_HASH = hashPassword('hcu-dummy-password-not-an-account');
+
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
 function inviteHash(code) {
-  return crypto.createHash('sha256').update(String(code || '').trim().toUpperCase(), 'utf8').digest('hex');
+  return sha256Hex(String(code || '').trim().toUpperCase());
+}
+
+function sessionHash(sessionId) {
+  return sha256Hex(String(sessionId || '').trim());
 }
 
 function generateInviteCode() {
@@ -122,7 +132,15 @@ export function createAccountStore({ dbPath, now = () => Date.now() } = {}) {
       used_at INTEGER,
       revoked_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS account_sessions (
+      session_hash TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    );
     CREATE INDEX IF NOT EXISTS accounts_email_idx ON accounts(email_normalized);
+    CREATE INDEX IF NOT EXISTS account_sessions_account_idx ON account_sessions(account_id);
   `);
 
   const getByIdStatement = db.prepare(`
@@ -145,6 +163,19 @@ export function createAccountStore({ dbPath, now = () => Date.now() } = {}) {
     UPDATE accounts SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL
   `);
   const deleteAccountStatement = db.prepare('DELETE FROM accounts WHERE account_id = ?');
+  const insertSessionStatement = db.prepare(`
+    INSERT INTO account_sessions (session_hash, account_id, created_at, expires_at, revoked_at)
+    VALUES (?, ?, ?, ?, NULL)
+  `);
+  const getSessionAccountStatement = db.prepare(`
+    SELECT a.account_id, a.email_normalized, a.password_hash, a.role, a.created_at, a.revoked_at
+    FROM account_sessions s
+    JOIN accounts a ON a.account_id = s.account_id
+    WHERE s.session_hash = ? AND s.revoked_at IS NULL AND s.expires_at >= ? AND a.revoked_at IS NULL
+  `);
+  const revokeSessionStatement = db.prepare('UPDATE account_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL');
+  const revokeAccountSessionsStatement = db.prepare('UPDATE account_sessions SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL');
+  const deleteAccountSessionsStatement = db.prepare('DELETE FROM account_sessions WHERE account_id = ?');
 
   const getInviteStatement = db.prepare('SELECT invite_hash, created_at, used_at, revoked_at FROM invites WHERE invite_hash = ?');
   const listInvitesStatement = db.prepare('SELECT invite_hash, created_at, used_at, revoked_at FROM invites ORDER BY created_at, invite_hash');
@@ -213,22 +244,75 @@ export function createAccountStore({ dbPath, now = () => Date.now() } = {}) {
 
   function verifyPassword(email, password) {
     let normalizedEmail;
-    try { normalizedEmail = normalizeAccountEmail(email); } catch { return null; }
-    const row = getByEmailStatement.get(normalizedEmail);
-    if (!row || row.revoked_at !== null || !verifyPasswordHash(password, row.password_hash)) return null;
+    try { normalizedEmail = normalizeAccountEmail(email); } catch { normalizedEmail = null; }
+    const row = normalizedEmail ? getByEmailStatement.get(normalizedEmail) : null;
+    const matches = verifyPasswordHash(password, row?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!row || row.revoked_at !== null || !matches) return null;
     return rowToAccount(row);
+  }
+
+  function createSession(accountId, { ttlMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
+    const id = String(accountId || '').trim();
+    const account = getAccount(id);
+    if (!account || account.revokedAt !== null) throw accountError('ACCOUNT_NOT_FOUND', 'Unknown or revoked account.');
+    if (!Number.isInteger(ttlMs) || ttlMs < 60_000 || ttlMs > 30 * 24 * 60 * 60 * 1000) {
+      throw accountError('INVALID_SESSION_TTL', 'Session ttlMs must be between 60000 and 2592000000.');
+    }
+    const sessionId = crypto.randomBytes(32).toString('base64url');
+    const createdAt = Number(now());
+    const expiresAt = createdAt + ttlMs;
+    insertSessionStatement.run(sessionHash(sessionId), id, createdAt, expiresAt);
+    return { sessionId, accountId: id, createdAt, expiresAt };
+  }
+
+  function getSessionAccount(sessionId) {
+    const id = String(sessionId || '').trim();
+    if (!id) return null;
+    return rowToAccount(getSessionAccountStatement.get(sessionHash(id), Number(now())));
+  }
+
+  function revokeSession(sessionId) {
+    const id = String(sessionId || '').trim();
+    if (!id) return false;
+    return Number(revokeSessionStatement.run(Number(now()), sessionHash(id)).changes) === 1;
   }
 
   function revokeAccount(accountId) {
     const id = String(accountId || '').trim();
     const existing = getAccount(id);
     if (!existing) throw accountError('ACCOUNT_NOT_FOUND', 'Unknown account.');
-    if (existing.revokedAt === null) revokeAccountStatement.run(Number(now()), id);
-    return getAccount(id);
+    if (existing.revokedAt !== null) return existing;
+    const revokedAt = Number(now());
+    let began = false;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      began = true;
+      revokeAccountStatement.run(revokedAt, id);
+      revokeAccountSessionsStatement.run(revokedAt, id);
+      db.exec('COMMIT');
+      began = false;
+      return getAccount(id);
+    } catch (error) {
+      if (began) { try { db.exec('ROLLBACK'); } catch {} }
+      throw error;
+    }
   }
 
   function deleteAccount(accountId) {
-    return Number(deleteAccountStatement.run(String(accountId || '').trim()).changes) === 1;
+    const id = String(accountId || '').trim();
+    let began = false;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      began = true;
+      deleteAccountSessionsStatement.run(id);
+      const deleted = Number(deleteAccountStatement.run(id).changes) === 1;
+      db.exec('COMMIT');
+      began = false;
+      return deleted;
+    } catch (error) {
+      if (began) { try { db.exec('ROLLBACK'); } catch {} }
+      throw error;
+    }
   }
 
   function createInvite() {
@@ -271,6 +355,9 @@ export function createAccountStore({ dbPath, now = () => Date.now() } = {}) {
     createAccount,
     createAdmin,
     verifyPassword,
+    createSession,
+    getSessionAccount,
+    revokeSession,
     revokeAccount,
     deleteAccount,
     createInvite,

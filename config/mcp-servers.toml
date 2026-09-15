@@ -12,6 +12,9 @@ instructions = "Use filesystem tools for file content, shell/process tools for t
 [surface]
 mode = "agent"
 
+[auth]
+need_invite = true
+
 [trusted_roots]
 # The launcher substitutes ${repoRoot}. Additional machine-specific roots are
 # added through the runtime overlay and must not be committed here.

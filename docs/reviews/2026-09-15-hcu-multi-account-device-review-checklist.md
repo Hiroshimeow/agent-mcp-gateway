@@ -33,10 +33,10 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 ## Phase 3 — Accounts / invites / OAuth / ownership
 - [x] Accounts are durable and use normalized email + salted scrypt password hash.
 - [x] Invite codes are 8-char uppercase/unambiguous, hashed, single-use, revocable.
-- [ ] `need_invite=true` requires an invite; false allows normal signup.
-- [ ] No email verification is required in this phase.
-- [ ] Login UI does not reveal whether an email exists.
-- [ ] Login abuse control does not permit easy global victim-account lockout.
+- [x] `need_invite=true` requires an invite; false allows normal signup.
+- [x] No email verification is required in this phase.
+- [x] Login UI does not reveal whether an email exists.
+- [x] Login abuse control does not permit easy global victim-account lockout.
 - [x] Admin is local CLI-only; no public admin login.
 - [ ] The author uses a normal account for MCP usage.
 - [ ] OAuth access/refresh token human subject is `account_id`, not merely `client_id`.
