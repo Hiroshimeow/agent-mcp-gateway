@@ -51,10 +51,24 @@ function normalizeCapabilities(value) {
   return [...new Set(value.map(item => String(item).trim()).filter(Boolean))].sort();
 }
 
+function machineMetadata(payload = {}) {
+  const pathStyle = String(payload.path_style || '').trim();
+  return {
+    hostname: String(payload.hostname || '').trim().slice(0, 128) || null,
+    platform: String(payload.platform || '').trim().slice(0, 32) || null,
+    arch: String(payload.arch || '').trim().slice(0, 32) || null,
+    pathStyle: ['windows', 'posix'].includes(pathStyle) ? pathStyle : null
+  };
+}
+
 function publicDevice(device, { stored = null, usage = null, schema = null } = {}) {
   return {
     deviceId: device.deviceId,
     deviceName: stored?.deviceName || device.deviceId,
+    hostname: device.hostname || stored?.hostname || null,
+    platform: device.platform || stored?.platform || null,
+    arch: device.arch || stored?.arch || null,
+    pathStyle: device.pathStyle || stored?.pathStyle || null,
     account: {
       connected: Boolean(stored?.accountLabel),
       label: stored?.accountLabel || null
@@ -152,6 +166,10 @@ export function createDeviceBroker(options = {}) {
         revoked: Boolean(stored.revokedAt),
         connectionEpoch: 0,
         agentVersion: 'unknown',
+        hostname: stored.hostname || null,
+        platform: stored.platform || null,
+        arch: stored.arch || null,
+        pathStyle: stored.pathStyle || null,
         capabilities: [],
         connectedAt: null,
         lastSeenAt: null,
@@ -172,7 +190,7 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  function registerConnection(ws, { deviceId, agentVersion, capabilities, publicKeyPem = null, authorizationGeneration = null }) {
+  function registerConnection(ws, { deviceId, agentVersion, capabilities, hostname = null, platform = null, arch = null, pathStyle = null, publicKeyPem = null, authorizationGeneration = null }) {
     const previous = devices.get(deviceId);
     const connectionEpoch = (previous?.connectionEpoch || 0) + 1;
     const current = {
@@ -182,6 +200,10 @@ export function createDeviceBroker(options = {}) {
       revoked: false,
       connectionEpoch,
       agentVersion: String(agentVersion || 'unknown'),
+      hostname: String(hostname || '').trim().slice(0, 128) || null,
+      platform: String(platform || '').trim().slice(0, 32) || null,
+      arch: String(arch || '').trim().slice(0, 32) || null,
+      pathStyle: ['windows', 'posix'].includes(String(pathStyle || '').trim()) ? String(pathStyle).trim() : null,
       capabilities: normalizeCapabilities(capabilities),
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
@@ -262,6 +284,7 @@ export function createDeviceBroker(options = {}) {
         publicKeyPem,
         agentVersion: message.payload?.agent_version,
         capabilities: message.payload?.capabilities,
+        ...machineMetadata(message.payload),
         legacyEnrollmentAuthorized: Boolean(ws.enrollmentAuthorized),
         enrollmentGrant: ws.enrollmentAuthorized ? null : pairingCredential
       });
@@ -280,6 +303,7 @@ export function createDeviceBroker(options = {}) {
         publicKeyPem,
         agentVersion: message.payload?.agent_version,
         capabilities: message.payload?.capabilities,
+        ...machineMetadata(message.payload),
         authorizationGeneration: stored?.authorizationGeneration ?? null,
         wasEnrolled: Boolean(stored),
         enrollmentGrant: pairingCredential
@@ -294,6 +318,7 @@ export function createDeviceBroker(options = {}) {
       publicKeyPem: stored.publicKeyPem,
       agentVersion: message.payload?.agent_version,
       capabilities: message.payload?.capabilities,
+      ...machineMetadata(message.payload),
       authorizationGeneration: stored.authorizationGeneration
     });
   }
@@ -329,7 +354,11 @@ export function createDeviceBroker(options = {}) {
           deviceId: state.deviceId,
           publicKeyPem: state.publicKeyPem,
           deviceName: pairing?.deviceName || state.deviceId,
-          accountLabel: pairing?.account?.label || null
+          accountLabel: pairing?.account?.label || null,
+          hostname: state.hostname,
+          platform: state.platform,
+          arch: state.arch,
+          pathStyle: state.pathStyle
         });
         authorizedPublicKeyPem = enrolled.publicKeyPem;
         authorizationGeneration = enrolled.authorizationGeneration;
@@ -350,7 +379,11 @@ export function createDeviceBroker(options = {}) {
             deviceId: state.deviceId,
             publicKeyPem: state.publicKeyPem,
             deviceName: pairing.deviceName,
-            accountLabel: pairing.account?.label || null
+            accountLabel: pairing.account?.label || null,
+            hostname: state.hostname,
+            platform: state.platform,
+            arch: state.arch,
+            pathStyle: state.pathStyle
           });
         } else {
           if (current.revokedAt || current.publicKeyPem !== state.publicKeyPem) throw new Error('device authorization changed');
@@ -358,7 +391,11 @@ export function createDeviceBroker(options = {}) {
           updated = deviceStore.updateMetadata({
             deviceId: state.deviceId,
             deviceName: pairing.deviceName,
-            accountLabel: pairing.account?.label || null
+            accountLabel: pairing.account?.label || null,
+            hostname: state.hostname,
+            platform: state.platform,
+            arch: state.arch,
+            pathStyle: state.pathStyle
           });
         }
         authorizedPublicKeyPem = updated.publicKeyPem;
@@ -397,7 +434,8 @@ export function createDeviceBroker(options = {}) {
     const current = registerConnection(ws, {
       deviceId,
       agentVersion: message.payload?.agent_version,
-      capabilities: message.payload?.capabilities
+      capabilities: message.payload?.capabilities,
+      ...machineMetadata(message.payload)
     });
     ws.send(JSON.stringify({
       protocol_version: DEVICE_PROTOCOL_VERSION,

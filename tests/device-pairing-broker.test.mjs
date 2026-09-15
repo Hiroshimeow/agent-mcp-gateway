@@ -63,7 +63,15 @@ async function sendEnrollHello(ws, { deviceId, publicKeyPem }) {
     type: 'enroll_hello',
     device_id: deviceId,
     timestamp: Date.now(),
-    payload: { public_key_pem: publicKeyPem, agent_version: 'pair-test', capabilities: ['ping'] }
+    payload: {
+      public_key_pem: publicKeyPem,
+      agent_version: 'hcu-device-test',
+      hostname: 'g8',
+      platform: 'linux',
+      arch: 'x64',
+      path_style: 'posix',
+      capabilities: ['ping']
+    }
   }));
   return await challengePromise;
 }
@@ -163,6 +171,16 @@ test('pairing grant is consumed only after key proof and persists account/device
   const stored = f.deviceStore.get('paired-device');
   assert.equal(stored.deviceName, 'Workstation A');
   assert.equal(stored.accountLabel, 'Example Gateway');
+  assert.equal(stored.hostname, 'g8');
+  assert.equal(stored.platform, 'linux');
+  assert.equal(stored.arch, 'x64');
+  assert.equal(stored.pathStyle, 'posix');
+
+  const [listed] = f.broker.listDevices();
+  assert.equal(listed.hostname, 'g8');
+  assert.equal(listed.platform, 'linux');
+  assert.equal(listed.arch, 'x64');
+  assert.equal(listed.pathStyle, 'posix');
 });
 
 test('usage counters survive reconnect and account metadata returns without another pairing grant', async t => {

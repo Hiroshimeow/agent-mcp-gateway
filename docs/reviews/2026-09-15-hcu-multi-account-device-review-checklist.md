@@ -3,22 +3,22 @@
 Use this checklist after each phase. A reviewer should be able to reject one phase without reopening unrelated phases.
 
 ## Phase 0 — Repo rename / runtime continuity
-- [ ] GitHub canonical repo is `Hiroshimeow/agent-mcp-device`.
-- [ ] Canonical local checkout is `E:/git-project/agent-mcp-device`.
-- [ ] `origin` points to the renamed repo; `upstream` remains DesktopCommanderMCP.
-- [ ] Live Windows runner executes from `agent-mcp-device`, not the old repo.
-- [ ] Device reconnect is proven online after rename.
-- [ ] No new commits are made in stale `broker-mcp-gateway` checkout.
+- [x] GitHub canonical repo is `Hiroshimeow/agent-mcp-device`.
+- [x] Canonical local checkout is `E:/git-project/agent-mcp-device`.
+- [x] `origin` points to the renamed repo; `upstream` remains DesktopCommanderMCP.
+- [x] Live Windows runner executes from `agent-mcp-device`, not the old repo.
+- [x] Device reconnect is proven online after rename.
+- [x] No new commits are made in stale `broker-mcp-gateway` checkout.
 
 ## Phase 1 — Device identity / metadata / HCU branding
-- [ ] New `device_id` format is `<hostname>-<random8>`, immutable after enrollment.
-- [ ] `device_name` is separate from `device_id` and can be friendly/renameable.
-- [ ] Device hello provides hostname/platform/arch/path_style/version/capabilities.
-- [ ] `list_devices` exposes those fields in bounded structured output.
-- [ ] Duplicate friendly names do not silently route.
-- [ ] HCU runtime paths/service names replace new DesktopCommander runtime branding.
-- [ ] Legal/upstream attribution is preserved.
-- [ ] npm is NOT published in this phase.
+- [x] New `device_id` format is `<hostname>-<random8>`, immutable after enrollment.
+- [x] `device_name` is separate from `device_id` and can be friendly/renameable.
+- [x] Device hello provides hostname/platform/arch/path_style/version/capabilities.
+- [x] `list_devices` exposes those fields in bounded structured output.
+- [x] Duplicate friendly names do not silently route.
+- [x] HCU runtime paths/service names replace new DesktopCommander runtime branding.
+- [x] Legal/upstream attribution is preserved.
+- [x] npm is NOT published in this phase.
 
 ## Phase 2 — P0 IDs / no fallback
 - [ ] Public project field is only `project_id`; no model-facing `projectId` remains.

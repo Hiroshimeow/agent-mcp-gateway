@@ -33,6 +33,29 @@ test('device store persists enrolled identities across reopen and supports revok
   second.close();
 });
 
+test('device store persists bounded machine metadata independently from friendly name', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-metadata-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+
+  store.enroll({
+    deviceId: 'g8-a1b2c3d4',
+    publicKeyPem: publicKeyPem(),
+    deviceName: 'Linux Build Box',
+    hostname: 'g8',
+    platform: 'linux',
+    arch: 'x64',
+    pathStyle: 'posix'
+  });
+  const stored = store.get('g8-a1b2c3d4');
+  assert.equal(stored.deviceName, 'Linux Build Box');
+  assert.equal(stored.hostname, 'g8');
+  assert.equal(stored.platform, 'linux');
+  assert.equal(stored.arch, 'x64');
+  assert.equal(stored.pathStyle, 'posix');
+});
+
 test('device store refuses silent public-key replacement', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
   const dbPath = path.join(dir, 'devices.sqlite');

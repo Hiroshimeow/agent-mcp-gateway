@@ -24,13 +24,14 @@ test('device inventory pagination is stable, bounded, and reports truncation', (
   const inventory = devices(1000).reverse();
   const first = paginateDeviceInventory(inventory, { limit: 25 });
   assert.equal(first.devices.length, 25);
-  assert.equal(first.devices[0].deviceId, 'device-0000');
+  assert.equal(first.devices[0].device_id, 'device-0000');
+  assert.equal(first.devices[0].deviceId, undefined);
   assert.equal(first.truncated, true);
   assert.equal(typeof first.nextCursor, 'string');
   assert.equal(first.total, 1000);
 
   const second = paginateDeviceInventory(inventory, { limit: 25, cursor: first.nextCursor });
-  assert.equal(second.devices[0].deviceId, 'device-0025');
+  assert.equal(second.devices[0].device_id, 'device-0025');
   assert.equal(second.truncated, true);
 
   assert.throws(

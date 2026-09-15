@@ -15,7 +15,8 @@ function inventorySignature(devices) {
   return createHash('sha256')
     .update(JSON.stringify(devices.map(device => ({
       deviceId: device?.deviceId || '',
-      status: device?.status || '',
+      online: Boolean(device?.online),
+      revoked: Boolean(device?.revoked),
       capabilities: Array.isArray(device?.capabilities) ? device.capabilities : []
     }))))
     .digest('hex')
@@ -55,6 +56,27 @@ export function listDevicesToolDefinition() {
   };
 }
 
+function toWireDevice(device = {}) {
+  return {
+    device_id: device.deviceId || '',
+    device_name: device.deviceName || device.deviceId || '',
+    hostname: device.hostname || null,
+    platform: device.platform || null,
+    arch: device.arch || null,
+    path_style: device.pathStyle || null,
+    online: Boolean(device.online),
+    revoked: Boolean(device.revoked),
+    agent_version: device.agentVersion || 'unknown',
+    capabilities: Array.isArray(device.capabilities) ? [...device.capabilities] : [],
+    connection_epoch: Number(device.connectionEpoch || 0),
+    connected_at: device.connectedAt || null,
+    last_seen_at: device.lastSeenAt || null,
+    account: device.account || { connected: false, label: null },
+    usage: device.usage ?? null,
+    schema: device.schema ?? null
+  };
+}
+
 export function paginateDeviceInventory(devices, options = {}) {
   const sorted = [...(Array.isArray(devices) ? devices : [])]
     .sort((left, right) => String(left?.deviceId || '').localeCompare(String(right?.deviceId || '')));
@@ -62,7 +84,7 @@ export function paginateDeviceInventory(devices, options = {}) {
   const offset = decodeCursor(options.cursor, signature);
   if (offset > sorted.length) throw new Error('Invalid or stale cursor: device offset is outside the current inventory.');
   const limit = boundedLimit(options.limit);
-  const page = sorted.slice(offset, offset + limit);
+  const page = sorted.slice(offset, offset + limit).map(toWireDevice);
   const nextOffset = offset + page.length;
   const truncated = nextOffset < sorted.length;
   return {
