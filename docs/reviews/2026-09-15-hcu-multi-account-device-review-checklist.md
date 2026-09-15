@@ -31,13 +31,13 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] Regression test proves omission cannot mutate/read the default project accidentally.
 
 ## Phase 3 — Accounts / invites / OAuth / ownership
-- [ ] Accounts are durable and use normalized email + salted scrypt password hash.
-- [ ] Invite codes are 8-char uppercase/unambiguous, hashed, single-use, revocable.
+- [x] Accounts are durable and use normalized email + salted scrypt password hash.
+- [x] Invite codes are 8-char uppercase/unambiguous, hashed, single-use, revocable.
 - [ ] `need_invite=true` requires an invite; false allows normal signup.
 - [ ] No email verification is required in this phase.
 - [ ] Login UI does not reveal whether an email exists.
 - [ ] Login abuse control does not permit easy global victim-account lockout.
-- [ ] Admin is local CLI-only; no public admin login.
+- [x] Admin is local CLI-only; no public admin login.
 - [ ] The author uses a normal account for MCP usage.
 - [ ] OAuth access/refresh token human subject is `account_id`, not merely `client_id`.
 - [ ] `offline_access` remains supported.

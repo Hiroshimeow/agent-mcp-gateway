@@ -91,10 +91,10 @@
 **Gateway additions:** account/invite/session persistence, admin CLI, login/signup routes, auth-provider refactor, pairing ownership.
 
 - [ ] Use one authoritative SQLite runtime DB (`gateway.sqlite`) for account/device/pairing/usage/auth metadata going forward.
-- [ ] Accounts: UUID `account_id`, normalized email, scrypt password hash+salt, role, revoked/deleted timestamps.
-- [ ] Invites: hash only, 8-char uppercase unambiguous code, created/used/revoked timestamps, single-use.
+- [x] Accounts: UUID `account_id`, normalized email, scrypt password hash+salt, role, revoked/deleted timestamps.
+- [x] Invites: hash only, 8-char uppercase unambiguous code, created/used/revoked timestamps, single-use.
 - [ ] Config flag `need_invite` defaults to gated production behavior; when false signup does not require an invite.
-- [ ] Local CLI creates admin, lists/revokes/deletes accounts, creates/revokes invite codes. Admin has no public web login.
+- [x] Local CLI creates admin, lists/revokes/deletes accounts, creates/revokes invite codes. Admin has no public web login.
 - [ ] Product signup accepts email/password/invite; email verification is intentionally absent in this phase.
 - [ ] Product login uses the minimal dark progressive UI without account-enumeration signaling; signup/OUT remains available independently of whether the typed email exists.
 - [ ] Login failures use generic responses and simple source+account-key cooldown/rate limiting; no global three-strikes lockout DoS.

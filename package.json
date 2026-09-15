@@ -17,7 +17,14 @@
     "benchmark:catalog": "node scripts/benchmark-mcp-catalog.mjs",
     "device:revoke": "node scripts/device-admin.mjs revoke",
     "device:rotate": "node scripts/device-admin.mjs rotate",
-    "device:enroll": "node scripts/device-admin.mjs enroll"
+    "device:enroll": "node scripts/device-admin.mjs enroll",
+    "admin:account:create": "node scripts/admin.mjs account create-admin",
+    "admin:account:list": "node scripts/admin.mjs account list",
+    "admin:account:revoke": "node scripts/admin.mjs account revoke",
+    "admin:account:delete": "node scripts/admin.mjs account delete",
+    "admin:invite:create": "node scripts/admin.mjs invite create",
+    "admin:invite:list": "node scripts/admin.mjs invite list",
+    "admin:invite:revoke": "node scripts/admin.mjs invite revoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
