@@ -1,10 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
@@ -16,11 +13,9 @@ import {
   ListPromptsRequestSchema,
   ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
-  ListRootsRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
-import { DEFAULT_SHELL_RESPONSE_BUDGET_BYTES, executeDirectShell } from './direct-shell.mjs';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
@@ -42,11 +37,8 @@ import {
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
-import { validateShellCommand } from './shell-policy.mjs';
 import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
-import { prepareGuardedEdit } from './guarded-edit.mjs';
-import { createProcessSessionManager } from './process-session-manager.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
@@ -62,11 +54,7 @@ import { installAccountRoutes } from './account-http.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
-  createWorkspaceRegistry,
-  isAbsoluteWorkspacePath,
-  isPathInsideWorkspace,
-  normalizeWorkspacePath,
-  toFilesystemRootUri
+  createWorkspaceRegistry
 } from './workspace-registry.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,7 +67,6 @@ const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
 const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const runtimeProfile = getRuntimeProfile(process.env);
-const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
 const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLowerCase() === 'true';
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
@@ -92,15 +79,12 @@ const toolMetrics = createToolMetricsRecorder({
 const skillBootstrapGate = createSkillBootstrapGate({
   ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
 });
-const filesystemEntrypointPath = fileURLToPath(
-  new URL('../node_modules/@modelcontextprotocol/server-filesystem/dist/index.js', import.meta.url)
-);
 const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
 const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'interact_with_process', 'terminate_process']);
 const activeProxyServers = new Set();
 
 if (!repoRoot) throw new Error('REPO_ROOT is required');
-if (!enableFilesystem && !enableShell) throw new Error('At least one local execution primitive must be enabled');
+if (!enableFilesystem && !enableShell) throw new Error('At least one execution tool family must be enabled');
 
 function envFlag(value, defaultValue = false) {
   const text = String(value ?? '').trim().toLowerCase();
@@ -132,7 +116,6 @@ function currentSurfaceConfig(snapshot = workspaceSnapshot()) {
   return loadSurfaceConfig(snapshot.rawConfig, process.env);
 }
 
-const processSessions = createProcessSessionManager({ env: process.env });
 const remoteProcessSessions = createRemoteProcessSessionRegistry();
 const gatewayDbPath = path.resolve(process.env.MCP_GATEWAY_DB_PATH || path.join(runtimeDirectory, 'gateway.sqlite'));
 const accountStore = createAccountStore({ dbPath: gatewayDbPath });
@@ -153,78 +136,6 @@ const deviceAudit = createDeviceAuditRecorder({
   auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
   enabled: process.env.MCP_DEVICE_AUDIT_ENABLED !== 'false'
 });
-
-function currentRoots() {
-  return workspaceSnapshot().roots;
-}
-
-function currentRoot() {
-  return currentRoots()[0] || path.resolve(repoRoot);
-}
-
-function appendStderrToLog(transport, logPath) {
-  if (!logPath || !transport.stderr) return;
-  const stderrLog = fs.createWriteStream(logPath, { flags: 'a' });
-  transport.stderr.pipe(stderrLog);
-}
-
-function createClient(name, version, transport, capabilities = {}) {
-  return new Client({ name, version }, { capabilities });
-}
-
-function createFilesystemTransport() {
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [filesystemEntrypointPath],
-    cwd: currentRoot(),
-    stderr: 'pipe'
-  });
-  appendStderrToLog(transport, filesystemLogPath);
-  return transport;
-}
-
-const filesystemTransport = enableFilesystem ? createFilesystemTransport() : null;
-const filesystemClient = filesystemTransport
-  ? createClient('agent-mcp-gateway-filesystem', '2.0.0', filesystemTransport, { roots: { listChanged: true } })
-  : null;
-
-if (filesystemClient) {
-  filesystemClient.setRequestHandler(ListRootsRequestSchema, async () => ({
-    roots: currentRoots().map(root => ({
-      uri: toFilesystemRootUri(root),
-      name: path.basename(root) || root
-    }))
-  }));
-  await filesystemClient.connect(filesystemTransport);
-  await activateFilesystemRoots();
-}
-
-function textFromToolResult(result) {
-  return (result?.content || []).filter(item => item?.type === 'text').map(item => item.text || '').join('\n');
-}
-
-async function waitForFilesystemRoots(expectedRoots = currentRoots(), timeoutMs = 3000) {
-  if (!filesystemClient) return;
-  const deadline = Date.now() + timeoutMs;
-  let lastText = '';
-  while (Date.now() <= deadline) {
-    const result = await filesystemClient.callTool({ name: 'list_allowed_directories', arguments: {} });
-    lastText = textFromToolResult(result);
-    const activeLines = lastText.split(/\r?\n/).slice(1).filter(Boolean).map(value => normalizeWorkspacePath(value));
-    const exactRoots = activeLines.length === expectedRoots.length && expectedRoots.every(root =>
-      activeLines.some(active => isPathInsideWorkspace(active, root) && isPathInsideWorkspace(root, active))
-    );
-    if (exactRoots) return;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`Filesystem root activation timed out. Expected: ${expectedRoots.join('; ')}. Reported: ${lastText}`);
-}
-
-async function activateFilesystemRoots() {
-  if (!filesystemClient) return;
-  await filesystemClient.sendRootsListChanged();
-  await waitForFilesystemRoots(currentRoots());
-}
 
 async function broadcastCatalogChanges(changes = {}) {
   const tasks = [];
@@ -265,7 +176,6 @@ const externalToolBroker = createExternalToolBroker({
 workspaceRegistry.subscribe(async (next, previous) => {
   const { rootsChanged, upstreamChanged } = classifyWorkspaceChange(next, previous);
   if (rootsChanged) {
-    await activateFilesystemRoots();
     await broadcastCatalogChanges(workspaceCatalogChanges({ rootsChanged }, currentSurfaceConfig(next)));
   }
   if (upstreamChanged) {
@@ -287,10 +197,10 @@ const shellExecuteSchema = {
   properties: {
     command: { type: 'string', description: 'The system instruction to execute in the verified environment.' },
     working_directory: { type: 'string', description: 'The target workspace for execution.' },
-    timeout_ms: { type: 'integer', minimum: 1, maximum: 300000, description: 'Optional one-shot execution timeout in milliseconds. Defaults to 300000.' },
-    device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Omit for local execution.' }
+    timeout_ms: { type: 'integer', minimum: 1, maximum: 28000, description: 'Optional one-shot execution timeout in milliseconds. Defaults to 28000; use start_process for longer work.' },
+    device_id: { type: 'string', minLength: 1, description: 'Owned online device that will execute this command.' }
   },
-  required: ['command'],
+  required: ['command', 'working_directory', 'device_id'],
   additionalProperties: false
 };
 
@@ -301,9 +211,9 @@ const processToolSchemas = {
       command: { type: 'string', minLength: 1, description: 'Command to execute in a retained process session.' },
       working_directory: { type: 'string', description: 'Trusted workspace directory for the process.' },
       timeout_ms: { type: 'integer', minimum: 1, maximum: 30000, default: 10000, description: 'Foreground wait before yielding RUNNING. Does not kill the process.' },
-      device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Follow-up process calls use the returned session_id without repeating device_id.' }
+      device_id: { type: 'string', minLength: 1, description: 'Owned online device that will start the process. Follow-up calls use session_id only.' }
     },
-    required: ['command'],
+    required: ['command', 'working_directory', 'device_id'],
     additionalProperties: false
   },
   read_process_output: {
@@ -381,7 +291,10 @@ function customToolContext(callerContext = {}) {
         callerCategory: callerContext.callerCategory || 'anonymous'
       }
     ),
-    executeDirectShell,
+    callDeviceTool: async (tool, args = {}) => {
+      const { deviceId, toolArguments } = requireDeviceId(args);
+      return await callRemoteDevice({ context: callerContext, deviceId, tool, arguments: toolArguments });
+    },
     externalToolBroker,
     runtimeProfile,
     packageRoot,
@@ -409,22 +322,75 @@ function buildEditFileInputSchema(inputSchema = {}) {
   };
 }
 
-function withOptionalDeviceId(inputSchema = {}) {
+function withRequiredDeviceId(inputSchema = {}) {
   return {
     ...inputSchema,
     type: 'object',
     properties: {
       ...(inputSchema.properties || {}),
-      device_id: { type: 'string', minLength: 1, description: 'Optional registered remote device. Omit for local execution.' }
-    }
+      device_id: { type: 'string', minLength: 1, description: 'Owned online device that will perform this filesystem operation.' }
+    },
+    required: [...new Set([...(inputSchema.required || []), 'device_id'])]
   };
 }
+
+const FILESYSTEM_TOOL_DEFINITIONS = [
+  {
+    name: 'read_text_file',
+    description: 'Read a text file from one explicit owned online device. Use head or tail to bound large reads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        tail: { type: 'number', description: 'If provided, returns only the last N lines of the file.' },
+        head: { type: 'number', description: 'If provided, returns only the first N lines of the file.' }
+      },
+      required: ['path'],
+      additionalProperties: false
+    },
+    outputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'], additionalProperties: false }
+  },
+  {
+    name: 'write_file',
+    description: 'Create or completely overwrite a text file on one explicit owned online device.',
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
+      required: ['path', 'content'],
+      additionalProperties: false
+    },
+    outputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'], additionalProperties: false }
+  },
+  {
+    name: 'edit_file',
+    description: 'Make exact guarded edits to a text file on one explicit owned online device.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { oldText: { type: 'string' }, newText: { type: 'string' } },
+            required: ['oldText', 'newText'],
+            additionalProperties: false
+          }
+        },
+        dryRun: { type: 'boolean', default: false }
+      },
+      required: ['path'],
+      additionalProperties: false
+    },
+    outputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'], additionalProperties: false }
+  }
+];
 
 function filesystemToolMeta(tool) {
   const baseSchema = tool.name === 'edit_file' ? buildEditFileInputSchema(tool.inputSchema) : tool.inputSchema;
   return stableToolDefinition(applyToolRisk({
     ...tool,
-    inputSchema: withOptionalDeviceId(baseSchema),
+    inputSchema: withRequiredDeviceId(baseSchema),
     name: tool.name,
     description: decorateSkillBootstrapDescription(tool.name, tool.name === 'edit_file'
       ? `${tool.description} Prefer old_text/new_text with expected_replacements for guarded exact edits; legacy edits[]/dryRun remains supported for compatibility.`
@@ -434,9 +400,8 @@ function filesystemToolMeta(tool) {
 
 async function listMergedTools() {
   const tools = [];
-  if (filesystemClient) {
-    const result = await filesystemClient.listTools();
-    tools.push(...(result.tools || []).filter(tool => FILESYSTEM_TOOL_NAMES.has(tool.name)).map(filesystemToolMeta));
+  if (enableFilesystem) {
+    tools.push(...FILESYSTEM_TOOL_DEFINITIONS.map(filesystemToolMeta));
   }
   tools.push(...listCustomTools(customToolContext()));
   tools.push(applyToolRisk(listDevicesToolDefinition()));
@@ -465,89 +430,18 @@ async function refreshDeviceSchemaSnapshot() {
   });
 }
 
-async function ensureFileTarget(args = {}) {
-  const target = args.path;
-  if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
-}
-
-async function ensureImageTarget(args = {}) {
-  const target = args.path || args.file || args.sourcePath;
-  if (target && isAbsoluteWorkspacePath(target)) await workspaceRegistry.ensureTrustedPath(target, 'file');
-}
-
 function structuredToolText(value, { includeStructured = false } = {}) {
   const result = { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
   return includeStructured ? { ...result, structuredContent: value } : result;
 }
 
-const SHELL_TOOL_RESULT_BUDGET_BYTES = DEFAULT_SHELL_RESPONSE_BUDGET_BYTES - (8 * 1024);
+const SHELL_RESPONSE_BUDGET_BYTES = 128 * 1024;
+const SHELL_TOOL_RESULT_BUDGET_BYTES = SHELL_RESPONSE_BUDGET_BYTES - (8 * 1024);
 
 function boundedShellToolText(value) {
   const response = structuredToolText(value, { includeStructured: true });
   if (Buffer.byteLength(JSON.stringify(response)) <= SHELL_TOOL_RESULT_BUDGET_BYTES) return response;
-  throw new Error(`shell_execute response exceeds ${DEFAULT_SHELL_RESPONSE_BUDGET_BYTES} byte budget`);
-}
-
-function isGuardedEditArguments(args = {}) {
-  return ['old_text', 'new_text', 'expected_replacements', 'dry_run'].some(key => Object.prototype.hasOwnProperty.call(args, key));
-}
-
-async function guardedEditFile(args = {}) {
-  if (Object.prototype.hasOwnProperty.call(args, 'edits')) {
-    throw new Error('Use either legacy edits/dryRun or guarded old_text/new_text fields, not both');
-  }
-  const pathValue = args.path;
-  const readResult = await filesystemClient.callTool({ name: 'read_text_file', arguments: { path: pathValue } });
-  if (readResult?.isError) throw new Error(textFromToolResult(readResult) || 'Unable to read edit target');
-  const originalContent = textFromToolResult(readResult);
-  const prepared = prepareGuardedEdit(originalContent, {
-    oldText: args.old_text,
-    newText: args.new_text,
-    expectedReplacements: args.expected_replacements ?? 1
-  });
-
-  if (!prepared.ok) {
-    return structuredToolText({
-      ok: false,
-      tool: 'edit_file',
-      changed: false,
-      code: 'EXPECTED_REPLACEMENTS_MISMATCH',
-      expectedReplacements: prepared.expectedReplacements,
-      actualCount: prepared.actualCount,
-      guidance: 'No file was changed. Resubmit with exact old_text and the intended expected_replacements.'
-    }, { includeStructured: true });
-  }
-
-  const dryRun = args.dry_run === true;
-  if (!dryRun) {
-    const confirmResult = await filesystemClient.callTool({ name: 'read_text_file', arguments: { path: pathValue } });
-    if (confirmResult?.isError) throw new Error(textFromToolResult(confirmResult) || 'Unable to re-read edit target');
-    if (textFromToolResult(confirmResult) !== originalContent) {
-      return structuredToolText({
-        ok: false,
-        tool: 'edit_file',
-        changed: false,
-        code: 'FILE_CHANGED_DURING_EDIT',
-        guidance: 'The file changed after validation. Read it again and resubmit the exact edit.'
-      }, { includeStructured: true });
-    }
-    const writeResult = await filesystemClient.callTool({
-      name: 'write_file',
-      arguments: { path: pathValue, content: prepared.modifiedContent }
-    });
-    if (writeResult?.isError) return writeResult;
-  }
-
-  return structuredToolText({
-    ok: true,
-    tool: 'edit_file',
-    changed: !dryRun,
-    dryRun,
-    expectedReplacements: prepared.expectedReplacements,
-    actualCount: prepared.actualCount,
-    preview: prepared.preview.text,
-    previewTruncated: prepared.preview.truncated
-  }, { includeStructured: true });
+  throw new Error(`shell_execute response exceeds ${SHELL_RESPONSE_BUDGET_BYTES} byte budget`);
 }
 
 function appendSkillAdvisory(result, advisory) {
@@ -563,8 +457,12 @@ function splitDeviceArguments(args = {}) {
   return { deviceId: String(deviceId || '').trim(), toolArguments };
 }
 
-function isRemoteProcessSession(sessionId) {
-  return String(sessionId || '').startsWith('remote-');
+function requireDeviceId(args = {}) {
+  const routed = splitDeviceArguments(args);
+  if (routed.deviceId) return routed;
+  const error = new Error('DEVICE_ID_REQUIRED: device_id is required for execution tools.');
+  error.code = 'DEVICE_ID_REQUIRED';
+  throw error;
 }
 
 async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args = {}, timeoutMs }) {
@@ -625,48 +523,19 @@ async function routeToolCall(request, context = {}) {
   assertToolAllowedForProfile(toolName, runtimeProfile);
 
   if (toolName === 'shell_execute' && enableShell) {
-    const args = request.params.arguments || {};
-    const { deviceId, toolArguments } = splitDeviceArguments(args);
-    if (deviceId) {
-      const remoteTimeoutMs = Number(toolArguments.timeout_ms || 28000);
-      if (!Number.isInteger(remoteTimeoutMs) || remoteTimeoutMs < 1 || remoteTimeoutMs > 28000) {
-        throw new Error('Remote shell_execute timeout_ms must be between 1 and 28000; use start_process for longer commands.');
-      }
-      const result = await callRemoteDevice({
-        context,
-        deviceId,
-        tool: 'shell_execute',
-        arguments: { ...toolArguments, timeout_ms: remoteTimeoutMs },
-        timeoutMs: remoteTimeoutMs + 2000
-      });
-      return boundedShellToolText(result);
+    const { deviceId, toolArguments } = requireDeviceId(request.params.arguments || {});
+    const remoteTimeoutMs = Number(toolArguments.timeout_ms || 28000);
+    if (!Number.isInteger(remoteTimeoutMs) || remoteTimeoutMs < 1 || remoteTimeoutMs > 28000) {
+      throw new Error('Remote shell_execute timeout_ms must be between 1 and 28000; use start_process for longer commands.');
     }
-    if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
-      await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
-    }
-    const roots = currentRoots();
-    const validated = validateShellCommand(args, { resolvedRepoRoots: roots, defaultCwd: roots[0] });
-    const result = await executeDirectShell(validated.command, {
-      cwd: validated.cwd || roots[0],
-      timeout: validated.timeoutMs ?? 300000,
-      env: process.env,
-      spillDirectory: path.join(runtimeDirectory, 'shell-output')
+    const result = await callRemoteDevice({
+      context,
+      deviceId,
+      tool: 'shell_execute',
+      arguments: { ...toolArguments, timeout_ms: remoteTimeoutMs },
+      timeoutMs: remoteTimeoutMs + 2000
     });
-    return boundedShellToolText({
-      workingDirectoryResolved: validated.cwd || roots[0],
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      stderrClassification: result.exitCode !== 0 || result.timedOut ? 'error' : (result.stderr ? 'warning' : 'none'),
-      durationMs: result.durationMs,
-      timedOut: result.timedOut,
-      stdoutTruncated: result.stdoutTruncated,
-      stderrTruncated: result.stderrTruncated,
-      ...(result.stdoutTruncated ? { stdoutBytes: result.stdoutBytes } : {}),
-      ...(result.stderrTruncated ? { stderrBytes: result.stderrBytes } : {}),
-      stdoutSpillPath: result.stdoutSpillPath,
-      stderrSpillPath: result.stderrSpillPath
-    });
+    return boundedShellToolText(result);
   }
 
   if (toolName === 'list_devices') {
@@ -681,101 +550,46 @@ async function routeToolCall(request, context = {}) {
     const args = request.params.arguments || {};
     const ownerKey = callerKey || 'anonymous';
     if (toolName === 'start_process') {
-      const { deviceId, toolArguments } = splitDeviceArguments(args);
-      if (deviceId) {
-        const remote = await callRemoteDevice({
-          context,
-          deviceId,
-          tool: 'start_process',
-          arguments: toolArguments,
-          timeoutMs: Math.min(Number(toolArguments.timeout_ms || 10000) + 2000, 30000)
-        });
-        const remoteSessionId = remote?.sessionId ?? remote?.session_id;
-        if (!remoteSessionId) throw new Error('Remote start_process did not return a session identifier.');
-        const sessionId = remoteProcessSessions.register({ ownerKey, deviceId, remoteSessionId });
-        return structuredToolText({ ...remote, sessionId, session_id: sessionId }, { includeStructured: true });
-      }
-      if (args.working_directory && isAbsoluteWorkspacePath(args.working_directory)) {
-        await workspaceRegistry.ensureTrustedPath(args.working_directory, 'directory');
-      }
-      const roots = currentRoots();
-      const validated = validateShellCommand(
-        { command: args.command, working_directory: args.working_directory },
-        { resolvedRepoRoots: roots, defaultCwd: roots[0] }
-      );
-      return structuredToolText(await processSessions.start({
-        command: validated.command,
-        cwd: validated.cwd || roots[0],
-        ownerKey,
-        timeoutMs: args.timeout_ms
-      }), { includeStructured: true });
-    }
-    if (isRemoteProcessSession(args.session_id)) {
-      const remoteSession = remoteProcessSessions.resolve({ sessionId: args.session_id, ownerKey });
-      const remoteArgs = { ...args, session_id: remoteSession.remoteSessionId };
-      const remoteTimeoutMs = toolName === 'read_process_output'
-        ? 12000
-        : Math.min(Number(args.timeout_ms || 10000) + 2000, 30000);
+      const { deviceId, toolArguments } = requireDeviceId(args);
       const remote = await callRemoteDevice({
         context,
-        deviceId: remoteSession.deviceId,
-        tool: toolName,
-        arguments: remoteArgs,
-        timeoutMs: remoteTimeoutMs
+        deviceId,
+        tool: 'start_process',
+        arguments: toolArguments,
+        timeoutMs: Math.min(Number(toolArguments.timeout_ms || 10000) + 2000, 30000)
       });
-      if (toolName === 'terminate_process') {
-        remoteProcessSessions.remove({ sessionId: args.session_id, ownerKey });
-      }
-      return structuredToolText({ ...remote, sessionId: args.session_id, session_id: args.session_id }, { includeStructured: true });
+      const remoteSessionId = remote?.sessionId ?? remote?.session_id;
+      if (!remoteSessionId) throw new Error('Remote start_process did not return a session identifier.');
+      const sessionId = remoteProcessSessions.register({ ownerKey, deviceId, remoteSessionId });
+      return structuredToolText({ ...remote, sessionId, session_id: sessionId }, { includeStructured: true });
     }
-    if (toolName === 'read_process_output') {
-      return structuredToolText(processSessions.read({
-        sessionId: args.session_id,
-        ownerKey,
-        offset: args.offset,
-        length: args.length
-      }), { includeStructured: true });
+    const remoteSession = remoteProcessSessions.resolve({ sessionId: args.session_id, ownerKey });
+    const remoteArgs = { ...args, session_id: remoteSession.remoteSessionId };
+    const remoteTimeoutMs = toolName === 'read_process_output'
+      ? 12000
+      : Math.min(Number(args.timeout_ms || 10000) + 2000, 30000);
+    const remote = await callRemoteDevice({
+      context,
+      deviceId: remoteSession.deviceId,
+      tool: toolName,
+      arguments: remoteArgs,
+      timeoutMs: remoteTimeoutMs
+    });
+    if (toolName === 'terminate_process') {
+      remoteProcessSessions.remove({ sessionId: args.session_id, ownerKey });
     }
-    if (toolName === 'interact_with_process') {
-      return structuredToolText(await processSessions.interact({
-        sessionId: args.session_id,
-        ownerKey,
-        input: args.input,
-        timeoutMs: args.timeout_ms
-      }), { includeStructured: true });
-    }
-    return structuredToolText(await processSessions.terminate({
-      sessionId: args.session_id,
-      ownerKey
-    }), { includeStructured: true });
+    return structuredToolText({ ...remote, sessionId: args.session_id, session_id: args.session_id }, { includeStructured: true });
   }
 
   if (FILESYSTEM_TOOL_NAMES.has(toolName)) {
-    const fileArgs = request.params.arguments || {};
-    const { deviceId, toolArguments } = splitDeviceArguments(fileArgs);
-    if (deviceId) {
-      const result = await callRemoteDevice({
-        context,
-        deviceId,
-        tool: toolName,
-        arguments: toolArguments
-      });
-      const rendered = result && Array.isArray(result.content)
-        ? normalizeRemoteFilesystemResult(result)
-        : structuredToolText(result, { includeStructured: true });
-      return appendSkillAdvisory(
-        rendered,
-        skillBootstrapGate.takeReadAdvisory(callerKey, toolName)
-      );
-    }
-    await ensureFileTarget(fileArgs);
-    const result = toolName === 'edit_file' && isGuardedEditArguments(fileArgs)
-      ? await guardedEditFile(fileArgs)
-      : await filesystemClient.callTool(request.params);
-    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
+    const { deviceId, toolArguments } = requireDeviceId(request.params.arguments || {});
+    const result = await callRemoteDevice({ context, deviceId, tool: toolName, arguments: toolArguments });
+    const rendered = result && Array.isArray(result.content)
+      ? normalizeRemoteFilesystemResult(result)
+      : structuredToolText(result, { includeStructured: true });
+    return appendSkillAdvisory(rendered, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
-  if (toolName === 'image_preview') await ensureImageTarget(request.params.arguments || {});
   if (isLocalCustomTool(toolName)) {
     const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext(context));
     if (toolName === 'get_skill') skillBootstrapGate.markSkillLoaded(callerKey);
@@ -1246,8 +1060,8 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   console.log(
     `Project registry: ${snapshot.projectRegistry.projects.size} project(s), default=${snapshot.projectRegistry.defaultProjectId || 'none'}`
   );
-  console.log(`Filesystem enabled: ${enableFilesystem}`);
-  console.log(`Shell enabled: ${enableShell}`);
+  console.log(`Filesystem tools enabled: ${enableFilesystem}`);
+  console.log(`Shell tools enabled: ${enableShell}`);
   console.log(`Runtime profile: ${runtimeProfile.name}`);
   console.log(`Static bearer enabled: ${staticBearerToken ? 'true' : 'false'}`);
   console.log(`MCP transport mode: ${useStatefulMcpSessions ? 'stateful' : 'stateless'}`);
@@ -1261,7 +1075,6 @@ async function shutdown() {
   workspaceRegistry.close();
   toolMetrics.close();
   deviceAudit.close();
-  await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
   try { oauthStateStore.close(); } catch {}
   try { accountStore.close(); } catch {}
@@ -1269,8 +1082,6 @@ async function shutdown() {
   try { devicePairingStore.close(); } catch {}
   try { deviceStore.close(); } catch {}
   await externalMcpManager.shutdown().catch(() => {});
-  await filesystemClient?.close().catch(() => {});
-  await filesystemTransport?.close().catch(() => {});
   process.exit(0);
 }
 

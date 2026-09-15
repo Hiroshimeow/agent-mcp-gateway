@@ -1,4 +1,3 @@
-import { imagePreviewTool } from './image-preview-tool.mjs';
 import { fail, ok } from './response-utils.mjs';
 import { getSkillTool } from '../skills/index.mjs';
 import { inspectProject, listProjects, PROJECT_INSPECTION_VIEWS } from '../project-inspection.mjs';
@@ -45,8 +44,9 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'image_preview',
-    description: 'Read an existing local image as MCP image content for visual inspection.',
+    description: 'Load a bounded image preview from one explicit owned online device for visual inspection.',
     inputSchema: schema({
+      device_id: { type: 'string', minLength: 1, description: 'Owned online device containing the image.' },
       path: { type: 'string' },
       file: { type: 'string' },
       sourcePath: { type: 'string' },
@@ -54,9 +54,12 @@ const TOOL_DEFINITIONS = [
       includeImage: { type: 'boolean', default: true },
       includeData: { type: 'boolean', default: true },
       maxBytes: { type: 'number', default: 8388608 }
-    }),
+    }, ['device_id']),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
-    handler: imagePreviewTool
+    handler: (args, context) => {
+      if (!context.callDeviceTool) throw new Error('Device execution routing is unavailable.');
+      return context.callDeviceTool('image_preview', args);
+    }
   },
   {
     name: 'project_list',

@@ -9,7 +9,6 @@ const root = process.cwd();
 const smokeCredential = `placeholder_mcp_smoke_${process.pid}`;
 const observedProfiles = {};
 const observedCatalogBytes = {};
-const observedResponseBudgets = {};
 
 async function findFreePort() {
   return await new Promise((resolve, reject) => {
@@ -166,29 +165,7 @@ function names(tools) {
   return tools.map(tool => tool.name).sort();
 }
 
-function portablePath(value) {
-  return path.resolve(value).replaceAll('\\', '/');
-}
-
-function nodeByteOutputCommand(bytes, value = 120) {
-  const executable = `'${process.execPath.replaceAll("'", "''")}'`;
-  const script = `'process.stdout.write(Buffer.alloc(${bytes}, ${value}))'`;
-  return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
-}
-
-function nodeOutputCommand(bytes) {
-  return nodeByteOutputCommand(bytes);
-}
-
-function nodeSleepCommand(ms) {
-  const executable = `'${process.execPath.replaceAll("'", "''")}'`;
-  const script = `'setTimeout(() => {}, ${ms})'`;
-  return process.platform === 'win32' ? `& ${executable} -e ${script}` : `${executable} -e ${script}`;
-}
-
-
-await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirectory }) => {
-  const baseConfig = fs.readFileSync(configPath, 'utf8');
+await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
   const resources = await listResources(baseUrl, 42);
@@ -256,12 +233,22 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const shellOutputSchema = tools.find(tool => tool.name === 'shell_execute')?.outputSchema;
   assert.equal(shellOutputSchema?.type, 'object');
   const shellInputSchema = tools.find(tool => tool.name === 'shell_execute')?.inputSchema;
-  assert.equal(shellInputSchema?.properties?.timeout_ms?.maximum, 300000);
+  assert.equal(shellInputSchema?.properties?.timeout_ms?.maximum, 28000);
   assert.equal(shellInputSchema?.properties?.device_id?.minLength, 1);
-  assert.equal(tools.find(tool => tool.name === 'read_text_file')?.inputSchema?.properties?.device_id?.minLength, 1);
-  assert.equal(tools.find(tool => tool.name === 'write_file')?.inputSchema?.properties?.device_id?.minLength, 1);
+  assert.deepEqual(shellInputSchema?.required, ['command', 'working_directory', 'device_id']);
+  const readInputSchema = tools.find(tool => tool.name === 'read_text_file')?.inputSchema;
+  const writeInputSchema = tools.find(tool => tool.name === 'write_file')?.inputSchema;
+  const startProcessInputSchema = tools.find(tool => tool.name === 'start_process')?.inputSchema;
+  const imagePreviewInputSchema = tools.find(tool => tool.name === 'image_preview')?.inputSchema;
+  assert.equal(readInputSchema?.properties?.device_id?.minLength, 1);
+  assert.ok(readInputSchema?.required?.includes('device_id'));
+  assert.equal(writeInputSchema?.properties?.device_id?.minLength, 1);
+  assert.ok(writeInputSchema?.required?.includes('device_id'));
   assert.equal(editInputSchema?.properties?.device_id?.minLength, 1);
-  assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.device_id?.minLength, 1);
+  assert.ok(editInputSchema?.required?.includes('device_id'));
+  assert.equal(startProcessInputSchema?.properties?.device_id?.minLength, 1);
+  assert.deepEqual(startProcessInputSchema?.required, ['command', 'working_directory', 'device_id']);
+  assert.deepEqual(imagePreviewInputSchema?.required, ['device_id']);
   assert.equal(tools.find(tool => tool.name === 'read_process_output')?.inputSchema?.properties?.device_id, undefined);
   assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.default, 10000);
   assert.equal(tools.find(tool => tool.name === 'start_process')?.inputSchema?.properties?.timeout_ms?.maximum, 30000);
@@ -287,94 +274,27 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   ]) assert.equal(shellOutputSchema?.properties?.[redundantField], undefined);
 
   const target = path.join(workspace, 'smoke.txt');
-  fs.writeFileSync(target, 'context', 'utf8');
+  fs.writeFileSync(target, 'must-not-be-read-by-gateway-host', 'utf8');
 
-  const firstRead = await callTool(baseUrl, 3, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-a' });
-  assert.equal(firstRead.result.content[0].text, 'context');
-  assert.equal(firstRead.result.content[0].text, 'context');
-  assert.ok(firstRead.result.content.some(item => item.type === 'text' && /Skill hint.*get_skill/i.test(item.text)));
-
-  const secondRead = await callTool(baseUrl, 4, 'read_text_file', { path: target }, { 'mcp-session-id': 'stale-b' });
-  assert.equal(secondRead.result.content.length, 1);
-
-  const firstWrite = await callTool(baseUrl, 5, 'write_file', { path: target, content: 'first' });
-  assert.notEqual(firstWrite.result.isError, true);
-
-  const invalidSkill = await callTool(baseUrl, 6, 'get_skill', { name: 'missing-smoke-skill' });
-  assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
-
-  const directEdit = await callTool(baseUrl, 7, 'edit_file', {
-    path: target,
-    edits: [{ oldText: 'first', newText: 'edited' }],
-    dryRun: false
-  });
-  assert.notEqual(directEdit.result.isError, true);
-
-  const directShell = await callTool(baseUrl, 8, 'shell_execute', {
-    command: nodeOutputCommand(2),
-    working_directory: workspace
-  });
-  assert.notEqual(directShell.result.isError, true);
-  assert.equal(JSON.parse(directShell.result.content[0].text).stdout, 'xx');
-
-  const timedShell = await callTool(baseUrl, 17, 'shell_execute', {
-    command: nodeSleepCommand(2000),
-    working_directory: workspace,
-    timeout_ms: 100
-  });
-  const timedPayload = JSON.parse(timedShell.result.content[0].text);
-  assert.equal(timedPayload.timedOut, true);
-  assert.equal(timedPayload.exitCode, 124);
-
-  const shortProcess = await callTool(baseUrl, 18, 'start_process', {
-    command: nodeOutputCommand(4),
-    working_directory: workspace,
-    timeout_ms: 5000
-  });
-  const shortProcessPayload = JSON.parse(shortProcess.result.content[0].text);
-  assert.equal(shortProcessPayload.status, 'COMPLETED');
-  assert.equal(shortProcessPayload.output, 'xxxx');
-
-  const longProcess = await callTool(baseUrl, 19, 'start_process', {
-    command: nodeSleepCommand(600),
-    working_directory: workspace,
-    timeout_ms: 50
-  });
-  const longProcessPayload = JSON.parse(longProcess.result.content[0].text);
-  assert.equal(longProcessPayload.status, 'RUNNING');
-  let completedProcessPayload = longProcessPayload;
-  const processDeadline = Date.now() + 5000;
-  while (completedProcessPayload.status === 'RUNNING' && Date.now() < processDeadline) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const completedProcess = await callTool(baseUrl, 30, 'read_process_output', {
-      session_id: longProcessPayload.sessionId,
-      offset: 0,
-      length: 128
-    });
-    completedProcessPayload = JSON.parse(completedProcess.result.content[0].text);
+  for (const [id, name, args] of [
+    [3, 'read_text_file', { path: target }],
+    [4, 'write_file', { path: target, content: 'must-not-write' }],
+    [5, 'edit_file', { path: target, old_text: 'must-not', new_text: 'changed', expected_replacements: 1 }],
+    [6, 'shell_execute', { command: 'echo must-not-run', working_directory: workspace }],
+    [7, 'start_process', { command: 'echo must-not-run', working_directory: workspace }],
+    [8, 'image_preview', { path: target }]
+  ]) {
+    const missingDevice = await callTool(baseUrl, id, name, args);
+    assert.match(JSON.stringify(missingDevice), /device_id/i, `${name} must require device_id`);
   }
-  assert.equal(completedProcessPayload.status, 'COMPLETED');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'must-not-be-read-by-gateway-host');
 
-  const interactiveScript = path.join(workspace, 'interactive-smoke.js');
-  fs.writeFileSync(interactiveScript, 'process.stdin.once(\"data\",d=>{process.stdout.write(\"got:\"+d.toString().trim());process.exit(0)});setTimeout(()=>{},5000);', 'utf8');
-  const interactiveCommand = process.platform === 'win32'
-    ? `& '${process.execPath.replaceAll("'", "''")}' '${interactiveScript.replaceAll("'", "''")}'`
-    : `'${process.execPath.replaceAll("'", "'\"'\"'")}' '${interactiveScript.replaceAll("'", "'\"'\"'")}'`;
-  const interactiveProcess = await callTool(baseUrl, 36, 'start_process', {
-    command: interactiveCommand,
-    working_directory: workspace,
-    timeout_ms: 50
-  });
-  const interactivePayload = JSON.parse(interactiveProcess.result.content[0].text);
-  assert.equal(interactivePayload.status, 'RUNNING');
-  const interacted = await callTool(baseUrl, 37, 'interact_with_process', {
-    session_id: interactivePayload.sessionId,
-    input: 'hello\n',
-    timeout_ms: 3000
-  });
-  const interactedPayload = JSON.parse(interacted.result.content[0].text);
-  assert.equal(interactedPayload.status, 'COMPLETED');
-  assert.match(interactedPayload.output, /got:hello/);
+  const absentDeviceRead = await callTool(baseUrl, 17, 'read_text_file', { device_id: 'missing-device', path: target });
+  assert.match(JSON.stringify(absentDeviceRead), /device|offline|connected|available|found/i);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'must-not-be-read-by-gateway-host');
+
+  const invalidSkill = await callTool(baseUrl, 18, 'get_skill', { name: 'missing-smoke-skill' });
+  assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
 
   const bootstrap = await callTool(baseUrl, 9, 'get_skill', { name: 'local_coding' });
   assert.notEqual(bootstrap.result.isError, true);
@@ -383,145 +303,18 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   assert.equal(bootstrapPayload.data.skillCatalog, undefined);
   assert.deepEqual(bootstrap.result.structuredContent, bootstrapPayload);
 
-  await callTool(baseUrl, 10, 'write_file', { path: target, content: 'first' });
-  await callTool(baseUrl, 11, 'edit_file', {
-    path: target,
-    edits: [{ oldText: 'first', newText: 'second' }],
-    dryRun: false
-  });
-  const read = await callTool(baseUrl, 12, 'read_text_file', { path: target });
-  assert.equal(read.result.content[0].text, 'second');
-  assert.equal(read.result.content.length, 1);
-
-  await callTool(baseUrl, 14, 'write_file', { path: target, content: 'alpha\r\nbeta\r\n' });
-  const guardedMismatch = await callTool(baseUrl, 15, 'edit_file', {
-    path: target,
-    old_text: 'beta',
-    new_text: 'gamma',
-    expected_replacements: 2
-  });
-  const mismatchPayload = JSON.parse(guardedMismatch.result.content[0].text);
-  assert.equal(mismatchPayload.code, 'EXPECTED_REPLACEMENTS_MISMATCH');
-  assert.equal(mismatchPayload.actualCount, 1);
-  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\r\nbeta\r\n');
-
-  const guardedEdit = await callTool(baseUrl, 16, 'edit_file', {
-    path: target,
-    old_text: 'beta',
-    new_text: 'gamma',
-    expected_replacements: 1
-  });
-  const guardedPayload = JSON.parse(guardedEdit.result.content[0].text);
-  assert.equal(guardedPayload.ok, true);
-  assert.equal(guardedPayload.actualCount, 1);
-  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\r\ngamma\r\n');
-
   const discovery = await callTool(baseUrl, 13, 'get_skill', {});
   const discoveryPayload = JSON.parse(discovery.result.content[0].text);
   assert.equal(discoveryPayload.data.mode, 'discovery');
   assert.equal(discoveryPayload.data.body, undefined);
   assert.deepEqual(discovery.result.structuredContent, discoveryPayload);
 
-  const concurrentRoots = [
-    fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-a-')),
-    fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-dynamic-root-b-'))
-  ];
-  await Promise.all(concurrentRoots.map(async (dynamicRoot, index) => {
-    const dynamicTarget = path.join(dynamicRoot, `auto-trusted-${index}.txt`);
-    const write = await callTool(baseUrl, 20 + index * 2, 'write_file', { path: dynamicTarget, content: `auto-trusted-${index}` });
-    assert.notEqual(write.result?.isError, true);
-    const dynamicRead = await callTool(baseUrl, 21 + index * 2, 'read_text_file', { path: dynamicTarget });
-    assert.equal(dynamicRead.result.content[0].text, `auto-trusted-${index}`);
-  }));
-  const persistedConfig = fs.readFileSync(configPath, 'utf8');
-  assert.equal(persistedConfig, baseConfig);
-  const runtimeRoots = fs.readFileSync(path.join(runtimeDirectory, 'trusted-roots.toml'), 'utf8');
-  for (const dynamicRoot of concurrentRoots) assert.ok(runtimeRoots.includes(portablePath(dynamicRoot)));
-
-  const shellDynamicRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-shell-root-'));
-  const shellPathCommand = process.platform === 'win32' ? '(Get-Location).Path' : 'pwd';
-  const shellPath = await callTool(baseUrl, 30, 'shell_execute', {
-    command: shellPathCommand,
-    working_directory: shellDynamicRoot
-  });
-  const shellPathData = JSON.parse(shellPath.result.content[0].text);
-  assert.equal(shellPathData.exitCode, 0);
-  assert.equal(path.resolve(shellPathData.workingDirectoryResolved), path.resolve(shellDynamicRoot));
-  assert.deepEqual(shellPath.result.structuredContent, shellPathData);
-  assert.equal(fs.readFileSync(configPath, 'utf8'), baseConfig);
-  assert.ok(fs.readFileSync(path.join(runtimeDirectory, 'trusted-roots.toml'), 'utf8').includes(portablePath(shellDynamicRoot)));
-
-  const command = process.platform === 'win32'
-    ? "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); Write-Output 'Tiếng Việt 日本語'; [Console]::Error.WriteLine('warning')"
-    : "printf 'Tiếng Việt 日本語\\n'; printf 'warning\\n' >&2";
-  const shell = await callTool(baseUrl, 31, 'shell_execute', { command, working_directory: workspace });
-  const shellData = JSON.parse(shell.result.content[0].text);
-  assert.equal(shellData.exitCode, 0);
-  assert.match(shellData.stdout, /Tiếng Việt 日本語/);
-  assert.match(shellData.stderr, /warning/);
-  assert.equal(shellData.stderrClassification, 'warning');
-  assert.equal(shellData.stdoutTruncated, false);
-  assert.equal(shellData.stderrTruncated, false);
-  assert.equal('command' in shellData, false);
-  assert.equal('encoding' in shellData, false);
-  assert.equal('returnedStdoutBytes' in shellData, false);
-  assert.equal('returnedStderrBytes' in shellData, false);
-  assert.deepEqual(shell.result.structuredContent, shellData);
-
-  const largeShell = await callTool(baseUrl, 32, 'shell_execute', {
-    command: nodeOutputCommand(256 * 1024),
-    working_directory: workspace
-  });
-  const largeShellData = JSON.parse(largeShell.result.content[0].text);
-  assert.equal(largeShellData.stdoutBytes, 256 * 1024);
-  assert.equal(largeShellData.stdoutTruncated, true);
-  assert.ok(largeShellData.stdoutSpillPath.startsWith(runtimeDirectory));
-  assert.deepEqual(largeShell.result.structuredContent, largeShellData);
-  const spillRead = await callTool(baseUrl, 33, 'read_text_file', { path: largeShellData.stdoutSpillPath });
-  assert.equal(spillRead.result.content[0].text.length, 256 * 1024);
-  assert.match(spillRead.result.content[0].text, /^x+$/);
-
-  const longComment = 'x'.repeat(process.platform === 'win32' ? 16 * 1024 : 70 * 1024);
-  const longCommand = `# ${longComment}\n${nodeOutputCommand(2)}`;
-  const longShell = await mcpRequestRaw(baseUrl, 34, 'tools/call', {
-    name: 'shell_execute',
-    arguments: { command: longCommand, working_directory: workspace }
-  });
-  const longShellData = JSON.parse(longShell.parsed.result.content[0].text);
-  assert.equal(longShellData.exitCode, 0);
-  assert.equal(longShellData.stdout, 'xx');
-  assert.equal('command' in longShellData, false);
-  assert.equal('commandBytes' in longShellData, false);
-  assert.equal('commandTruncated' in longShellData, false);
-  assert.ok(longShell.wireBytes <= 128 * 1024);
-  observedResponseBudgets.longCommandWireBytes = longShell.wireBytes;
-  assert.deepEqual(longShell.parsed.result.structuredContent, longShellData);
-
-  let compositeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-smoke-budget-cwd-'));
-  const depth = process.platform === 'win32' ? 1 : 17;
-  const componentBytes = process.platform === 'win32' ? 120 : 190;
-  for (let index = 0; index < depth; index += 1) {
-    compositeCwd = path.join(compositeCwd, `${index}-${'d'.repeat(componentBytes)}`);
-    fs.mkdirSync(compositeCwd);
-  }
-  const compositeCommand = `#${'\u0001'.repeat(900)}\n${nodeByteOutputCommand(64 * 1024, 0)}`;
-  const compositeShell = await mcpRequestRaw(baseUrl, 35, 'tools/call', {
-    name: 'shell_execute',
-    arguments: { command: compositeCommand, working_directory: compositeCwd }
-  });
-  const compositeShellData = JSON.parse(compositeShell.parsed.result.content[0].text);
-  assert.equal(compositeShellData.exitCode, 0);
-  assert.equal(compositeShellData.stdoutBytes, 64 * 1024);
-  assert.equal(compositeShellData.stdoutTruncated, true);
-  assert.ok(compositeShell.wireBytes <= 128 * 1024);
-  observedResponseBudgets.compositeWireBytes = compositeShell.wireBytes;
-  assert.deepEqual(compositeShell.parsed.result.structuredContent, compositeShellData);
-
   const metricsText = fs.readFileSync(path.join(runtimeDirectory, 'mcp-calls.ndjson'), 'utf8');
-  const metrics = metricsText.trim().split('\n').map(JSON.parse);
-  assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.truncated && metric.spill));
+  const metrics = metricsText.trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.ok(metrics.some(metric => metric.tool === 'read_text_file' && metric.success === false));
+  assert.ok(metrics.some(metric => metric.tool === 'shell_execute' && metric.success === false));
   assert.ok(metrics.every(metric => metric.callerCategory === 'static-bearer'));
-  assert.doesNotMatch(metricsText, /process\.stdout\.write|Tiếng Việt|warning/);
+  assert.doesNotMatch(metricsText, /must-not-run|must-not-be-read-by-gateway-host/);
   observedProfiles.yolo = names(tools);
   observedCatalogBytes.yolo = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
   assert.ok(observedCatalogBytes.yolo <= 32 * 1024, `yolo core catalog exceeded 32 KiB: ${observedCatalogBytes.yolo}`);
@@ -549,8 +342,7 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, progressive skill advisory, profile filtering, concurrent path grants, filesystem calls, structured UTF-8 shell output, and final serialized shell response budgets',
+  checked: 'exact core catalog, progressive skill advisory, profile filtering, explicit device routing, and no gateway-host execution fallback',
   observedProfiles,
-  observedCatalogBytes,
-  observedResponseBudgets
+  observedCatalogBytes
 }, null, 2));

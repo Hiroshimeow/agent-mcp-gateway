@@ -14,7 +14,7 @@ function policy(rule = {}) {
         id: 'test-rule',
         callers: ['oauth:client-a'],
         devices: ['device'],
-        tools: ['read_text_file', 'write_file', 'shell_execute', 'read_process_output'],
+        tools: ['read_text_file', 'write_file', 'image_preview', 'shell_execute', 'read_process_output'],
         roots: ['E:\\work\\project'],
         requests_per_minute: 5,
         max_input_bytes: 2048,
@@ -96,6 +96,19 @@ test('device inventory is filtered by caller and advertised capabilities', () =>
   assert.deepEqual(access.filterDevices(devices, {
     callerSubject: 'oauth:client-b', callerCategory: 'oauth'
   }), []);
+});
+
+test('remote image preview obeys the same safe-profile path root as filesystem tools', () => {
+  const access = policy();
+  assert.doesNotThrow(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'image_preview', arguments: { path: 'E:\\work\\project\\assets\\preview.png' }
+  }));
+  assert.doesNotThrow(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'image_preview', arguments: { file: 'E:\\work\\project\\assets\\preview.png' }
+  }));
+  assert.throws(() => access.authorize({
+    callerSubject: 'oauth:client-a', callerCategory: 'oauth', deviceId: 'device', tool: 'image_preview', arguments: { sourcePath: 'E:\\work\\other\\preview.png' }
+  }), error => error.code === 'DEVICE_PATH_DENIED');
 });
 
 test('remote shell requires an explicitly allowed working directory', () => {
