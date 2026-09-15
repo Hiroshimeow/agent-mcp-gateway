@@ -27,6 +27,7 @@ test('direct main entrypoint supports local gateway plus optional tunnel', () =>
   assert.match(main, /authenticated-mcp-wrapper\.mjs/);
   assert.match(main, /--tunnel/);
   assert.match(main, /load_openai_tunnel_config/);
+  assert.doesNotMatch(main, /MCP_AUTH_PASSWORD/);
   assert.match(config, /^\[openai_tunnel\]$/m);
 });
 
