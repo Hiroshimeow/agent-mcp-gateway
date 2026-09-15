@@ -23,17 +23,17 @@ const GATEWAY_RESOURCES = Object.freeze([
 ]);
 
 const LEGACY_RESOURCE_TEMPLATES = Object.freeze([
-  { uriTemplate: 'repo://project/{projectId}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
-  { uriTemplate: 'repo://project/{projectId}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
-  { uriTemplate: 'repo://project/{projectId}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' }
+  { uriTemplate: 'repo://project/{project_id}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
+  { uriTemplate: 'repo://project/{project_id}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{project_id}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' }
 ]);
 
 const NATIVE_RESOURCE_TEMPLATES = Object.freeze([
-  { uriTemplate: 'repo://project/{projectId}/summary', name: 'Project summary', mimeType: 'application/json' },
-  { uriTemplate: 'repo://project/{projectId}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
-  { uriTemplate: 'repo://project/{projectId}/git/status', name: 'Git status', mimeType: 'application/json' },
-  { uriTemplate: 'repo://project/{projectId}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' },
-  { uriTemplate: 'repo://project/{projectId}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
+  { uriTemplate: 'repo://project/{project_id}/summary', name: 'Project summary', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{project_id}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{project_id}/git/status', name: 'Git status', mimeType: 'application/json' },
+  { uriTemplate: 'repo://project/{project_id}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' },
+  { uriTemplate: 'repo://project/{project_id}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
   { uriTemplate: 'skill://skills/{skillName}/SKILL.md', name: 'Skill definition', mimeType: 'text/markdown' }
 ]);
 
@@ -52,9 +52,18 @@ function textContent(uri, text, mimeType = 'text/plain') {
 
 function getProject(context, projectId) {
   const registry = context.projectRegistry;
-  const id = projectId || registry?.defaultProjectId;
+  const id = String(projectId || '').trim();
+  if (!id) {
+    const error = new Error('PROJECT_ID_REQUIRED: project_id is required.');
+    error.code = 'PROJECT_ID_REQUIRED';
+    throw error;
+  }
   const project = registry?.projects?.get(id);
-  if (!project) throw new Error(`Unknown projectId: ${projectId}`);
+  if (!project) {
+    const error = new Error(`PROJECT_NOT_FOUND: Unknown project_id: ${id}`);
+    error.code = 'PROJECT_NOT_FOUND';
+    throw error;
+  }
   return project;
 }
 

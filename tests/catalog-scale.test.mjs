@@ -110,11 +110,11 @@ test('agent exposes no templates, native exposes exactly six fixed templates, le
   const nativeTemplates = listRepoResourceTemplates(context, mode('native'));
   assert.equal(nativeTemplates.length, 6);
   assert.deepEqual(nativeTemplates.map(item => item.uriTemplate), [
-    'repo://project/{projectId}/summary',
-    'repo://project/{projectId}/tree{?depth}',
-    'repo://project/{projectId}/git/status',
-    'repo://project/{projectId}/git/diff{?staged}',
-    'repo://project/{projectId}/file/{path}',
+    'repo://project/{project_id}/summary',
+    'repo://project/{project_id}/tree{?depth}',
+    'repo://project/{project_id}/git/status',
+    'repo://project/{project_id}/git/diff{?staged}',
+    'repo://project/{project_id}/file/{path}',
     'skill://skills/{skillName}/SKILL.md'
   ]);
   assert.equal(listRepoResourceTemplates(context, mode('legacy')).length, 3);
@@ -155,7 +155,7 @@ test('project deep links and old diagnostic aliases remain readable in every sur
   for (const surfaceMode of ['legacy', 'agent', 'native']) {
     context.surfaceConfig = mode(surfaceMode);
     const summary = JSON.parse((await readRepoResource('repo://project/fixture/summary', context)).contents[0].text);
-    assert.equal(summary.projectId, 'fixture');
+    assert.equal(summary.project_id, 'fixture');
     const oldRuntime = JSON.parse((await readRepoResource('repo://project/fixture/runtime-profile', context)).contents[0].text);
     const singletonRuntime = JSON.parse((await readRepoResource('repo://gateway/runtime-profile', context)).contents[0].text);
     assert.deepEqual(oldRuntime, singletonRuntime);

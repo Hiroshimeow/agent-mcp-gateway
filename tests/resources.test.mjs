@@ -25,7 +25,7 @@ test('lists project resources and reads project list', async () => {
   const { context } = await fixture();
   assert.equal(listRepoResources(context).some(r => r.uri === 'repo://projects'), true);
   const projects = firstJson(await readRepoResource('repo://projects', context));
-  assert.equal(projects.projects[0].projectId, 'fixture');
+  assert.equal(projects.projects[0].project_id, 'fixture');
   assert.equal(projects.projects[0].repoRoot, undefined);
 });
 

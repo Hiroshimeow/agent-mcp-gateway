@@ -22,13 +22,13 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] npm is NOT published in this phase.
 
 ## Phase 2 — P0 IDs / no fallback
-- [ ] Public project field is only `project_id`; no model-facing `projectId` remains.
-- [ ] `project_inspect` requires `project_id`.
-- [ ] Prompt/resource project variables use `project_id`.
-- [ ] Missing `project_id` fails closed instead of selecting default workspace.
-- [ ] Unknown `project_id` fails closed.
-- [ ] `default_project_id` is informational only, never an execution fallback.
-- [ ] Regression test proves omission cannot mutate/read the default project accidentally.
+- [x] Public project field is only `project_id`; no model-facing `projectId` remains.
+- [x] `project_inspect` requires `project_id`.
+- [x] Prompt/resource project variables use `project_id`.
+- [x] Missing `project_id` fails closed instead of selecting default workspace.
+- [x] Unknown `project_id` fails closed.
+- [x] `default_project_id` is informational only, never an execution fallback.
+- [x] Regression test proves omission cannot mutate/read the default project accidentally.
 
 ## Phase 3 — Accounts / invites / OAuth / ownership
 - [ ] Accounts are durable and use normalized email + salted scrypt password hash.

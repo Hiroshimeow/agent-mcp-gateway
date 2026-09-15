@@ -74,16 +74,20 @@ const TOOL_DEFINITIONS = [
     name: 'project_inspect',
     description: 'Inspect one configured project through bounded summary, tree, Git, README, or package views. Use read_text_file for generic file bodies.',
     inputSchema: schema({
-      projectId: { type: 'string', description: 'Configured project id.' },
+      project_id: { type: 'string', description: 'Configured project id.' },
       view: { type: 'string', enum: [...PROJECT_INSPECTION_VIEWS] },
       depth: { type: 'integer', minimum: 1, maximum: 10, default: 3 },
       staged: { type: 'boolean', default: false },
       cursor: { type: 'string', description: 'Opaque cursor returned by a bounded tree page.' },
       limit: { type: 'integer', minimum: 1, maximum: 500, default: 200 }
-    }, ['projectId', 'view']),
+    }, ['project_id', 'view']),
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
-    handler: async (args, context) => ok('project_inspect', `Inspected project ${args.projectId}`, await inspectProject(context, args))
+    handler: async (args, context) => ok(
+      'project_inspect',
+      `Inspected project ${args.project_id}`,
+      await inspectProject(context, { ...args, projectId: args.project_id })
+    )
   },
   {
     name: 'external_tool_search',

@@ -21,10 +21,10 @@ for (const schema of [ListResourcesRequestSchema, ReadResourceRequestSchema, Lis
 const resources = listRepoResources(context);
 const templates = listRepoResourceTemplates(context);
 const prompts = listRepoPrompts({ safetyProfile: { name: 'yolo' } });
-const prompt = getRepoPrompt('release_readiness', { projectId: 'gateway' }, { safetyProfile: { name: 'yolo' } });
+const prompt = getRepoPrompt('release_readiness', { project_id: 'gateway' }, { safetyProfile: { name: 'yolo' } });
 
 assert.ok(resources.some(r => r.uri === 'repo://projects'));
-assert.ok(templates.some(t => t.uriTemplate.includes('{projectId}')));
+assert.ok(templates.some(t => t.uriTemplate.includes('{project_id}')));
 assert.ok(prompts.some(p => p.name === 'release_readiness'));
 assert.equal(prompt.messages[0].role, 'user');
 

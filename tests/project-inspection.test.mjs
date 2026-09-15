@@ -47,13 +47,13 @@ async function fixture() {
 test('listProjects paginates with opaque cursors and exact query match first', async () => {
   const { registry } = await fixture();
   const first = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2 });
-  assert.deepEqual(first.items.map(item => item.projectId), ['alpha', 'alpha-tools']);
+  assert.deepEqual(first.items.map(item => item.project_id), ['alpha', 'alpha-tools']);
   assert.equal(typeof first.nextCursor, 'string');
   assert.equal(first.truncated, true);
   assert.equal(first.items[0].repoRoot, undefined);
 
   const second = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2, cursor: first.nextCursor });
-  assert.deepEqual(second.items.map(item => item.projectId), ['my-alpha']);
+  assert.deepEqual(second.items.map(item => item.project_id), ['my-alpha']);
   assert.equal(second.nextCursor, null);
   assert.equal(second.truncated, false);
 
@@ -77,7 +77,7 @@ test('inspectProject supports summary, bounded tree, git status, and git diff vi
   const context = { projectRegistry: registry, env: { MCP_RUNTIME_PROFILE: 'safe' } };
 
   const summary = await inspectProject(context, { projectId: 'alpha', view: 'summary' });
-  assert.equal(summary.projectId, 'alpha');
+  assert.equal(summary.project_id, 'alpha');
   assert.equal(summary.hasReadme, true);
   assert.equal(summary.hasPackageJson, true);
   assert.equal(summary.repoRoot, undefined);
@@ -106,7 +106,7 @@ test('inspectProject rejects unknown views and projects with actionable errors',
   const { registry } = await fixture();
   const context = { projectRegistry: registry };
   await assert.rejects(() => inspectProject(context, { projectId: 'alpha', view: 'file' }), /view/i);
-  await assert.rejects(() => inspectProject(context, { projectId: 'missing', view: 'summary' }), /Unknown projectId/);
+  await assert.rejects(() => inspectProject(context, { projectId: 'missing', view: 'summary' }), /Unknown project_id/);
 });
 
 test('inspectProject reports missing README and package.json explicitly', async () => {

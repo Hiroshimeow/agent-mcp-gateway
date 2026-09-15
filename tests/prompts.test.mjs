@@ -10,7 +10,7 @@ test('lists all required repo prompts', () => {
 });
 
 test('getRepoPrompt returns MCP-shaped messages', () => {
-  const prompt = getRepoPrompt('quality_check', { projectId: 'fixture' }, { safetyProfile: { name: 'yolo' } });
+  const prompt = getRepoPrompt('quality_check', { project_id: 'fixture' }, { safetyProfile: { name: 'yolo' } });
   assert.equal(prompt.messages[0].role, 'user');
   assert.equal(prompt.messages[0].content.type, 'text');
   assert.match(prompt.messages[0].content.text, /Active MCP runtime profile: yolo/);
@@ -23,7 +23,7 @@ test('unknown prompt is rejected', () => {
 });
 
 test('security and cross-platform prompts mention required caveats', () => {
-  assert.match(getRepoPrompt('quality_check', { projectId: 'fixture' }).messages[0].content.text, /architectural health/);
-  assert.match(getRepoPrompt('cross_platform_review', { projectId: 'fixture' }).messages[0].content.text, /POSIX non-login -c/);
-  assert.match(getRepoPrompt('release_readiness', { projectId: 'fixture' }).messages[0].content.text, /untracked imported files/);
+  assert.match(getRepoPrompt('quality_check', { project_id: 'fixture' }).messages[0].content.text, /architectural health/);
+  assert.match(getRepoPrompt('cross_platform_review', { project_id: 'fixture' }).messages[0].content.text, /POSIX non-login -c/);
+  assert.match(getRepoPrompt('release_readiness', { project_id: 'fixture' }).messages[0].content.text, /untracked imported files/);
 });

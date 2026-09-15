@@ -235,13 +235,15 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
   const projectListPayload = JSON.parse(projectList.result.content[0].text);
   assert.equal(projectListPayload.ok, true);
   assert.equal(projectListPayload.data.items.length, 1);
-  const smokeProjectId = projectListPayload.data.items[0].projectId;
-  const projectSummary = await callTool(baseUrl, 40, 'project_inspect', { projectId: smokeProjectId, view: 'summary' });
+  const smokeProjectId = projectListPayload.data.items[0].project_id;
+  const projectSummary = await callTool(baseUrl, 40, 'project_inspect', { project_id: smokeProjectId, view: 'summary' });
   const projectSummaryPayload = JSON.parse(projectSummary.result.content[0].text);
-  assert.equal(projectSummaryPayload.data.projectId, smokeProjectId);
-  const projectTree = await callTool(baseUrl, 41, 'project_inspect', { projectId: smokeProjectId, view: 'tree', depth: 2, limit: 20 });
+  assert.equal(projectSummaryPayload.data.project_id, smokeProjectId);
+  const projectTree = await callTool(baseUrl, 41, 'project_inspect', { project_id: smokeProjectId, view: 'tree', depth: 2, limit: 20 });
   const projectTreePayload = JSON.parse(projectTree.result.content[0].text);
   assert.equal(Array.isArray(projectTreePayload.data.entries), true);
+  const missingProjectId = await callTool(baseUrl, 42, 'project_inspect', { view: 'summary' });
+  assert.match(JSON.stringify(missingProjectId), /PROJECT_ID_REQUIRED/);
 
   const externalSearch = await callTool(baseUrl, 44, 'external_tool_search', { query: 'missing', limit: 10 });
   const externalSearchPayload = JSON.parse(externalSearch.result.content[0].text);

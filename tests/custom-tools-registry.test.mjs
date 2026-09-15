@@ -53,11 +53,11 @@ test('project tools route through bounded project inspection service', async () 
 
   const listResult = parseToolResult(await callCustomTool('project_list', { limit: 10 }, context));
   assert.equal(listResult.ok, true);
-  assert.deepEqual(listResult.data.items.map(item => item.projectId), ['fixture']);
+  assert.deepEqual(listResult.data.items.map(item => item.project_id), ['fixture']);
 
-  const inspectResult = parseToolResult(await callCustomTool('project_inspect', { projectId: 'fixture', view: 'summary' }, context));
+  const inspectResult = parseToolResult(await callCustomTool('project_inspect', { project_id: 'fixture', view: 'summary' }, context));
   assert.equal(inspectResult.ok, true);
-  assert.equal(inspectResult.data.projectId, 'fixture');
+  assert.equal(inspectResult.data.project_id, 'fixture');
   assert.equal(inspectResult.data.hasReadme, true);
 });
 

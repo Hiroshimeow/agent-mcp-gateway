@@ -68,10 +68,17 @@ function projectPathExposure(context = {}) {
   );
 }
 
+function projectLookupError(code, message) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  return error;
+}
+
 function getProject(projectRegistry, projectId) {
-  const id = projectId || projectRegistry?.defaultProjectId;
+  const id = String(projectId || '').trim();
+  if (!id) throw projectLookupError('PROJECT_ID_REQUIRED', 'project_id is required.');
   const project = projectRegistry?.projects?.get(id);
-  if (!project) throw new Error(`Unknown projectId: ${projectId || id || ''}`);
+  if (!project) throw projectLookupError('PROJECT_NOT_FOUND', `Unknown project_id: ${id}`);
   return project;
 }
 
@@ -85,7 +92,7 @@ function hasPackageJson(project) {
 
 function projectSummary(project, context = {}) {
   const data = {
-    projectId: project.projectId,
+    project_id: project.projectId,
     displayName: project.displayName,
     defaultRootName: path.basename(project.repoRoot) || project.projectId,
     default: context.projectRegistry?.defaultProjectId === project.projectId,
@@ -99,7 +106,7 @@ function projectSummary(project, context = {}) {
 
 function projectListItem(project, projectRegistry, exposePaths) {
   const item = {
-    projectId: project.projectId,
+    project_id: project.projectId,
     displayName: project.displayName,
     default: projectRegistry?.defaultProjectId === project.projectId
   };
@@ -173,7 +180,7 @@ function readTree(project, options = {}) {
   const page = entries.slice(offset, offset + limit);
   const truncated = entries.length > offset + page.length;
   return {
-    projectId: project.projectId,
+    project_id: project.projectId,
     rootName: path.basename(project.repoRoot),
     maxDepth: depth,
     maxEntries: limit,
@@ -194,7 +201,7 @@ function execGitRead(cwd, args) {
 async function gitStatus(project) {
   const result = await execGitRead(project.repoRoot, ['status', '--short', '--branch']);
   return {
-    projectId: project.projectId,
+    project_id: project.projectId,
     ok: result.ok,
     status: result.stdout,
     stderr: result.stderr,
@@ -205,7 +212,7 @@ async function gitStatus(project) {
 async function gitDiff(project, staged = false) {
   const result = await execGitRead(project.repoRoot, staged ? ['diff', '--staged'] : ['diff']);
   return {
-    projectId: project.projectId,
+    project_id: project.projectId,
     ok: result.ok,
     staged: Boolean(staged),
     text: result.ok ? result.stdout : result.stderr,
@@ -218,9 +225,9 @@ async function readReadme(project) {
   const readme = ['README.md', 'README.vi.md']
     .map(name => path.join(project.repoRoot, name))
     .find(file => fs.existsSync(file));
-  if (!readme) throw new Error(`README not found for projectId: ${project.projectId}`);
+  if (!readme) throw new Error(`README not found for project_id: ${project.projectId}`);
   return {
-    projectId: project.projectId,
+    project_id: project.projectId,
     fileName: path.basename(readme),
     text: await fs.promises.readFile(readme, 'utf8')
   };
@@ -228,9 +235,9 @@ async function readReadme(project) {
 
 async function readPackage(project) {
   const packagePath = path.join(project.repoRoot, 'package.json');
-  if (!fs.existsSync(packagePath)) throw new Error(`package.json not found for projectId: ${project.projectId}`);
+  if (!fs.existsSync(packagePath)) throw new Error(`package.json not found for project_id: ${project.projectId}`);
   return {
-    projectId: project.projectId,
+    project_id: project.projectId,
     data: JSON.parse(await fs.promises.readFile(packagePath, 'utf8'))
   };
 }

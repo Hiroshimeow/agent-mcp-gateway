@@ -73,14 +73,14 @@
 
 **Gateway files:** custom tool definitions, project inspection/resources/prompts/project registry/tests/smokes.
 
-- [ ] Public MCP project arguments/output use `project_id`, not `projectId`.
-- [ ] Resource URI template variable uses `project_id` consistently.
-- [ ] Prompt arguments use `project_id` consistently.
-- [ ] `project_inspect` requires explicit `project_id` and returns `PROJECT_ID_REQUIRED` when absent.
-- [ ] Resource reads that require a project fail when no project identity is supplied; never choose `defaultProjectId` for execution.
-- [ ] Default project may remain display metadata/hint only.
-- [ ] Unknown IDs fail closed and include only a bounded list/hint for recovery.
-- [ ] Remove compatibility parsing that accepts both `projectId` and `project_id` at the public boundary after tests are migrated.
+- [x] Public MCP project arguments/output use `project_id`, not `projectId`.
+- [x] Resource URI template variable uses `project_id` consistently.
+- [x] Prompt arguments use `project_id` consistently.
+- [x] `project_inspect` requires explicit `project_id` and returns `PROJECT_ID_REQUIRED` when absent.
+- [x] Resource reads that require a project fail when no project identity is supplied; never choose `defaultProjectId` for execution.
+- [x] Default project may remain display metadata/hint only.
+- [x] Unknown IDs fail closed and include only a bounded list/hint for recovery.
+- [x] Remove compatibility parsing that accepts both `projectId` and `project_id` at the public boundary after tests are migrated.
 
 **Gate:** grep shows one public spelling (`project_id`); targeted and full gateway tests prove missing/unknown IDs never execute against the default workspace.
 
