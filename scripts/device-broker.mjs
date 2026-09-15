@@ -90,6 +90,12 @@ function authFailure(ws, message = 'authentication failed') {
   if (ws.readyState === WebSocket.OPEN) ws.close(4003, message.slice(0, 120));
 }
 
+function deviceBrokerError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 export function createDeviceBroker(options = {}) {
   const enrollmentToken = String(options.enrollmentToken || '').trim();
   const deviceStore = options.deviceStore || null;
@@ -619,8 +625,12 @@ export function createDeviceBroker(options = {}) {
 
   async function callDevice({ requestId: requestedRequestId, accountId = null, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
     const device = devices.get(String(deviceId || ''));
-    if (device?.online && !refreshAuthorization(device)) throw new Error(`Device ${deviceId} authorization changed or was revoked; it is offline.`);
-    if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) throw new Error(`Device ${deviceId} is offline or unknown.`);
+    if (device?.online && !refreshAuthorization(device)) {
+      throw deviceBrokerError(`Device ${deviceId} authorization changed or was revoked; it is offline.`, 'DEVICE_OFFLINE');
+    }
+    if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) {
+      throw deviceBrokerError(`Device ${deviceId} is offline or unknown.`, 'DEVICE_OFFLINE');
+    }
     if (durableAuth && requireAccountOwnership) {
       const owner = String(accountId || '').trim();
       const stored = deviceStore.get(device.deviceId);

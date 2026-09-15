@@ -127,15 +127,15 @@
 
 ## Phase 5 — Pure control-plane execution migration
 
-- [ ] Gateway remains the MCP tool-contract owner but ceases direct host filesystem/shell/process execution for normal calls.
-- [ ] `read_text_file`, `write_file`, `edit_file`, `shell_execute`, `start_process` require `device_id` at the public boundary.
-- [ ] Process follow-ups keep using `session_id` only because the gateway stores session→device ownership/routing.
-- [ ] Host machine is treated as an ordinary device by running `agent-mcp-device` next to the gateway.
-- [ ] `image_preview` is reviewed explicitly: either remote-route it safely with bounded payloads or keep it out of the pure execution surface; no hidden host fallback is allowed.
-- [ ] Remove local trusted-root auto-grant/fallback execution paths that no longer have a consumer.
-- [ ] Ensure account ownership checks wrap all device execution tools.
+- [x] Gateway remains the MCP tool-contract owner but ceases direct host filesystem/shell/process execution for normal calls.
+- [x] `read_text_file`, `write_file`, `edit_file`, `shell_execute`, `start_process` require `device_id` at the public boundary.
+- [x] Process follow-ups keep using `session_id` only because the gateway stores session→device ownership/routing.
+- [x] Host machine is treated as an ordinary device by running `agent-mcp-device` next to the gateway.
+- [x] `image_preview` is reviewed explicitly: it remote-routes through the selected device and returns a bounded WebP preview; no hidden host fallback remains.
+- [x] Remove local trusted-root auto-grant/fallback execution paths that no longer have a consumer.
+- [x] Ensure account ownership checks wrap all device execution tools.
 
-**Gate:** deleting/stopping the host device makes host file/shell operations fail with `DEVICE_ID_REQUIRED/OFFLINE`, never run locally; starting it restores execution; tool schema still remains bounded/stable.
+**Gate:** PASS. An isolated real-WebSocket broker canary proves device dispatch succeeds, socket disconnect makes the same route fail closed with `DEVICE_OFFLINE`, and reconnect restores dispatch without any gateway-host fallback. `pure-control-plane-contract` also locks out host filesystem/shell/project-resource execution. Fresh gateway verification: 287/287 tests plus all three MCP smokes; fresh device verification: 52/52 tests. YOLO remains 16 tools / 15,793 serialized bytes. Live v2 cutover/restart remains intentionally deferred to Phase 8.
 
 ---
 

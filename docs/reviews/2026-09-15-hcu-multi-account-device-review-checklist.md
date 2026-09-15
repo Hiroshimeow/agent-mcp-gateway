@@ -57,13 +57,15 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] Two compatible Linux devices cause ambiguity, not guessing.
 
 ## Phase 5 — Pure control plane
-- [ ] Gateway owns schemas/routing but not normal host filesystem/shell execution.
-- [ ] Host machine runs `agent-mcp-device` when it must be controlled.
-- [ ] Filesystem/shell/start-process calls require `device_id`.
-- [ ] Process follow-ups require only bound `session_id`.
-- [ ] No missing-`device_id` fallback to gateway host remains.
-- [ ] `image_preview` has an explicit remote-safe decision; no hidden local fallback.
-- [ ] Ownership checks cover every execution tool.
+- [x] Gateway owns schemas/routing but not normal host filesystem/shell execution.
+- [x] Host machine runs `agent-mcp-device` when it must be controlled.
+- [x] Filesystem/shell/start-process calls require `device_id`.
+- [x] Process follow-ups require only bound `session_id`.
+- [x] No missing-`device_id` fallback to gateway host remains.
+- [x] `image_preview` has an explicit remote-safe decision; no hidden local fallback.
+- [x] Ownership checks cover every execution tool.
+
+Evidence: isolated real-WebSocket disconnect/reconnect gate returns `DEVICE_OFFLINE` while disconnected and resumes after reconnect; `pure-control-plane-contract` finds no host execution path in the model-facing gateway; full gateway 287/287 plus three smokes PASS; full device 52/52 PASS; YOLO catalog remains 16 tools / 15,793 bytes. Live v2 cutover is intentionally Phase 8.
 
 ## Phase 6 — Tool/debt cleanup
 - [ ] `edit_file` exposes one contract only: path/old_text/new_text/expected_replacements/dry_run/device_id.

@@ -86,6 +86,49 @@ test('device broker authenticates enrollment token, registers hello, and routes 
   assert.deepEqual(result, { ok: true, pong: true });
 });
 
+test('device disconnect fails closed with DEVICE_OFFLINE and reconnect restores dispatch', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', requestTimeoutMs: 1000 });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+
+  const attachResponder = ws => ws.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type !== 'tool_call') return;
+    ws.send(JSON.stringify({
+      protocol_version: 1,
+      type: 'tool_result',
+      request_id: message.request_id,
+      device_id: 'host-device',
+      connection_epoch: message.connection_epoch,
+      timestamp: Date.now(),
+      payload: { ok: true, source: 'device' }
+    }));
+  });
+
+  const first = await connectDevice(port, 'dev-secret', { device_id: 'host-device' });
+  attachResponder(first);
+  await waitUntil(() => broker.listDevices()[0]?.online === true);
+  assert.deepEqual(await broker.callDevice({ deviceId: 'host-device', tool: 'ping', arguments: {} }), { ok: true, source: 'device' });
+
+  first.close();
+  await waitUntil(() => broker.listDevices()[0]?.online === false);
+  await assert.rejects(
+    broker.callDevice({ deviceId: 'host-device', tool: 'ping', arguments: {} }),
+    error => error.code === 'DEVICE_OFFLINE'
+  );
+
+  const second = await connectDevice(port, 'dev-secret', { device_id: 'host-device' });
+  t.after(() => second.close());
+  attachResponder(second);
+  await waitUntil(() => broker.listDevices()[0]?.online === true);
+  assert.deepEqual(await broker.callDevice({ deviceId: 'host-device', tool: 'ping', arguments: {} }), { ok: true, source: 'device' });
+});
+
 test('device broker rejects an invalid enrollment token', async t => {
   const server = http.createServer((_req, res) => res.end('ok'));
   const broker = createDeviceBroker({ enrollmentToken: 'dev-secret' });
