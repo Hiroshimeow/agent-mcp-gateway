@@ -14,7 +14,8 @@ test('runtime uses gateway.sqlite as the single authoritative state database', (
   assert.match(deviceAdmin, /gateway\.sqlite/);
   assert.doesNotMatch(deviceAdmin, /MCP_DEVICE_DB_PATH|devices\.sqlite/);
   assert.doesNotMatch(launcher, /AUTH_STATE_PATH|auth-state\.json/);
-  assert.equal(pkg.scripts['admin:migrate-runtime'], 'node scripts/migrate-runtime-state.mjs');
+  assert.equal(pkg.scripts['admin:migrate-runtime'], undefined);
+  assert.equal(fs.existsSync(new URL('../scripts/migrate-runtime-state.mjs', import.meta.url)), false);
 });
 
 test('wrapper preserves account and activity session through MCP caller context and project/device routing', () => {
