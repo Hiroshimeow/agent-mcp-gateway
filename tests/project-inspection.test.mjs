@@ -36,82 +36,84 @@ async function fixture() {
   await fs.appendFile(path.join(alpha, 'README.md'), 'changed\n');
 
   const registry = buildTrustedRootsProjectRegistry([
-    `${alpha} | alpha | Alpha`,
-    `${alphaTools} | alpha-tools | Alpha Tools`,
-    `${myAlpha} | my-alpha | My Alpha`,
-    `${empty} | empty | Empty`
+    `${alpha} | alpha | Alpha | device-a`,
+    `${alphaTools} | alpha-tools | Alpha Tools | device-a`,
+    `${myAlpha} | my-alpha | My Alpha | device-a`,
+    `${empty} | empty | Empty | device-a`
   ], { defaultProjectId: 'alpha' });
-  return { base, alpha, registry };
+  const context = {
+    projectRegistry: registry,
+    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }]
+  };
+  return { base, alpha, registry, context };
 }
 
 test('listProjects paginates with opaque cursors and exact query match first', async () => {
-  const { registry } = await fixture();
-  const first = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2 });
+  const { context } = await fixture();
+  const first = listProjects({ ...context, exposePaths: false }, { device_id: 'device-a', query: 'alpha', limit: 2 });
   assert.deepEqual(first.items.map(item => item.project_id), ['alpha', 'alpha-tools']);
   assert.equal(typeof first.nextCursor, 'string');
   assert.equal(first.truncated, true);
   assert.equal(first.items[0].repoRoot, undefined);
 
-  const second = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 2, cursor: first.nextCursor });
+  const second = listProjects({ ...context, exposePaths: false }, { device_id: 'device-a', query: 'alpha', limit: 2, cursor: first.nextCursor });
   assert.deepEqual(second.items.map(item => item.project_id), ['my-alpha']);
   assert.equal(second.nextCursor, null);
   assert.equal(second.truncated, false);
 
   assert.throws(
-    () => listProjects({ projectRegistry: registry }, { cursor: 'not-a-valid-cursor' }),
+    () => listProjects(context, { device_id: 'device-a', cursor: 'not-a-valid-cursor' }),
     /cursor/i
   );
 });
 
 test('listProjects hides absolute paths by default and exposes them only when enabled', async () => {
-  const { registry, alpha } = await fixture();
-  const hidden = listProjects({ projectRegistry: registry, exposePaths: false }, { query: 'alpha', limit: 1 });
+  const { context, alpha } = await fixture();
+  const hidden = listProjects({ ...context, exposePaths: false }, { device_id: 'device-a', query: 'alpha', limit: 1 });
   assert.equal(hidden.items[0].repoRoot, undefined);
 
-  const exposed = listProjects({ projectRegistry: registry, exposePaths: true }, { query: 'alpha', limit: 1 });
+  const exposed = listProjects({ ...context, exposePaths: true }, { device_id: 'device-a', query: 'alpha', limit: 1 });
   assert.equal(exposed.items[0].repoRoot, alpha);
 });
 
 test('inspectProject supports summary, bounded tree, git status, and git diff views', async () => {
-  const { registry } = await fixture();
-  const context = { projectRegistry: registry, env: { MCP_RUNTIME_PROFILE: 'safe' } };
+  const { context: baseContext } = await fixture();
+  const context = { ...baseContext, env: { MCP_RUNTIME_PROFILE: 'safe' } };
 
-  const summary = await inspectProject(context, { projectId: 'alpha', view: 'summary' });
+  const summary = await inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'summary' });
   assert.equal(summary.project_id, 'alpha');
   assert.equal(summary.hasReadme, true);
   assert.equal(summary.hasPackageJson, true);
   assert.equal(summary.repoRoot, undefined);
 
-  const tree = await inspectProject(context, { projectId: 'alpha', view: 'tree', depth: 2, limit: 2 });
+  const tree = await inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'tree', depth: 2, limit: 2 });
   assert.equal(tree.entries.length, 2);
   assert.equal(tree.truncated, true);
   assert.equal(typeof tree.nextCursor, 'string');
   assert.equal(tree.entries.some(entry => entry.path.includes('node_modules')), false);
   assert.equal(tree.entries.every(entry => entry.depth <= 2), true);
 
-  const treeNext = await inspectProject(context, { projectId: 'alpha', view: 'tree', depth: 2, limit: 10, cursor: tree.nextCursor });
+  const treeNext = await inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'tree', depth: 2, limit: 10, cursor: tree.nextCursor });
   assert.equal(treeNext.entries.some(entry => entry.path.includes('node_modules')), false);
   assert.equal(treeNext.entries.every(entry => entry.depth <= 2), true);
 
-  const status = await inspectProject(context, { projectId: 'alpha', view: 'git_status' });
+  const status = await inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'git_status' });
   assert.equal(status.ok, true);
   assert.match(status.status, /README\.md/);
 
-  const diff = await inspectProject(context, { projectId: 'alpha', view: 'git_diff' });
+  const diff = await inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'git_diff' });
   assert.equal(diff.ok, true);
   assert.match(diff.text, /changed/);
 });
 
 test('inspectProject rejects unknown views and projects with actionable errors', async () => {
-  const { registry } = await fixture();
-  const context = { projectRegistry: registry };
-  await assert.rejects(() => inspectProject(context, { projectId: 'alpha', view: 'file' }), /view/i);
-  await assert.rejects(() => inspectProject(context, { projectId: 'missing', view: 'summary' }), /Unknown project_id/);
+  const { context } = await fixture();
+  await assert.rejects(() => inspectProject(context, { deviceId: 'device-a', projectId: 'alpha', view: 'file' }), /view/i);
+  await assert.rejects(() => inspectProject(context, { deviceId: 'device-a', projectId: 'missing', view: 'summary' }), /PROJECT_DEVICE_MISMATCH/);
 });
 
 test('inspectProject reports missing README and package.json explicitly', async () => {
-  const { registry } = await fixture();
-  const context = { projectRegistry: registry };
-  await assert.rejects(() => inspectProject(context, { projectId: 'empty', view: 'readme' }), /README/i);
-  await assert.rejects(() => inspectProject(context, { projectId: 'empty', view: 'package' }), /package\.json/i);
+  const { context } = await fixture();
+  await assert.rejects(() => inspectProject(context, { deviceId: 'device-a', projectId: 'empty', view: 'readme' }), /README/i);
+  await assert.rejects(() => inspectProject(context, { deviceId: 'device-a', projectId: 'empty', view: 'package' }), /package\.json/i);
 });

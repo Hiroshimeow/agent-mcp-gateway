@@ -367,12 +367,20 @@ const shellExecuteOutputSchema = {
   }
 };
 
-function customToolContext() {
+function customToolContext(callerContext = {}) {
   const snapshot = workspaceSnapshot();
   return {
     resolvedRepoRoots: snapshot.roots,
     resolvedRepoRoot: snapshot.roots[0],
     projectRegistry: snapshot.projectRegistry,
+    accountId: callerContext.accountId || null,
+    listVisibleDevices: () => deviceAccessPolicy.filterDevices(
+      deviceBroker.listDevices({ accountId: callerContext.accountId || null }),
+      {
+        callerSubject: callerContext.callerSubject || callerContext.callerCategory || 'anonymous',
+        callerCategory: callerContext.callerCategory || 'anonymous'
+      }
+    ),
     executeDirectShell,
     externalToolBroker,
     runtimeProfile,
@@ -769,7 +777,7 @@ async function routeToolCall(request, context = {}) {
 
   if (toolName === 'image_preview') await ensureImageTarget(request.params.arguments || {});
   if (isLocalCustomTool(toolName)) {
-    const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext());
+    const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext(context));
     if (toolName === 'get_skill') skillBootstrapGate.markSkillLoaded(callerKey);
     return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
@@ -817,20 +825,28 @@ async function routeObservedToolCall(request, context) {
   }
 }
 
-function currentResourceContext() {
+function currentResourceContext(callerContext = {}) {
   const snapshot = workspaceSnapshot();
   return {
     resolvedRepoRoots: snapshot.roots,
     resolvedRepoRoot: snapshot.roots[0],
     projectRegistry: snapshot.projectRegistry,
     surfaceConfig: currentSurfaceConfig(snapshot),
+    accountId: callerContext.accountId || null,
+    listVisibleDevices: () => deviceAccessPolicy.filterDevices(
+      deviceBroker.listDevices({ accountId: callerContext.accountId || null }),
+      {
+        callerSubject: callerContext.callerSubject || callerContext.callerCategory || 'anonymous',
+        callerCategory: callerContext.callerCategory || 'anonymous'
+      }
+    ),
     packageRoot,
     env: process.env,
     listTools: listMergedTools
   };
 }
 
-function createProxyServer({ callerKey, callerCategory, callerSubject }) {
+function createProxyServer({ accountId, callerKey, callerCategory, callerSubject }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -850,18 +866,19 @@ function createProxyServer({ callerKey, callerCategory, callerSubject }) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await listMergedTools() }));
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { callerKey, callerCategory, callerSubject }));
+  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { accountId, callerKey, callerCategory, callerSubject }));
+  const callerContext = { accountId, callerKey, callerCategory, callerSubject };
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    const context = currentResourceContext();
+    const context = currentResourceContext(callerContext);
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
   });
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-    const context = currentResourceContext();
+    const context = currentResourceContext(callerContext);
     return { resourceTemplates: [...listRepoResourceTemplates(context), ...await externalMcpManager.listResourceTemplates()] };
   });
   server.setRequestHandler(ReadResourceRequestSchema, async request => {
     if (isExternalResourceUri(request.params.uri)) return await externalMcpManager.readResource(request.params.uri);
-    return await readRepoResource(request.params.uri, currentResourceContext());
+    return await readRepoResource(request.params.uri, currentResourceContext(callerContext));
   });
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: [...listRepoPrompts({ runtimeProfile }), ...await externalMcpManager.listPrompts()]
@@ -870,10 +887,7 @@ function createProxyServer({ callerKey, callerCategory, callerSubject }) {
     if (externalMcpManager.isExternalPromptName(request.params.name)) {
       return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
     }
-    return getRepoPrompt(request.params.name, request.params.arguments || {}, {
-      runtimeProfile,
-      defaultProjectId: workspaceSnapshot().projectRegistry.defaultProjectId
-    });
+    return getRepoPrompt(request.params.name, request.params.arguments || {}, { runtimeProfile });
   });
   activeProxyServers.add(server);
   return server;

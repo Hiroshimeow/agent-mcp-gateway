@@ -13,18 +13,31 @@ import { catalogToolBytes, selectExternalCatalog } from '../scripts/catalog-budg
 
 function syntheticContext(projectCount, skillCount, deviceCount = projectCount) {
   const projects = new Map();
+  const projectRoutes = new Map();
+  const devices = Array.from({ length: deviceCount }, (_, index) => ({
+    deviceId: `device-${String(index).padStart(4, '0')}`,
+    online: true,
+    revoked: false,
+    pathStyle: 'posix',
+    capabilities: ['read_text_file']
+  }));
   for (let index = 0; index < projectCount; index += 1) {
     const projectId = `project-${String(index).padStart(4, '0')}`;
-    projects.set(projectId, {
+    const deviceId = devices[index % Math.max(devices.length, 1)]?.deviceId || 'device-0000';
+    const project = {
       projectId,
+      deviceId,
       displayName: `Project ${index}`,
       repoRoot: path.join(os.tmpdir(), 'mcp-scale-missing', projectId),
       trustedRoots: []
-    });
+    };
+    projects.set(projectId, project);
+    projectRoutes.set(`${deviceId}\u0000${projectId}`, project);
   }
   return {
     projectRegistry: {
       projects,
+      projectRoutes,
       defaultProjectId: projects.keys().next().value,
       exposeProjectPaths: false
     },
@@ -33,10 +46,8 @@ function syntheticContext(projectCount, skillCount, deviceCount = projectCount) 
       name: `Synthetic skill ${index}`,
       mimeType: 'text/markdown'
     })),
-    devices: Array.from({ length: deviceCount }, (_, index) => ({
-      deviceId: `device-${String(index).padStart(4, '0')}`,
-      capabilities: ['read_text_file']
-    })),
+    devices,
+    listVisibleDevices: () => devices,
     env: { MCP_RUNTIME_PROFILE: 'safe' },
     listTools: async () => []
   };
@@ -110,11 +121,11 @@ test('agent exposes no templates, native exposes exactly six fixed templates, le
   const nativeTemplates = listRepoResourceTemplates(context, mode('native'));
   assert.equal(nativeTemplates.length, 6);
   assert.deepEqual(nativeTemplates.map(item => item.uriTemplate), [
-    'repo://project/{project_id}/summary',
-    'repo://project/{project_id}/tree{?depth}',
-    'repo://project/{project_id}/git/status',
-    'repo://project/{project_id}/git/diff{?staged}',
-    'repo://project/{project_id}/file/{path}',
+    'repo://device/{device_id}/project/{project_id}/summary',
+    'repo://device/{device_id}/project/{project_id}/tree{?depth}',
+    'repo://device/{device_id}/project/{project_id}/git/status',
+    'repo://device/{device_id}/project/{project_id}/git/diff{?staged}',
+    'repo://device/{device_id}/project/{project_id}/file/{path}',
     'skill://skills/{skillName}/SKILL.md'
   ]);
   assert.equal(listRepoResourceTemplates(context, mode('legacy')).length, 3);
@@ -138,23 +149,30 @@ test('legacy lists singleton diagnostics but does not duplicate gateway diagnost
   const resources = listRepoResources(context, mode('legacy'));
   assert.equal(resources.some(item => item.uri === 'repo://gateway/runtime-profile'), true);
   assert.equal(resources.some(item => item.uri === 'repo://gateway/tool-manifest'), true);
-  assert.equal(resources.some(item => /\/runtime-profile$/.test(item.uri) && item.uri.startsWith('repo://project/')), false);
-  assert.equal(resources.some(item => /\/tool-manifest$/.test(item.uri) && item.uri.startsWith('repo://project/')), false);
+  assert.equal(resources.some(item => /\/runtime-profile$/.test(item.uri) && item.uri.includes('/project/')), false);
+  assert.equal(resources.some(item => /\/tool-manifest$/.test(item.uri) && item.uri.includes('/project/')), false);
 });
 
 test('project deep links and old diagnostic aliases remain readable in every surface mode', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-scale-deep-link-'));
   await fs.writeFile(path.join(root, 'README.md'), '# Deep link\n');
-  const project = { projectId: 'fixture', displayName: 'Fixture', repoRoot: root, trustedRoots: [root] };
+  const project = { projectId: 'fixture', deviceId: 'device-a', displayName: 'Fixture', repoRoot: root, trustedRoots: [root] };
   const context = {
-    projectRegistry: { projects: new Map([['fixture', project]]), defaultProjectId: 'fixture', exposeProjectPaths: false },
+    projectRegistry: {
+      projects: new Map([['fixture', project]]),
+      projectRoutes: new Map([['device-a\u0000fixture', project]]),
+      defaultProjectId: 'fixture',
+      exposeProjectPaths: false
+    },
+    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, pathStyle: 'posix' }],
     env: { MCP_RUNTIME_PROFILE: 'safe' },
     listTools: async () => []
   };
 
   for (const surfaceMode of ['legacy', 'agent', 'native']) {
     context.surfaceConfig = mode(surfaceMode);
-    const summary = JSON.parse((await readRepoResource('repo://project/fixture/summary', context)).contents[0].text);
+    const summary = JSON.parse((await readRepoResource('repo://device/device-a/project/fixture/summary', context)).contents[0].text);
+    assert.equal(summary.device_id, 'device-a');
     assert.equal(summary.project_id, 'fixture');
     const oldRuntime = JSON.parse((await readRepoResource('repo://project/fixture/runtime-profile', context)).contents[0].text);
     const singletonRuntime = JSON.parse((await readRepoResource('repo://gateway/runtime-profile', context)).contents[0].text);

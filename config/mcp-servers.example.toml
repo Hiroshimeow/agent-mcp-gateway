@@ -12,9 +12,10 @@ instructions = "Use filesystem tools for file content, shell/process tools for t
 mode = "agent"
 
 [trusted_roots]
-roots = [
-  { path = "${repoRoot}", project_id = "workspace", display_name = "Workspace" }
-]
+# Generic trusted paths do not become routable projects automatically.
+# Put machine-specific project routes in a private/runtime overlay, for example:
+# { path = "/srv/app", project_id = "app", display_name = "App", device_id = "device-id" }
+roots = ["${repoRoot}"]
 
 [openai_tunnel]
 enabled = false

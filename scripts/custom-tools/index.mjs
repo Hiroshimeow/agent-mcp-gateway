@@ -60,12 +60,13 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'project_list',
-    description: 'List configured projects with bounded pagination and optional name/id filtering. Local absolute paths stay hidden unless path exposure is explicitly enabled.',
+    description: 'List configured projects for one explicit owned online device. Local absolute paths stay hidden unless path exposure is explicitly enabled.',
     inputSchema: schema({
+      device_id: { type: 'string', minLength: 1, description: 'Owned online device id whose configured projects should be listed.' },
       query: { type: 'string', description: 'Optional project id or display-name filter.' },
       cursor: { type: 'string', description: 'Opaque cursor returned by the previous page.' },
       limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
-    }),
+    }, ['device_id']),
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: (args, context) => ok('project_list', 'Listed projects', listProjects(context, args))
@@ -74,19 +75,20 @@ const TOOL_DEFINITIONS = [
     name: 'project_inspect',
     description: 'Inspect one configured project through bounded summary, tree, Git, README, or package views. Use read_text_file for generic file bodies.',
     inputSchema: schema({
-      project_id: { type: 'string', description: 'Configured project id.' },
+      device_id: { type: 'string', minLength: 1, description: 'Owned online device id associated with the project.' },
+      project_id: { type: 'string', description: 'Configured project id on that device.' },
       view: { type: 'string', enum: [...PROJECT_INSPECTION_VIEWS] },
       depth: { type: 'integer', minimum: 1, maximum: 10, default: 3 },
       staged: { type: 'boolean', default: false },
       cursor: { type: 'string', description: 'Opaque cursor returned by a bounded tree page.' },
       limit: { type: 'integer', minimum: 1, maximum: 500, default: 200 }
-    }, ['project_id', 'view']),
+    }, ['device_id', 'project_id', 'view']),
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
     handler: async (args, context) => ok(
       'project_inspect',
       `Inspected project ${args.project_id}`,
-      await inspectProject(context, { ...args, projectId: args.project_id })
+      await inspectProject(context, { ...args, deviceId: args.device_id, projectId: args.project_id })
     )
   },
   {

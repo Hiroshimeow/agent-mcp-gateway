@@ -16,11 +16,10 @@ mode = "agent"
 need_invite = true
 
 [trusted_roots]
-# The launcher substitutes ${repoRoot}. Additional machine-specific roots are
-# added through the runtime overlay and must not be committed here.
-roots = [
-  { path = "${repoRoot}", project_id = "workspace", display_name = "Workspace" }
-]
+# The launcher substitutes ${repoRoot}. This generic root grants local path
+# discovery only; it is not a routable project. Machine-specific project routes
+# must declare path + project_id + device_id in a private/runtime overlay.
+roots = ["${repoRoot}"]
 
 [openai_tunnel]
 enabled = false

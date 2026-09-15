@@ -1,14 +1,14 @@
 import { buildSkillPrompt, getSkillDefinition, listSkillPromptDefinitions } from '../skills/index.mjs';
 
 const PROMPTS = new Map([
-  ['explore_project', { description: 'Explore the project structure and understand the codebase layout.', args: ['project_id', 'focus', 'depth'] }],
-  ['quality_check', { description: 'Review project structure, documentation, and general code quality standards.', args: ['project_id', 'depth'] }],
-  ['cross_platform_review', { description: 'Review Windows/Linux/macOS shell, path, environment, child-process, and test behavior.', args: ['project_id'] }],
-  ['release_readiness', { description: 'Check release readiness, git state, tests, secret scan, schema smoke, and docs consistency.', args: ['project_id'] }],
-  ['explain_diff', { description: 'Explain the working-tree or staged diff.', args: ['project_id', 'staged'] }],
-  ['generate_pr_description', { description: 'Generate a PR description from repo context and diff.', args: ['project_id', 'baseBranch', 'headBranch'] }],
-  ['plan_feature', { description: 'Create a small, reviewable implementation plan for a feature.', args: ['project_id', 'feature'] }],
-  ['fix_with_tests', { description: 'Run an agent coding loop that fixes a scoped issue and validates with tests.', args: ['project_id', 'issue'] }]
+  ['explore_project', { description: 'Explore the project structure and understand the codebase layout.', args: ['device_id', 'project_id', 'focus', 'depth'] }],
+  ['quality_check', { description: 'Review project structure, documentation, and general code quality standards.', args: ['device_id', 'project_id', 'depth'] }],
+  ['cross_platform_review', { description: 'Review Windows/Linux/macOS shell, path, environment, child-process, and test behavior.', args: ['device_id', 'project_id'] }],
+  ['release_readiness', { description: 'Check release readiness, git state, tests, secret scan, schema smoke, and docs consistency.', args: ['device_id', 'project_id'] }],
+  ['explain_diff', { description: 'Explain the working-tree or staged diff.', args: ['device_id', 'project_id', 'staged'] }],
+  ['generate_pr_description', { description: 'Generate a PR description from repo context and diff.', args: ['device_id', 'project_id', 'baseBranch', 'headBranch'] }],
+  ['plan_feature', { description: 'Create a small, reviewable implementation plan for a feature.', args: ['device_id', 'project_id', 'feature'] }],
+  ['fix_with_tests', { description: 'Run an agent coding loop that fixes a scoped issue and validates with tests.', args: ['device_id', 'project_id', 'issue'] }]
 ]);
 
 function profileName(context) {
@@ -16,7 +16,7 @@ function profileName(context) {
 }
 
 function promptArguments(names) {
-  return names.map(name => ({ name, required: name === 'project_id' }));
+  return names.map(name => ({ name, required: name === 'device_id' || name === 'project_id' }));
 }
 
 export function listRepoPrompts(_context = {}) {
@@ -43,6 +43,12 @@ export function getRepoPrompt(name, args = {}, context = {}) {
 
   const prompt = PROMPTS.get(name);
   if (!prompt) throw new Error(`Unknown prompt: ${name}`);
+  const deviceId = String(args.device_id || '').trim();
+  if (!deviceId) {
+    const error = new Error('DEVICE_ID_REQUIRED: device_id is required.');
+    error.code = 'DEVICE_ID_REQUIRED';
+    throw error;
+  }
   const projectId = String(args.project_id || '').trim();
   if (!projectId) {
     const error = new Error('PROJECT_ID_REQUIRED: project_id is required.');
@@ -50,7 +56,7 @@ export function getRepoPrompt(name, args = {}, context = {}) {
     throw error;
   }
   const safety = profileName(context);
-  const common = `Project: ${projectId}\nActive MCP runtime profile: ${safety}. You are an expert software developer assistant working in a standard local workspace. Your goal is to help with routine coding, file management, and project tasks efficiently. Command strings are executed as-is by the selected OS shell; do not assume PowerShell and POSIX syntax are interchangeable.`;
+  const common = `Device: ${deviceId}\nProject: ${projectId}\nActive MCP runtime profile: ${safety}. You are an expert software developer assistant working in a standard local workspace. Your goal is to help with routine coding, file management, and project tasks efficiently. Command strings are executed as-is by the selected OS shell; do not assume PowerShell and POSIX syntax are interchangeable.`;
   const bodies = {
     explore_project: `${common}\nExplore focus: ${args.focus || 'structure,entrypoints,config,tests,docs'}. Depth: ${args.depth || 'normal'}. Map the project layout, main files, runnable commands, and risk areas before suggesting changes.`,
     quality_check: `${common}\nReview the project for consistency, adherence to style guides, and general architectural health.`,

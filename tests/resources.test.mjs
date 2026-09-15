@@ -13,8 +13,16 @@ async function fixture() {
   await fs.writeFile(path.join(root, 'file.txt'), 'hello');
   await fs.writeFile(path.join(root, 'binary.bin'), Buffer.from([0, 1, 2, 3]));
   await fs.writeFile(path.join(root, 'large.txt'), 'x'.repeat(1024 * 1024 + 1));
-  const registry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture`], { defaultProjectId: 'fixture' });
-  return { root, context: { projectRegistry: registry, env: { MCP_SAFETY_PROFILE: 'safe' }, listTools: async () => [{ name: 'read_text_file' }, { name: 'shell_execute' }] } };
+  const registry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture | device-a`], { defaultProjectId: 'fixture' });
+  return {
+    root,
+    context: {
+      projectRegistry: registry,
+      env: { MCP_SAFETY_PROFILE: 'safe' },
+      listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
+      listTools: async () => [{ name: 'read_text_file' }, { name: 'shell_execute' }]
+    }
+  };
 }
 
 function firstJson(result) {
@@ -23,38 +31,38 @@ function firstJson(result) {
 
 test('lists project resources and reads project list', async () => {
   const { context } = await fixture();
-  assert.equal(listRepoResources(context).some(r => r.uri === 'repo://projects'), true);
-  const projects = firstJson(await readRepoResource('repo://projects', context));
+  assert.equal(listRepoResources(context).some(r => r.uri === 'repo://device/device-a/projects'), true);
+  const projects = firstJson(await readRepoResource('repo://device/device-a/projects', context));
   assert.equal(projects.projects[0].project_id, 'fixture');
   assert.equal(projects.projects[0].repoRoot, undefined);
 });
 
 test('reads summary safety profile readme package tree and tool manifest', async () => {
   const { context } = await fixture();
-  assert.equal(firstJson(await readRepoResource('repo://project/fixture/summary', context)).hasPackageJson, true);
-  assert.equal(firstJson(await readRepoResource('repo://project/fixture/safety-profile', context)).profile, 'safe');
-  assert.match((await readRepoResource('repo://project/fixture/readme', context)).contents[0].text, /Fixture/);
-  assert.equal(firstJson(await readRepoResource('repo://project/fixture/package', context)).name, 'fixture');
-  assert.equal(Array.isArray(firstJson(await readRepoResource('repo://project/fixture/tree', context)).entries), true);
-  assert.equal(firstJson(await readRepoResource('repo://project/fixture/tree?depth=bad', context)).maxDepth, 3);
-  const manifest = firstJson(await readRepoResource('repo://project/fixture/tool-manifest', context));
+  assert.equal(firstJson(await readRepoResource('repo://device/device-a/project/fixture/summary', context)).hasPackageJson, true);
+  assert.equal(firstJson(await readRepoResource('repo://device/device-a/project/fixture/safety-profile', context)).profile, 'safe');
+  assert.match((await readRepoResource('repo://device/device-a/project/fixture/readme', context)).contents[0].text, /Fixture/);
+  assert.equal(firstJson(await readRepoResource('repo://device/device-a/project/fixture/package', context)).name, 'fixture');
+  assert.equal(Array.isArray(firstJson(await readRepoResource('repo://device/device-a/project/fixture/tree', context)).entries), true);
+  assert.equal(firstJson(await readRepoResource('repo://device/device-a/project/fixture/tree?depth=bad', context)).maxDepth, 3);
+  const manifest = firstJson(await readRepoResource('repo://device/device-a/project/fixture/tool-manifest', context));
   assert.equal(manifest.tools.find(t => t.name === 'shell_execute').visible, false);
   assert.equal(manifest.tools.find(t => t.name === 'read_text_file').visible, true);
 });
 
 test('reads safe project-relative file and rejects traversal', async () => {
   const { context } = await fixture();
-  assert.equal((await readRepoResource('repo://project/fixture/file/file.txt', context)).contents[0].text, 'hello');
-  await assert.rejects(() => readRepoResource('repo://project/fixture/file/..%2Fsecret.txt', context), /Invalid project-relative/);
+  assert.equal((await readRepoResource('repo://device/device-a/project/fixture/file/file.txt', context)).contents[0].text, 'hello');
+  await assert.rejects(() => readRepoResource('repo://device/device-a/project/fixture/file/..%2Fsecret.txt', context), /Invalid project-relative/);
 });
 
 test('rejects binary and oversized project-relative files', async () => {
   const { context } = await fixture();
-  await assert.rejects(() => readRepoResource('repo://project/fixture/file/binary.bin', context), /binary/);
-  await assert.rejects(() => readRepoResource('repo://project/fixture/file/large.txt', context), /too large/);
+  await assert.rejects(() => readRepoResource('repo://device/device-a/project/fixture/file/binary.bin', context), /binary/);
+  await assert.rejects(() => readRepoResource('repo://device/device-a/project/fixture/file/large.txt', context), /too large/);
 });
 
 test('rejects unknown resource URI', async () => {
   const { context } = await fixture();
-  await assert.rejects(() => readRepoResource('repo://project/fixture/nope', context), /Unknown resource URI/);
+  await assert.rejects(() => readRepoResource('repo://device/device-a/project/fixture/nope', context), /Unknown resource URI/);
 });

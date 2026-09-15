@@ -48,14 +48,18 @@ test('isLocalCustomTool accepts only canonical retained names', () => {
 test('project tools route through bounded project inspection service', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-project-tools-'));
   await fs.writeFile(path.join(root, 'README.md'), '# Project tool fixture\n');
-  const projectRegistry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture`], { defaultProjectId: 'fixture' });
-  const context = { projectRegistry, env: { MCP_RUNTIME_PROFILE: 'safe' } };
+  const projectRegistry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture | device-a`], { defaultProjectId: 'fixture' });
+  const context = {
+    projectRegistry,
+    env: { MCP_RUNTIME_PROFILE: 'safe' },
+    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }]
+  };
 
-  const listResult = parseToolResult(await callCustomTool('project_list', { limit: 10 }, context));
+  const listResult = parseToolResult(await callCustomTool('project_list', { device_id: 'device-a', limit: 10 }, context));
   assert.equal(listResult.ok, true);
   assert.deepEqual(listResult.data.items.map(item => item.project_id), ['fixture']);
 
-  const inspectResult = parseToolResult(await callCustomTool('project_inspect', { project_id: 'fixture', view: 'summary' }, context));
+  const inspectResult = parseToolResult(await callCustomTool('project_inspect', { device_id: 'device-a', project_id: 'fixture', view: 'summary' }, context));
   assert.equal(inspectResult.ok, true);
   assert.equal(inspectResult.data.project_id, 'fixture');
   assert.equal(inspectResult.data.hasReadme, true);

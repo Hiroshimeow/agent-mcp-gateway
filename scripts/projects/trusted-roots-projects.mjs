@@ -33,6 +33,20 @@ function isInsideRoot(candidatePath, rootPath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function normalizeDeviceId(value) {
+  const deviceId = String(value || '').trim();
+  if (!deviceId) return undefined;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(deviceId)) {
+    const error = new Error(`Invalid device_id: ${deviceId}`);
+    error.code = 'INVALID_DEVICE_ID';
+    throw error;
+  }
+  return deviceId;
+}
+
+export function projectRouteKey(deviceId, projectId) {
+  return `${String(deviceId || '').trim()}\u0000${String(projectId || '').trim()}`;
+}
 
 export function trustedRootEntryToLine(entry, context = {}) {
   if (typeof entry === 'string') return entry;
@@ -40,12 +54,13 @@ export function trustedRootEntryToLine(entry, context = {}) {
   const rawRoot = entry.path ?? entry.root;
   if (!rawRoot) return '';
   const root = expandTrustedRootPlaceholders(String(rawRoot), context);
+  const projectId = entry.project_id ?? entry.projectId;
+  const displayName = entry.display_name ?? entry.displayName;
+  const deviceId = entry.device_id ?? entry.deviceId;
   const fields = [root];
-  if (entry.project_id ?? entry.projectId) fields.push(String(entry.project_id ?? entry.projectId));
-  if (entry.display_name ?? entry.displayName) {
-    if (fields.length === 1) fields.push('');
-    fields.push(String(entry.display_name ?? entry.displayName));
-  }
+  if (projectId !== undefined || displayName !== undefined || deviceId !== undefined) fields.push(projectId === undefined ? '' : String(projectId));
+  if (displayName !== undefined || deviceId !== undefined) fields.push(displayName === undefined ? '' : String(displayName));
+  if (deviceId !== undefined) fields.push(String(deviceId));
   return fields.join(' | ');
 }
 
@@ -139,8 +154,8 @@ export function parseTrustedRootLine(line, options = {}) {
   }
 
   const parts = raw.split('|').map(part => part.trim());
-  if (parts.length > 3) {
-    const error = new Error(`Invalid trusted root line${lineNumber ? ` ${lineNumber}` : ''}: expected at most 3 pipe-separated fields`);
+  if (parts.length > 4) {
+    const error = new Error(`Invalid trusted root line${lineNumber ? ` ${lineNumber}` : ''}: expected at most 4 pipe-separated fields`);
     error.code = 'INVALID_TRUSTED_ROOT_LINE';
     error.details = { line, lineNumber };
     throw error;
@@ -165,6 +180,8 @@ export function parseTrustedRootLine(line, options = {}) {
   const explicitProjectId = parts.length >= 2 && parts[1] !== '';
   const projectId = explicitProjectId ? assertValidProjectId(parts[1]) : undefined;
   const displayName = parts.length >= 3 && parts[2] !== '' ? parts[2] : undefined;
+  const explicitDeviceId = parts.length >= 4 && parts[3] !== '';
+  const deviceId = explicitDeviceId ? normalizeDeviceId(parts[3]) : undefined;
 
   return {
     rawLine: raw,
@@ -172,7 +189,9 @@ export function parseTrustedRootLine(line, options = {}) {
     root: resolvedRoot,
     projectId,
     displayName,
-    explicitProjectId
+    deviceId,
+    explicitProjectId,
+    explicitDeviceId
   };
 }
 
@@ -189,7 +208,9 @@ export function normalizeTrustedRootEntries(linesOrEntries, options = {}) {
 
   for (const entry of parsedEntries) {
     const root = normalizeRootPath(entry.root);
-    const rootKey = process.platform === 'win32' ? root.toLowerCase() : root;
+    const deviceId = normalizeDeviceId(entry.deviceId ?? entry.device_id);
+    const normalizedRootKey = process.platform === 'win32' ? root.toLowerCase() : root;
+    const rootKey = `${deviceId || ''}\u0000${normalizedRootKey}`;
     if (seenRoots.has(rootKey)) continue;
     seenRoots.add(rootKey);
 
@@ -207,8 +228,10 @@ export function normalizeTrustedRootEntries(linesOrEntries, options = {}) {
       ...entry,
       root,
       projectId,
+      deviceId,
       displayName: entry.displayName || projectId,
-      explicitProjectId
+      explicitProjectId,
+      explicitDeviceId: Boolean(entry.explicitDeviceId || deviceId)
     });
   }
 
@@ -217,8 +240,32 @@ export function normalizeTrustedRootEntries(linesOrEntries, options = {}) {
 
 export function buildTrustedRootsProjectRegistry(entries, options = {}) {
   const normalizedEntries = normalizeTrustedRootEntries(entries, options);
-  const projects = new Map();
+  const legacyProjects = new Map();
+  const projectRoutes = new Map();
   const missingRoots = [];
+
+  function addEntry(target, key, entry) {
+    const existing = target.get(key);
+    if (!existing) {
+      target.set(key, {
+        projectId: entry.projectId,
+        deviceId: entry.deviceId || null,
+        displayName: entry.displayName,
+        repoRoot: entry.root,
+        trustedRoots: [entry.root],
+        extraTrustedRoots: [],
+        explicitProjectId: entry.explicitProjectId,
+        explicitDeviceId: entry.explicitDeviceId
+      });
+      return;
+    }
+    if (!existing.trustedRoots.includes(entry.root)) {
+      existing.trustedRoots.push(entry.root);
+      existing.extraTrustedRoots.push(entry.root);
+    }
+    existing.explicitProjectId = existing.explicitProjectId || entry.explicitProjectId;
+    existing.explicitDeviceId = existing.explicitDeviceId || entry.explicitDeviceId;
+  }
 
   for (const entry of normalizedEntries) {
     if (options.checkExists && !fs.existsSync(entry.root)) {
@@ -231,31 +278,37 @@ export function buildTrustedRootsProjectRegistry(entries, options = {}) {
       }
     }
 
-    const existing = projects.get(entry.projectId);
-    if (!existing) {
-      projects.set(entry.projectId, {
-        projectId: entry.projectId,
-        displayName: entry.displayName,
-        repoRoot: entry.root,
-        trustedRoots: [entry.root],
-        extraTrustedRoots: [],
-        explicitProjectId: entry.explicitProjectId
-      });
-      continue;
+    if (entry.deviceId) {
+      addEntry(projectRoutes, projectRouteKey(entry.deviceId, entry.projectId), entry);
+    } else {
+      addEntry(legacyProjects, entry.projectId, entry);
     }
+  }
 
-    if (!existing.trustedRoots.includes(entry.root)) {
-      existing.trustedRoots.push(entry.root);
-      existing.extraTrustedRoots.push(entry.root);
+  // Legacy project-only lookup remains available only when the id identifies
+  // exactly one route. Ambiguous ids deliberately have no project-only entry.
+  const projects = new Map(legacyProjects);
+  const routesByProjectId = new Map();
+  for (const route of projectRoutes.values()) {
+    const routes = routesByProjectId.get(route.projectId) || [];
+    routes.push(route);
+    routesByProjectId.set(route.projectId, routes);
+  }
+  const ambiguousProjectIds = new Set();
+  for (const [projectId, routes] of routesByProjectId) {
+    if (legacyProjects.has(projectId) || routes.length !== 1) {
+      projects.delete(projectId);
+      ambiguousProjectIds.add(projectId);
+    } else {
+      projects.set(projectId, routes[0]);
     }
-    existing.explicitProjectId = existing.explicitProjectId || entry.explicitProjectId;
   }
 
   const allTrustedRoots = [...new Set(normalizedEntries.map(entry => entry.root))];
   const rootIndex = [];
   for (const project of projects.values()) {
     for (const root of project.trustedRoots) {
-      rootIndex.push({ projectId: project.projectId, root });
+      rootIndex.push({ projectId: project.projectId, deviceId: project.deviceId, root });
     }
   }
   rootIndex.sort((a, b) => b.root.length - a.root.length);
@@ -270,6 +323,8 @@ export function buildTrustedRootsProjectRegistry(entries, options = {}) {
     pathInference: options.pathInference !== false,
     exposeProjectPaths: Boolean(options.exposeProjectPaths),
     projects,
+    projectRoutes,
+    ambiguousProjectIds,
     rootIndex,
     allTrustedRoots,
     missingRoots

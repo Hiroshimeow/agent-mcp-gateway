@@ -16,3 +16,10 @@ test('runtime uses gateway.sqlite as the single authoritative state database', (
   assert.doesNotMatch(launcher, /AUTH_STATE_PATH|auth-state\.json/);
   assert.equal(pkg.scripts['admin:migrate-runtime'], 'node scripts/migrate-runtime-state.mjs');
 });
+
+test('wrapper preserves account_id through MCP caller context and project/device routing', () => {
+  assert.match(wrapper, /function createProxyServer\(\{ accountId, callerKey, callerCategory, callerSubject \}\)/);
+  assert.match(wrapper, /routeObservedToolCall\(request, \{ accountId, callerKey, callerCategory, callerSubject \}\)/);
+  assert.match(wrapper, /customToolContext\(context\)/);
+  assert.match(wrapper, /deviceBroker\.listDevices\(\{ accountId: callerContext\.accountId \|\| null \}\)/);
+});

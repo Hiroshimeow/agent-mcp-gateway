@@ -49,12 +49,12 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 - [x] Alice knowing Bob's `device_id` is insufficient to call Bob's device.
 
 ## Phase 4 — Device/project association
-- [ ] Every configured project is associated with an explicit `device_id`.
-- [ ] `project_list` requires/selects a device explicitly.
-- [ ] `project_inspect` requires `device_id` + `project_id`.
-- [ ] Wrong project/device pair fails, never reroutes.
-- [ ] `/home` or path-style hints may auto-select only when exactly one compatible owned online device exists.
-- [ ] Two compatible Linux devices cause ambiguity, not guessing.
+- [x] Every configured project is associated with an explicit `device_id`.
+- [x] `project_list` requires/selects a device explicitly.
+- [x] `project_inspect` requires `device_id` + `project_id`.
+- [x] Wrong project/device pair fails, never reroutes.
+- [x] `/home` or path-style hints may auto-select only when exactly one compatible owned online device exists.
+- [x] Two compatible Linux devices cause ambiguity, not guessing.
 
 ## Phase 5 — Pure control plane
 - [ ] Gateway owns schemas/routing but not normal host filesystem/shell execution.

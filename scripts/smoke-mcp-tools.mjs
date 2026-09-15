@@ -230,19 +230,18 @@ await withServer('yolo', async ({ baseUrl, workspace, configPath, runtimeDirecto
     assert.equal(tool?._meta?.root_repo, undefined, `${tool.name} leaked root_repo`);
     assert.equal(tool?._meta?.repo_root, undefined, `${tool.name} leaked repo_root`);
   }
-  const projectList = await callTool(baseUrl, 39, 'project_list', { limit: 10 });
-  const projectListPayload = JSON.parse(projectList.result.content[0].text);
-  assert.equal(projectListPayload.ok, true);
-  assert.equal(projectListPayload.data.items.length, 1);
-  const smokeProjectId = projectListPayload.data.items[0].project_id;
-  const projectSummary = await callTool(baseUrl, 40, 'project_inspect', { project_id: smokeProjectId, view: 'summary' });
-  const projectSummaryPayload = JSON.parse(projectSummary.result.content[0].text);
-  assert.equal(projectSummaryPayload.data.project_id, smokeProjectId);
-  const projectTree = await callTool(baseUrl, 41, 'project_inspect', { project_id: smokeProjectId, view: 'tree', depth: 2, limit: 20 });
-  const projectTreePayload = JSON.parse(projectTree.result.content[0].text);
-  assert.equal(Array.isArray(projectTreePayload.data.entries), true);
-  const missingProjectId = await callTool(baseUrl, 42, 'project_inspect', { view: 'summary' });
-  assert.match(JSON.stringify(missingProjectId), /PROJECT_ID_REQUIRED/);
+  const projectListSchema = tools.find(tool => tool.name === 'project_list')?.inputSchema;
+  assert.deepEqual(projectListSchema?.required, ['device_id']);
+  const projectInspectSchema = tools.find(tool => tool.name === 'project_inspect')?.inputSchema;
+  assert.deepEqual(projectInspectSchema?.required, ['device_id', 'project_id', 'view']);
+
+  // Static bearer intentionally has no account_id and therefore no visible
+  // tenant device/project inventory. Project routing must fail closed rather
+  // than silently falling back to the local workspace.
+  const missingProjectDevice = await callTool(baseUrl, 39, 'project_list', { limit: 10 });
+  assert.match(JSON.stringify(missingProjectDevice), /DEVICE_ID_REQUIRED/);
+  const missingInspectDevice = await callTool(baseUrl, 40, 'project_inspect', { project_id: 'workspace', view: 'summary' });
+  assert.match(JSON.stringify(missingInspectDevice), /DEVICE_ID_REQUIRED/);
 
   const externalSearch = await callTool(baseUrl, 44, 'external_tool_search', { query: 'missing', limit: 10 });
   const externalSearchPayload = JSON.parse(externalSearch.result.content[0].text);

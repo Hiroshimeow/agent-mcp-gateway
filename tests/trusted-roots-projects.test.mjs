@@ -48,7 +48,9 @@ test('parseTrustedRootLine parses path with projectId and displayName', () => {
       root: path.resolve(root),
       projectId: 'example-app',
       displayName: undefined,
-      explicitProjectId: true
+      deviceId: undefined,
+      explicitProjectId: true,
+      explicitDeviceId: false
     }
   );
 

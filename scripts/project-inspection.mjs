@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 import { getRuntimeProfile } from './runtime-profile.mjs';
+import { projectRouteKey } from './projects/trusted-roots-projects.mjs';
 
 const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'logs', 'packages', '_zip_temp']);
 const DEFAULT_LIST_LIMIT = 50;
@@ -74,12 +75,35 @@ function projectLookupError(code, message) {
   return error;
 }
 
-function getProject(projectRegistry, projectId) {
+function visibleDevices(context = {}) {
+  if (typeof context.listVisibleDevices === 'function') {
+    const devices = context.listVisibleDevices();
+    return Array.isArray(devices) ? devices : [];
+  }
+  return Array.isArray(context.devices) ? context.devices : [];
+}
+
+function requireVisibleOnlineDevice(context, deviceId) {
+  const id = String(deviceId || '').trim();
+  if (!id) throw projectLookupError('DEVICE_ID_REQUIRED', 'device_id is required.');
+  const device = visibleDevices(context).find(item => String(item?.deviceId || '').trim() === id);
+  if (!device) throw projectLookupError('DEVICE_NOT_FOUND', `Unknown or unavailable device_id: ${id}`);
+  if (device.revoked || !device.online) throw projectLookupError('DEVICE_OFFLINE', `Device ${id} is offline or revoked.`);
+  return device;
+}
+
+function getProject(projectRegistry, deviceId, projectId) {
   const id = String(projectId || '').trim();
   if (!id) throw projectLookupError('PROJECT_ID_REQUIRED', 'project_id is required.');
-  const project = projectRegistry?.projects?.get(id);
-  if (!project) throw projectLookupError('PROJECT_NOT_FOUND', `Unknown project_id: ${id}`);
+  const project = projectRegistry?.projectRoutes?.get(projectRouteKey(deviceId, id));
+  if (!project) throw projectLookupError('PROJECT_DEVICE_MISMATCH', `project_id ${id} is not configured for device_id ${deviceId}.`);
   return project;
+}
+
+export function resolveProjectRoute(context = {}, { deviceId, projectId } = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  requireVisibleOnlineDevice(context, normalizedDeviceId);
+  return getProject(context.projectRegistry, normalizedDeviceId, projectId);
 }
 
 function hasReadme(project) {
@@ -92,6 +116,7 @@ function hasPackageJson(project) {
 
 function projectSummary(project, context = {}) {
   const data = {
+    device_id: project.deviceId,
     project_id: project.projectId,
     displayName: project.displayName,
     defaultRootName: path.basename(project.repoRoot) || project.projectId,
@@ -106,6 +131,7 @@ function projectSummary(project, context = {}) {
 
 function projectListItem(project, projectRegistry, exposePaths) {
   const item = {
+    device_id: project.deviceId,
     project_id: project.projectId,
     displayName: project.displayName,
     default: projectRegistry?.defaultProjectId === project.projectId
@@ -117,9 +143,12 @@ function projectListItem(project, projectRegistry, exposePaths) {
 export function listProjects(context = {}, options = {}) {
   const projectRegistry = context.projectRegistry;
   const exposePaths = projectPathExposure(context);
+  const deviceId = String(options.device_id ?? options.deviceId ?? '').trim();
+  requireVisibleOnlineDevice(context, deviceId);
   const query = String(options.query || '').trim().toLowerCase();
   const limit = boundedInteger(options.limit, DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT, 'limit');
-  const all = [...(projectRegistry?.projects?.values() || [])];
+  const all = [...(projectRegistry?.projectRoutes?.values() || [])]
+    .filter(project => project.deviceId === deviceId);
   const matched = all
     .map(project => {
       const id = String(project.projectId || '').toLowerCase();
@@ -134,6 +163,7 @@ export function listProjects(context = {}, options = {}) {
       return a.project.projectId.localeCompare(b.project.projectId);
     });
   const version = cursorVersion('projects', [
+    deviceId,
     query,
     ...matched.map(entry => `${entry.project.projectId}:${entry.project.displayName}`)
   ]);
@@ -180,6 +210,7 @@ function readTree(project, options = {}) {
   const page = entries.slice(offset, offset + limit);
   const truncated = entries.length > offset + page.length;
   return {
+    device_id: project.deviceId,
     project_id: project.projectId,
     rootName: path.basename(project.repoRoot),
     maxDepth: depth,
@@ -201,6 +232,7 @@ function execGitRead(cwd, args) {
 async function gitStatus(project) {
   const result = await execGitRead(project.repoRoot, ['status', '--short', '--branch']);
   return {
+    device_id: project.deviceId,
     project_id: project.projectId,
     ok: result.ok,
     status: result.stdout,
@@ -212,6 +244,7 @@ async function gitStatus(project) {
 async function gitDiff(project, staged = false) {
   const result = await execGitRead(project.repoRoot, staged ? ['diff', '--staged'] : ['diff']);
   return {
+    device_id: project.deviceId,
     project_id: project.projectId,
     ok: result.ok,
     staged: Boolean(staged),
@@ -227,6 +260,7 @@ async function readReadme(project) {
     .find(file => fs.existsSync(file));
   if (!readme) throw new Error(`README not found for project_id: ${project.projectId}`);
   return {
+    device_id: project.deviceId,
     project_id: project.projectId,
     fileName: path.basename(readme),
     text: await fs.promises.readFile(readme, 'utf8')
@@ -237,6 +271,7 @@ async function readPackage(project) {
   const packagePath = path.join(project.repoRoot, 'package.json');
   if (!fs.existsSync(packagePath)) throw new Error(`package.json not found for project_id: ${project.projectId}`);
   return {
+    device_id: project.deviceId,
     project_id: project.projectId,
     data: JSON.parse(await fs.promises.readFile(packagePath, 'utf8'))
   };
@@ -247,7 +282,8 @@ export async function inspectProject(context = {}, options = {}) {
   if (!PROJECT_INSPECTION_VIEWS.includes(view)) {
     throw new Error(`Invalid project inspection view: ${view}. Expected one of: ${PROJECT_INSPECTION_VIEWS.join(', ')}.`);
   }
-  const project = getProject(context.projectRegistry, options.projectId);
+  const deviceId = String(options.deviceId ?? options.device_id ?? '').trim();
+  const project = resolveProjectRoute(context, { deviceId, projectId: options.projectId ?? options.project_id });
   if (view === 'summary') return projectSummary(project, context);
   if (view === 'tree') return readTree(project, options);
   if (view === 'git_status') return await gitStatus(project);

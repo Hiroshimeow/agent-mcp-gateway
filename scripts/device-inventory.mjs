@@ -3,6 +3,34 @@ import { createHash } from 'node:crypto';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
+function deviceSelectionError(code, message) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  return error;
+}
+
+function pathStyleFromHint(pathHint) {
+  const hint = String(pathHint || '').trim();
+  if (!hint) throw deviceSelectionError('PATH_HINT_REQUIRED', 'path_hint is required.');
+  if (/^[A-Za-z]:[\\/]/.test(hint) || /^\\\\/.test(hint)) return 'windows';
+  if (hint.startsWith('/')) return 'posix';
+  throw deviceSelectionError('PATH_HINT_UNSUPPORTED', 'path_hint must be an absolute Windows or POSIX path.');
+}
+
+export function selectDeviceForPathHint(devices, pathHint) {
+  const pathStyle = pathStyleFromHint(pathHint);
+  const matches = (Array.isArray(devices) ? devices : []).filter(device =>
+    Boolean(device?.online) &&
+    !device?.revoked &&
+    String(device?.pathStyle || '') === pathStyle
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) {
+    throw deviceSelectionError('DEVICE_NOT_FOUND', `No owned online ${pathStyle} device matches path_hint.`);
+  }
+  throw deviceSelectionError('DEVICE_SELECTION_AMBIGUOUS', `Multiple owned online ${pathStyle} devices match path_hint; provide device_id explicitly.`);
+}
+
 function boundedLimit(value) {
   const limit = value === undefined ? DEFAULT_LIMIT : Number(value);
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
@@ -49,7 +77,8 @@ export function listDevicesToolDefinition() {
       type: 'object',
       properties: {
         cursor: { type: 'string', description: 'Opaque cursor returned by the previous page.' },
-        limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT, default: DEFAULT_LIMIT }
+        limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT, default: DEFAULT_LIMIT },
+        path_hint: { type: 'string', description: 'Optional absolute Windows/POSIX path hint. Returns selected_device_id only when exactly one owned online device is compatible.' }
       },
       additionalProperties: false
     }
@@ -80,6 +109,8 @@ function toWireDevice(device = {}) {
 export function paginateDeviceInventory(devices, options = {}) {
   const sorted = [...(Array.isArray(devices) ? devices : [])]
     .sort((left, right) => String(left?.deviceId || '').localeCompare(String(right?.deviceId || '')));
+  const pathHint = String(options.path_hint || '').trim();
+  const selectedDevice = pathHint ? selectDeviceForPathHint(sorted, pathHint) : null;
   const signature = inventorySignature(sorted);
   const offset = decodeCursor(options.cursor, signature);
   if (offset > sorted.length) throw new Error('Invalid or stale cursor: device offset is outside the current inventory.');
@@ -89,6 +120,7 @@ export function paginateDeviceInventory(devices, options = {}) {
   const truncated = nextOffset < sorted.length;
   return {
     devices: page,
+    ...(selectedDevice ? { selected_device_id: selectedDevice.deviceId } : {}),
     truncated,
     nextCursor: truncated ? encodeCursor(nextOffset, signature) : null,
     total: sorted.length

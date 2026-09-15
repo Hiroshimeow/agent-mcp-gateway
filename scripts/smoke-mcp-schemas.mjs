@@ -11,8 +11,13 @@ import { listRepoResources, listRepoResourceTemplates } from './resources/index.
 import { buildTrustedRootsProjectRegistry } from './projects/trusted-roots-projects.mjs';
 
 const root = process.cwd();
-const registry = buildTrustedRootsProjectRegistry([`${root} | gateway | Gateway`], { defaultProjectId: 'gateway' });
-const context = { projectRegistry: registry, env: { MCP_SAFETY_PROFILE: 'yolo' }, listTools: async () => [] };
+const registry = buildTrustedRootsProjectRegistry([`${root} | gateway | Gateway | smoke-device`], { defaultProjectId: 'gateway' });
+const context = {
+  projectRegistry: registry,
+  env: { MCP_SAFETY_PROFILE: 'yolo' },
+  listVisibleDevices: () => [{ deviceId: 'smoke-device', online: true, revoked: false, platform: process.platform, pathStyle: process.platform === 'win32' ? 'windows' : 'posix' }],
+  listTools: async () => []
+};
 
 for (const schema of [ListResourcesRequestSchema, ReadResourceRequestSchema, ListResourceTemplatesRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema]) {
   assert.equal(typeof schema.parse, 'function');
@@ -21,9 +26,9 @@ for (const schema of [ListResourcesRequestSchema, ReadResourceRequestSchema, Lis
 const resources = listRepoResources(context);
 const templates = listRepoResourceTemplates(context);
 const prompts = listRepoPrompts({ safetyProfile: { name: 'yolo' } });
-const prompt = getRepoPrompt('release_readiness', { project_id: 'gateway' }, { safetyProfile: { name: 'yolo' } });
+const prompt = getRepoPrompt('release_readiness', { device_id: 'smoke-device', project_id: 'gateway' }, { safetyProfile: { name: 'yolo' } });
 
-assert.ok(resources.some(r => r.uri === 'repo://projects'));
+assert.ok(resources.some(r => r.uri === 'repo://device/smoke-device/projects'));
 assert.ok(templates.some(t => t.uriTemplate.includes('{project_id}')));
 assert.ok(prompts.some(p => p.name === 'release_readiness'));
 assert.equal(prompt.messages[0].role, 'user');

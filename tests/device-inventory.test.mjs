@@ -17,7 +17,23 @@ test('list_devices schema is cardinality-independent and explicitly bounded', ()
   assert.equal(tool.inputSchema.properties.limit.maximum, 100);
   assert.equal(tool.inputSchema.properties.limit.default, 50);
   assert.equal(tool.inputSchema.properties.cursor.type, 'string');
+  assert.equal(tool.inputSchema.properties.path_hint.type, 'string');
   assert.doesNotMatch(JSON.stringify(tool), /device-0000/);
+});
+
+test('path_hint selects exactly one compatible online device and fails on ambiguity', () => {
+  const inventory = [
+    { deviceId: 'win-a', online: true, revoked: false, pathStyle: 'windows', capabilities: [] },
+    { deviceId: 'linux-a', online: true, revoked: false, pathStyle: 'posix', capabilities: [] },
+    { deviceId: 'linux-offline', online: false, revoked: false, pathStyle: 'posix', capabilities: [] }
+  ];
+  const selected = paginateDeviceInventory(inventory, { path_hint: '/home/user/project' });
+  assert.equal(selected.selected_device_id, 'linux-a');
+
+  assert.throws(
+    () => paginateDeviceInventory([...inventory, { deviceId: 'linux-b', online: true, revoked: false, pathStyle: 'posix', capabilities: [] }], { path_hint: '/srv/project' }),
+    /DEVICE_SELECTION_AMBIGUOUS/
+  );
 });
 
 test('device inventory pagination is stable, bounded, and reports truncation', () => {

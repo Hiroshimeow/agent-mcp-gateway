@@ -114,12 +114,12 @@
 
 ## Phase 4 — Explicit device/project routing contract
 
-- [ ] Extend configured project registry entries with explicit `device_id` association.
-- [ ] `project_list` requires a `device_id` and returns only projects associated with that device and visible to its owner.
-- [ ] `project_inspect` requires both `device_id` and `project_id` and rejects mismatched pairs.
-- [ ] Registry paths are metadata for routing, not access restrictions; YOLO device execution remains broad by default.
-- [ ] Path hints such as `/home/...` may help the agent pick a platform only when exactly one compatible owned online device exists; otherwise return/ask for explicit device selection.
-- [ ] No agent-visible API silently maps a project to an unrelated default device/workspace.
+- [x] Extend configured project registry entries with explicit `device_id` association.
+- [x] `project_list` requires a `device_id` and returns only projects associated with that device and visible to its owner.
+- [x] `project_inspect` requires both `device_id` and `project_id` and rejects mismatched pairs.
+- [x] Registry paths are metadata for routing, not access restrictions; YOLO device execution remains broad by default.
+- [x] Path hints such as `/home/...` may help the agent pick a platform only when exactly one compatible owned online device exists; otherwise return/ask for explicit device selection.
+- [x] No agent-visible API silently maps a project to an unrelated default device/workspace.
 
 **Gate:** tests cover same `project_id` on different devices, wrong device/project pair, missing IDs, offline device, and multiple Linux-device ambiguity.
 
