@@ -33,7 +33,7 @@ export function loadSurfaceConfig(rawConfig = {}, env = process.env) {
   // Surface mode is an explicit deployment choice. Do not guess from User-Agent
   // or client capabilities because the same client may reconnect with different metadata.
   const envMode = String(env?.MCP_SURFACE_MODE ?? '').trim();
-  const configuredMode = rawConfig?.surface?.mode ?? 'legacy';
+  const configuredMode = rawConfig?.surface?.mode ?? 'agent';
   const mode = envMode
     ? normalizeMode(envMode, 'MCP_SURFACE_MODE')
     : normalizeMode(configuredMode, 'surface.mode');

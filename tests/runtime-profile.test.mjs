@@ -13,9 +13,10 @@ test('runtime profile parses configured modes', () => {
   assert.equal(getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'yolo' }).name, 'yolo');
 });
 
-test('legacy SHELL_PROFILE remains a compatibility alias', () => {
-  assert.equal(getRuntimeProfile({ SHELL_PROFILE: 'safe' }).name, 'safe');
-  assert.equal(getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'assisted', SHELL_PROFILE: 'safe' }).name, 'assisted');
+test('legacy profile aliases are ignored', () => {
+  assert.equal(getRuntimeProfile({ SHELL_PROFILE: 'safe' }).name, 'yolo');
+  assert.equal(getRuntimeProfile({ MCP_SAFETY_PROFILE: 'safe' }).name, 'yolo');
+  assert.equal(getRuntimeProfile({ MCP_RUNTIME_PROFILE: 'assisted', SHELL_PROFILE: 'safe', MCP_SAFETY_PROFILE: 'safe' }).name, 'assisted');
 });
 
 test('unknown profile falls back to private yolo default', () => {

@@ -168,7 +168,7 @@ export function createExternalToolBroker({ getTools, invokeTool }) {
         throw new Error(`External tool ${name} belongs to the ${actualLane} lane; use external_tool_call_${actualLane}.`);
       }
       if (!isExternalToolAllowedForProfile(tool, runtimeProfile)) {
-        throw new Error(`Tool ${name} is disabled by MCP_SAFETY_PROFILE=${runtimeProfile?.name || 'unknown'}.`);
+        throw new Error(`Tool ${name} is disabled by MCP_RUNTIME_PROFILE=${runtimeProfile?.name || 'unknown'}.`);
       }
       const args = options.arguments ?? {};
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error(`Invalid arguments for ${name}: expected an object.`);

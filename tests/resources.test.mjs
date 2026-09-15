@@ -18,7 +18,7 @@ async function fixture() {
     root,
     context: {
       projectRegistry: registry,
-      env: { MCP_SAFETY_PROFILE: 'safe' },
+      env: { MCP_RUNTIME_PROFILE: 'safe' },
       listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
       callDeviceTool: async (tool, args) => {
         assert.equal(tool, 'project_inspect');

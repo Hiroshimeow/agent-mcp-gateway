@@ -79,7 +79,7 @@ async function withServer(profile, fn) {
     MCP_ADVERTISE_HOST: '127.0.0.1',
     MCP_GATEWAY_PORT: String(port),
     MCP_BEARER_TOKEN: smokeCredential,
-    MCP_SAFETY_PROFILE: profile,
+    MCP_RUNTIME_PROFILE: profile,
     ENABLE_FILESYSTEM: 'true',
     ENABLE_SHELL: 'true',
     MCP_STATEFUL_SESSIONS: 'false',

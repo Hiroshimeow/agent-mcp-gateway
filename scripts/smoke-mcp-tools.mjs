@@ -351,7 +351,7 @@ await withServer('safe', async ({ baseUrl }) => {
   const tools = await listTools(baseUrl);
   assert.deepEqual(names(tools), ['external_tool_call_read', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
-  assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=safe/);
+  assert.match(blocked.error?.message || '', /disabled by MCP_RUNTIME_PROFILE=safe/);
   observedProfiles.safe = names(tools);
   observedCatalogBytes.safe = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
 });
@@ -361,7 +361,7 @@ await withServer('assisted', async ({ baseUrl }) => {
   const tools = await listTools(baseUrl);
   assert.deepEqual(names(tools), ['edit_file', 'external_tool_call_read', 'external_tool_call_write', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file', 'write_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
-  assert.match(blocked.error?.message || '', /disabled by MCP_SAFETY_PROFILE=assisted/);
+  assert.match(blocked.error?.message || '', /disabled by MCP_RUNTIME_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);
   observedCatalogBytes.assisted = Buffer.byteLength(JSON.stringify({ tools }), 'utf8');
 });

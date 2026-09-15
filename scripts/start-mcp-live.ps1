@@ -193,9 +193,9 @@ $enableShellValue = "false"
 if ($envValues.ContainsKey("ENABLE_SHELL") -and $envValues["ENABLE_SHELL"]) {
     $enableShellValue = $envValues["ENABLE_SHELL"]
 }
-$shellProfileValue = "yolo"
-if ($envValues.ContainsKey("SHELL_PROFILE") -and $envValues["SHELL_PROFILE"]) {
-    $shellProfileValue = $envValues["SHELL_PROFILE"]
+$runtimeProfileValue = "yolo"
+if ($envValues.ContainsKey("MCP_RUNTIME_PROFILE") -and $envValues["MCP_RUNTIME_PROFILE"]) {
+    $runtimeProfileValue = $envValues["MCP_RUNTIME_PROFILE"]
 }
 $enableFilesystem = $enableFilesystemValue.ToLowerInvariant() -eq "true"
 $enableShell = $enableShellValue.ToLowerInvariant() -eq "true"
@@ -266,7 +266,7 @@ $gatewayEnv = @(
     "set `"MCP_BEARER_TOKEN=$bearerToken`"",
     "set `"ENABLE_FILESYSTEM=$enableFilesystemValue`"",
     "set `"ENABLE_SHELL=$enableShellValue`"",
-    "set `"SHELL_PROFILE=$shellProfileValue`"",
+    "set `"MCP_RUNTIME_PROFILE=$runtimeProfileValue`"",
     "set `"FILESYSTEM_LOG_PATH=$filesystemLog`"",
     "set `"SHELL_LOG_PATH=$shellLog`"",
     "node `"$wrapperScript`" 1>> `"$gatewayLog`" 2>&1"

@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 import { loadSurfaceConfig } from '../scripts/surface-config.mjs';
 
-test('surface config defaults to legacy behavior', () => {
+test('surface config defaults to agent behavior', () => {
   assert.deepEqual(loadSurfaceConfig({}, {}), {
-    mode: 'legacy',
-    enumerateProjectResources: true,
-    enumerateSkillResources: true,
-    exposeResourceTemplates: true,
+    mode: 'agent',
+    enumerateProjectResources: false,
+    enumerateSkillResources: false,
+    exposeResourceTemplates: false,
     exposePrompts: true
   });
 });

@@ -143,7 +143,7 @@ test('write call preserves underlying runtime risk and conservative unknown anno
 
   await assert.rejects(
     () => broker.call('write', { name: 'unknown_publish', arguments: { value: 'x' } }, RUNTIME_PROFILES.assisted),
-    /MCP_SAFETY_PROFILE=assisted/i
+    /MCP_RUNTIME_PROFILE=assisted/i
   );
   assert.equal(calls.length, 1);
 

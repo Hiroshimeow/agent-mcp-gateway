@@ -14,7 +14,7 @@ const root = process.cwd();
 const registry = buildTrustedRootsProjectRegistry([`${root} | gateway | Gateway | smoke-device`], { defaultProjectId: 'gateway' });
 const context = {
   projectRegistry: registry,
-  env: { MCP_SAFETY_PROFILE: 'yolo' },
+  env: { MCP_RUNTIME_PROFILE: 'yolo' },
   listVisibleDevices: () => [{ deviceId: 'smoke-device', online: true, revoked: false, platform: process.platform, pathStyle: process.platform === 'win32' ? 'windows' : 'posix' }],
   listTools: async () => []
 };

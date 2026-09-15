@@ -36,7 +36,7 @@ export function normalizeRuntimeProfileName(value) {
 }
 
 export function getRuntimeProfile(env = process.env) {
-  const raw = String(env.MCP_RUNTIME_PROFILE || env.MCP_SAFETY_PROFILE || env.SHELL_PROFILE || DEFAULT_RUNTIME_PROFILE).trim().toLowerCase();
+  const raw = String(env.MCP_RUNTIME_PROFILE || DEFAULT_RUNTIME_PROFILE).trim().toLowerCase();
   const name = normalizeRuntimeProfileName(raw);
   return RUNTIME_PROFILES[name];
 }

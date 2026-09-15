@@ -35,13 +35,13 @@
 ## Phase 0 — Repository rename and operational continuity
 
 **Repos:**
-- Gateway: `E:/git-project/agent-mcp-gateway`
-- Device canonical checkout: `E:/git-project/agent-mcp-device`
+- Gateway: `<workspace>/agent-mcp-gateway`
+- Device canonical checkout: `<workspace>/agent-mcp-device`
 - GitHub device origin: `Hiroshimeow/agent-mcp-device`
 - Device upstream remains `wonderwhy-er/DesktopCommanderMCP`
 
 - [x] Rename GitHub repo `broker-mcp-gateway` → `agent-mcp-device`.
-- [x] Create canonical local checkout `E:/git-project/agent-mcp-device` at the exact accepted feature SHA.
+- [x] Create canonical local checkout `<workspace>/agent-mcp-device` at the exact accepted feature SHA.
 - [x] Keep upstream remote pointing at Desktop Commander.
 - [x] Rebuild the canonical checkout.
 - [x] Repoint the Windows device runner to the canonical checkout.

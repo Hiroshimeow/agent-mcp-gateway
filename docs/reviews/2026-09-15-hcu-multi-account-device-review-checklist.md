@@ -4,7 +4,7 @@ Use this checklist after each phase. A reviewer should be able to reject one pha
 
 ## Phase 0 — Repo rename / runtime continuity
 - [x] GitHub canonical repo is `Hiroshimeow/agent-mcp-device`.
-- [x] Canonical local checkout is `E:/git-project/agent-mcp-device`.
+- [x] Canonical local checkout is `<workspace>/agent-mcp-device`.
 - [x] `origin` points to the renamed repo; `upstream` remains DesktopCommanderMCP.
 - [x] Live Windows runner executes from `agent-mcp-device`, not the old repo.
 - [x] Device reconnect is proven online after rename.

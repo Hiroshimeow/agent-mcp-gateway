@@ -132,7 +132,7 @@ export function shouldExposeToolForProfile(toolOrName, safetyProfile) {
 export function assertToolAllowedForProfile(toolOrName, safetyProfile) {
   if (!shouldExposeToolForProfile(toolOrName, safetyProfile)) {
     const name = typeof toolOrName === 'string' ? toolOrName : toolOrName?.name;
-    throw new Error(`Tool ${name} is disabled by MCP_SAFETY_PROFILE=${safetyProfile.name}.`);
+    throw new Error(`Tool ${name} is disabled by MCP_RUNTIME_PROFILE=${safetyProfile.name}.`);
   }
 }
 
@@ -149,7 +149,7 @@ export function buildToolRiskManifest(tools, safetyProfile) {
       destructiveHint: risk.destructiveHint,
       openWorldHint: risk.openWorldHint,
       visible,
-      reason: visible ? `Visible because MCP_SAFETY_PROFILE=${safetyProfile.name}.` : `Hidden because MCP_SAFETY_PROFILE=${safetyProfile.name}.`
+      reason: visible ? `Visible because MCP_RUNTIME_PROFILE=${safetyProfile.name}.` : `Hidden because MCP_RUNTIME_PROFILE=${safetyProfile.name}.`
     };
   });
 }
