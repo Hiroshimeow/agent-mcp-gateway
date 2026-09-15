@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  FileBackedAuthState,
+  SQLiteAuthState,
   isStaticBearerAuthorization,
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
@@ -46,21 +46,27 @@ test('static bearer docs describe optional dual auth without replacing OAuth', (
   assert.match(security, /shell_execute/);
 });
 
-test('FileBackedAuthState persists registered client and token metadata across instances', () => {
+test('SQLiteAuthState persists OAuth state hash-at-rest across instances', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-auth-state-'));
-  const statePath = path.join(tempDir, 'auth-state.json');
+  const statePath = path.join(tempDir, 'gateway.sqlite');
   try {
-    const first = new FileBackedAuthState(statePath);
+    const first = new SQLiteAuthState(statePath);
     first.setClient({ client_id: 'client-1' });
     first.setToken('access-1', { accountId: 'account-1', clientId: 'client-1', scopes: ['mcp:tools'], expiresAt: Date.now() + 60_000 });
     first.setRefreshToken('refresh-1', { accountId: 'account-1', clientId: 'client-1', scopes: ['mcp:tools'], expiresAt: Date.now() + 60_000 });
+    first.close();
 
-    const second = new FileBackedAuthState(statePath);
+    const bytes = fs.readFileSync(statePath);
+    assert.equal(bytes.includes(Buffer.from('access-1')), false);
+    assert.equal(bytes.includes(Buffer.from('refresh-1')), false);
+
+    const second = new SQLiteAuthState(statePath);
     assert.equal(second.getClient('client-1').client_id, 'client-1');
     assert.equal(second.getToken('access-1').accountId, 'account-1');
     assert.equal(second.getRefreshToken('refresh-1').accountId, 'account-1');
     second.deleteRefreshToken('refresh-1');
-    assert.equal(new FileBackedAuthState(statePath).getRefreshToken('refresh-1'), undefined);
+    assert.equal(second.getRefreshToken('refresh-1'), undefined);
+    second.close();
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

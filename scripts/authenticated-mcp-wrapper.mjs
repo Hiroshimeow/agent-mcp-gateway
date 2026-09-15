@@ -37,7 +37,7 @@ import { callCustomTool, isLocalCustomTool, listCustomTools } from './custom-too
 import {
   AUTH_SUPPORTED_SCOPES,
   AccountAuthProvider,
-  FileBackedAuthState,
+  SQLiteAuthState,
   isStaticBearerAuthorization,
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
@@ -80,7 +80,6 @@ const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const runtimeProfile = getRuntimeProfile(process.env);
 const filesystemLogPath = process.env.FILESYSTEM_LOG_PATH;
-const authStatePath = process.env.AUTH_STATE_PATH;
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
 const enableFilesystem = String(process.env.ENABLE_FILESYSTEM || 'true').toLowerCase() === 'true';
 const enableShell = String(process.env.ENABLE_SHELL || 'true').toLowerCase() === 'true';
@@ -135,7 +134,8 @@ function currentSurfaceConfig(snapshot = workspaceSnapshot()) {
 
 const processSessions = createProcessSessionManager({ env: process.env });
 const remoteProcessSessions = createRemoteProcessSessionRegistry();
-const accountStore = createAccountStore({ dbPath: path.join(runtimeDirectory, 'gateway.sqlite') });
+const gatewayDbPath = path.resolve(process.env.MCP_GATEWAY_DB_PATH || path.join(runtimeDirectory, 'gateway.sqlite'));
+const accountStore = createAccountStore({ dbPath: gatewayDbPath });
 const deviceDbPath = path.join(runtimeDirectory, 'devices.sqlite');
 const deviceStore = createDeviceStore({ dbPath: deviceDbPath });
 const devicePairingStore = createDevicePairingStore({ dbPath: deviceDbPath });
@@ -950,8 +950,9 @@ const accountHttp = installAccountRoutes(app, {
   accountStore,
   needInvite: () => workspaceSnapshot().rawConfig?.auth?.need_invite !== false
 });
+const oauthStateStore = new SQLiteAuthState(gatewayDbPath);
 const provider = new AccountAuthProvider({
-  stateStore: new FileBackedAuthState(authStatePath),
+  stateStore: oauthStateStore,
   accountStore,
   accountFromRequest: accountHttp.accountFromRequest
 });
@@ -1249,6 +1250,7 @@ async function shutdown() {
   deviceAudit.close();
   await processSessions.shutdown().catch(() => {});
   await deviceBroker.shutdown().catch(() => {});
+  try { oauthStateStore.close(); } catch {}
   try { accountStore.close(); } catch {}
   try { deviceUsageStore.close(); } catch {}
   try { devicePairingStore.close(); } catch {}

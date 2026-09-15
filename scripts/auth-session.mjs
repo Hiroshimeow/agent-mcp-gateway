@@ -1,58 +1,75 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 const ACCESS_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const AUTH_SUPPORTED_SCOPES = Object.freeze(['mcp:tools', 'offline_access']);
 
-export class FileBackedAuthState {
-  constructor(filePath) {
-    this.filePath = filePath;
-    this.state = this.load();
+function authTokenHash(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+export class SQLiteAuthState {
+  constructor(dbPath) {
+    if (!dbPath) throw new Error('dbPath is required for SQLiteAuthState.');
+    const resolved = path.resolve(dbPath);
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    this.db = new DatabaseSync(resolved);
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA busy_timeout = 5000;
+      CREATE TABLE IF NOT EXISTS oauth_clients (
+        client_id TEXT PRIMARY KEY,
+        metadata_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+        token_hash TEXT PRIMARY KEY,
+        metadata_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+        token_hash TEXT PRIMARY KEY,
+        metadata_json TEXT NOT NULL
+      );
+    `);
+    this.getClientStatement = this.db.prepare('SELECT metadata_json FROM oauth_clients WHERE client_id = ?');
+    this.setClientStatement = this.db.prepare('INSERT INTO oauth_clients (client_id, metadata_json) VALUES (?, ?) ON CONFLICT(client_id) DO UPDATE SET metadata_json = excluded.metadata_json');
+    this.getTokenStatement = this.db.prepare('SELECT metadata_json FROM oauth_access_tokens WHERE token_hash = ?');
+    this.setTokenStatement = this.db.prepare('INSERT INTO oauth_access_tokens (token_hash, metadata_json) VALUES (?, ?) ON CONFLICT(token_hash) DO UPDATE SET metadata_json = excluded.metadata_json');
+    this.getRefreshStatement = this.db.prepare('SELECT metadata_json FROM oauth_refresh_tokens WHERE token_hash = ?');
+    this.setRefreshStatement = this.db.prepare('INSERT INTO oauth_refresh_tokens (token_hash, metadata_json) VALUES (?, ?) ON CONFLICT(token_hash) DO UPDATE SET metadata_json = excluded.metadata_json');
+    this.deleteRefreshStatement = this.db.prepare('DELETE FROM oauth_refresh_tokens WHERE token_hash = ?');
   }
 
-  load() {
-    if (!this.filePath || !fs.existsSync(this.filePath)) {
-      return { clients: {}, tokens: {}, refreshTokens: {} };
-    }
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-      return {
-        clients: parsed.clients && typeof parsed.clients === 'object' ? parsed.clients : {},
-        tokens: parsed.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {},
-        refreshTokens: parsed.refreshTokens && typeof parsed.refreshTokens === 'object' ? parsed.refreshTokens : {}
-      };
-    } catch {
-      return { clients: {}, tokens: {}, refreshTokens: {} };
-    }
+  getClient(clientId) {
+    const row = this.getClientStatement.get(String(clientId || ''));
+    return row ? JSON.parse(row.metadata_json) : undefined;
   }
-
-  save() {
-    if (!this.filePath) return;
-    fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
-  }
-
-  getClient(clientId) { return this.state.clients[clientId]; }
   setClient(client) {
-    this.state.clients[client.client_id] = client;
-    this.save();
+    this.setClientStatement.run(client.client_id, JSON.stringify(client));
   }
-
-  getToken(token) { return this.state.tokens[token]; }
+  getToken(token) {
+    const row = this.getTokenStatement.get(authTokenHash(token));
+    return row ? JSON.parse(row.metadata_json) : undefined;
+  }
   setToken(token, tokenData) {
-    this.state.tokens[token] = tokenData;
-    this.save();
+    this.setTokenStatement.run(authTokenHash(token), JSON.stringify(tokenData));
   }
-
-  getRefreshToken(refreshToken) { return this.state.refreshTokens[refreshToken]; }
+  getRefreshToken(refreshToken) {
+    const row = this.getRefreshStatement.get(authTokenHash(refreshToken));
+    return row ? JSON.parse(row.metadata_json) : undefined;
+  }
   setRefreshToken(refreshToken, refreshTokenData) {
-    this.state.refreshTokens[refreshToken] = refreshTokenData;
-    this.save();
+    this.setRefreshStatement.run(authTokenHash(refreshToken), JSON.stringify(refreshTokenData));
   }
   deleteRefreshToken(refreshToken) {
-    delete this.state.refreshTokens[refreshToken];
-    this.save();
+    this.deleteRefreshStatement.run(authTokenHash(refreshToken));
+  }
+  close() {
+    this.db.close();
   }
 }
 

@@ -19,7 +19,6 @@ $pidFile = Join-Path $logsDir "live-pids.json"
 $gatewayLog = Join-Path $logsDir "gateway.log"
 $filesystemLog = Join-Path $logsDir "filesystem-$runId.log"
 $shellLog = Join-Path $logsDir "shell.log"
-$authStateFile = Join-Path $logsDir "auth-state.json"
 $wrapperScript = Join-Path $projectRoot "scripts\authenticated-mcp-wrapper.mjs"
 $stopLiveScript = Join-Path $projectRoot "scripts\stop-mcp-live.ps1"
 
@@ -270,7 +269,6 @@ $gatewayEnv = @(
     "set `"SHELL_PROFILE=$shellProfileValue`"",
     "set `"FILESYSTEM_LOG_PATH=$filesystemLog`"",
     "set `"SHELL_LOG_PATH=$shellLog`"",
-    "set `"AUTH_STATE_PATH=$authStateFile`"",
     "node `"$wrapperScript`" 1>> `"$gatewayLog`" 2>&1"
 ) -join " && "
 $gatewayProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $gatewayEnv) -WorkingDirectory $projectRoot -PassThru -WindowStyle Hidden
