@@ -49,7 +49,7 @@ export function projectRouteKey(deviceId, projectId) {
 }
 
 export function trustedRootEntryToLine(entry, context = {}) {
-  if (typeof entry === 'string') return entry;
+  if (typeof entry === 'string') return expandTrustedRootPlaceholders(entry, context);
   if (!entry || typeof entry !== 'object') return '';
   const rawRoot = entry.path ?? entry.root;
   if (!rawRoot) return '';

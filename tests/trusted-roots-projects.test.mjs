@@ -13,12 +13,21 @@ import {
   normalizeTrustedRootEntries,
   parseTrustedRootLine,
   resolveTrustedRootPaths,
-  splitTrustedRootConfig
+  splitTrustedRootConfig,
+  trustedRootsTomlToRaw
 } from '../scripts/projects/trusted-roots-projects.mjs';
 
 function abs(...segments) {
   return path.join(os.tmpdir(), 'mcp-project-tests', ...segments);
 }
+
+test('trustedRootsTomlToRaw expands placeholders in string roots', () => {
+  const repoRoot = path.resolve('fixture-repo-root');
+  const raw = trustedRootsTomlToRaw({ roots: ['${repoRoot}', '${home}'] }, { repoRoot, home: path.resolve('fixture-home') });
+  const lines = raw.split(/\r?\n/);
+  assert.equal(lines[0], repoRoot);
+  assert.equal(lines[1], path.resolve('fixture-home'));
+});
 
 test('parseTrustedRootLine ignores blank lines and full-line comments', () => {
   assert.equal(parseTrustedRootLine(''), null);
