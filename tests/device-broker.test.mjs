@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import tls from 'node:tls';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { WebSocket } from 'ws';
 
-import { createDeviceBroker } from '../scripts/device-broker.mjs';
+import { buildDeviceAuthChallengeV2, buildDeviceAuthExporterContext, createDeviceBroker } from '../scripts/device-broker.mjs';
+import { DEVICE_INNER_TLS_SUBPROTOCOL, createJsonFrameParser, createWebSocketDuplex, encodeJsonFrame } from '../scripts/device-secure-transport.mjs';
+import { createDeviceStore } from '../scripts/device-store.mjs';
+
+const innerTlsFixtureDir = path.join('tests', 'fixtures', 'device-inner-tls');
+const innerTlsCa = fs.readFileSync(path.join(innerTlsFixtureDir, 'ca-cert.pem'));
+const innerTlsCert = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-cert.pem'));
+const innerTlsKey = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-key.pem'));
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -84,6 +96,99 @@ test('device broker authenticates enrollment token, registers hello, and routes 
 
   const result = await broker.callDevice({ deviceId: 'device-test', tool: 'ping', arguments: {} });
   assert.deepEqual(result, { ok: true, pong: true });
+});
+
+test('v2 tool routing stays inside inner TLS and keeps outer WebSocket opaque', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-broker-v2-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const store = createDeviceStore({ dbPath });
+  const pair = generateKeyPairSync('ed25519');
+  const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  store.enroll({ deviceId: 'device-v2-route', publicKeyPem });
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({
+    deviceStore: store,
+    requestTimeoutMs: 1000,
+    requireAccountOwnership: false,
+    innerTls: { cert: innerTlsCert, key: innerTlsKey }
+  });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    store.close();
+    await closeServer(server);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const observedOuter = [];
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, DEVICE_INNER_TLS_SUBPROTOCOL);
+  ws.on('message', raw => observedOuter.push(Buffer.from(raw)));
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+  const secure = tls.connect({
+    socket: createWebSocketDuplex(ws),
+    ca: innerTlsCa,
+    servername: 'localhost',
+    minVersion: 'TLSv1.3',
+    rejectUnauthorized: true
+  });
+  await new Promise((resolve, reject) => { secure.once('secureConnect', resolve); secure.once('error', reject); });
+
+  const queue = [];
+  const waiters = [];
+  const parser = createJsonFrameParser({
+    onMessage(message) {
+      const waiter = waiters.shift();
+      if (waiter) waiter(message);
+      else queue.push(message);
+    }
+  });
+  secure.on('data', chunk => parser.push(chunk));
+  const next = async () => queue.length ? queue.shift() : await new Promise(resolve => waiters.push(resolve));
+  const send = message => secure.write(encodeJsonFrame(message));
+
+  send({ protocol_version: 2, type: 'auth_hello', device_id: 'device-v2-route', timestamp: Date.now(), payload: { capabilities: ['read_text_file'] } });
+  const challenge = await next();
+  const exporter = secure.exportKeyingMaterial(
+    32,
+    'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2',
+    buildDeviceAuthExporterContext({ deviceId: 'device-v2-route', mode: 'reconnect' })
+  );
+  const signature = sign(null, buildDeviceAuthChallengeV2({
+    deviceId: 'device-v2-route',
+    mode: 'reconnect',
+    nonce: challenge.payload.nonce,
+    exporter,
+    publicKeyPem
+  }), pair.privateKey).toString('base64');
+  send({ protocol_version: 2, type: 'auth_response', device_id: 'device-v2-route', timestamp: Date.now(), payload: { signature } });
+  const ok = await next();
+  assert.equal(ok.type, 'auth_ok');
+
+  const resultPromise = broker.callDevice({
+    deviceId: 'device-v2-route',
+    tool: 'read_text_file',
+    arguments: { path: 'C:\\secret\\opaque.txt' }
+  });
+  const call = await next();
+  assert.equal(call.type, 'tool_call');
+  assert.equal(call.payload.tool, 'read_text_file');
+  assert.equal(call.payload.arguments.path, 'C:\\secret\\opaque.txt');
+  send({
+    protocol_version: 2,
+    type: 'tool_result',
+    request_id: call.request_id,
+    device_id: 'device-v2-route',
+    connection_epoch: call.connection_epoch,
+    timestamp: Date.now(),
+    payload: { marker: 'v2-secret-result-marker' }
+  });
+  assert.deepEqual(await resultPromise, { marker: 'v2-secret-result-marker' });
+  const outer = Buffer.concat(observedOuter);
+  assert.equal(outer.includes(Buffer.from('read_text_file')), false);
+  assert.equal(outer.includes(Buffer.from('opaque.txt')), false);
+  secure.destroy();
+  ws.terminate();
 });
 
 test('device disconnect fails closed with DEVICE_OFFLINE and reconnect restores dispatch', async t => {

@@ -5,12 +5,29 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import tls from 'node:tls';
 import { WebSocket } from 'ws';
 
-import { buildDeviceAuthChallenge, createDeviceBroker } from '../scripts/device-broker.mjs';
+import {
+  buildDeviceAuthChallenge,
+  buildDeviceAuthChallengeV2,
+  buildDeviceAuthExporterContext,
+  createDeviceBroker
+} from '../scripts/device-broker.mjs';
+import {
+  DEVICE_INNER_TLS_SUBPROTOCOL,
+  createJsonFrameParser,
+  createWebSocketDuplex,
+  encodeJsonFrame
+} from '../scripts/device-secure-transport.mjs';
 import { createDevicePairingStore } from '../scripts/device-pairing-store.mjs';
 import { createDeviceStore } from '../scripts/device-store.mjs';
 import { createDeviceUsageStore } from '../scripts/device-usage.mjs';
+
+const innerTlsFixtureDir = path.join('tests', 'fixtures', 'device-inner-tls');
+const innerTlsCa = fs.readFileSync(path.join(innerTlsFixtureDir, 'ca-cert.pem'));
+const innerTlsCert = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-cert.pem'));
+const innerTlsKey = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-key.pem'));
 
 function keyPair() {
   const pair = crypto.generateKeyPairSync('ed25519');
@@ -54,6 +71,35 @@ function openSocket(port, credential) {
     ws.once('error', reject);
     ws.once('open', () => resolve(ws));
   });
+}
+
+async function openV2(port) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, DEVICE_INNER_TLS_SUBPROTOCOL);
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+  const secure = tls.connect({
+    socket: createWebSocketDuplex(ws),
+    ca: innerTlsCa,
+    servername: 'localhost',
+    minVersion: 'TLSv1.3',
+    rejectUnauthorized: true
+  });
+  await new Promise((resolve, reject) => { secure.once('secureConnect', resolve); secure.once('error', reject); });
+  const queue = [];
+  const waiters = [];
+  const parser = createJsonFrameParser({
+    onMessage(message) {
+      const waiter = waiters.shift();
+      if (waiter) waiter(message);
+      else queue.push(message);
+    }
+  });
+  secure.on('data', chunk => parser.push(chunk));
+  return {
+    ws,
+    secure,
+    send(message) { secure.write(encodeJsonFrame(message)); },
+    async next() { return queue.length ? queue.shift() : await new Promise(resolve => waiters.push(resolve)); }
+  };
 }
 
 async function sendEnrollHello(ws, { deviceId, publicKeyPem }) {
@@ -128,7 +174,8 @@ async function fixture(t) {
       toolSchemaTokenEstimate: 4057,
       tokenEstimateMethod: 'utf8_bytes_div_4_estimate'
     },
-    requestTimeoutMs: 1000
+    requestTimeoutMs: 1000,
+    innerTls: { cert: innerTlsCert, key: innerTlsKey }
   });
   broker.attach(server);
   const port = await listen(server);
@@ -182,6 +229,82 @@ test('pairing grant is consumed only after key proof and persists account/device
   assert.equal(listed.platform, 'linux');
   assert.equal(listed.arch, 'x64');
   assert.equal(listed.pathStyle, 'posix');
+});
+
+test('v2 pairing grant is consumed only after valid inner-TLS device proof', async t => {
+  const f = await fixture(t);
+  const keys = keyPair();
+  f.deviceStore.enroll({ deviceId: 'v2-pair-device', publicKeyPem: keys.publicKeyPem, deviceName: 'Before Pair' });
+  const grant = approvedGrant(f.pairingStore, {
+    deviceId: 'v2-pair-device', deviceName: 'After Pair', publicKeyPem: keys.publicKeyPem
+  });
+
+  const bad = await openV2(f.port);
+  bad.send({
+    protocol_version: 2,
+    type: 'pair_hello',
+    device_id: 'v2-pair-device',
+    timestamp: Date.now(),
+    payload: {
+      public_key_pem: keys.publicKeyPem,
+      enrollment_grant: grant.enrollmentGrant,
+      capabilities: ['ping']
+    }
+  });
+  const badChallenge = await bad.next();
+  assert.equal(badChallenge.payload.mode, 'pair');
+  assert.equal(f.pairingStore.getStatusByUserCode(grant.userCode).status, 'approved');
+  const badClosed = new Promise(resolve => bad.ws.once('close', resolve));
+  bad.send({
+    protocol_version: 2,
+    type: 'auth_response',
+    device_id: 'v2-pair-device',
+    timestamp: Date.now(),
+    payload: { signature: Buffer.alloc(64).toString('base64') }
+  });
+  await badClosed;
+  assert.equal(f.pairingStore.getStatusByUserCode(grant.userCode).status, 'approved');
+  bad.secure.destroy();
+
+  const good = await openV2(f.port);
+  t.after(() => { good.secure.destroy(); good.ws.terminate(); });
+  good.send({
+    protocol_version: 2,
+    type: 'pair_hello',
+    device_id: 'v2-pair-device',
+    timestamp: Date.now(),
+    payload: {
+      public_key_pem: keys.publicKeyPem,
+      enrollment_grant: grant.enrollmentGrant,
+      capabilities: ['ping']
+    }
+  });
+  const challenge = await good.next();
+  const exporter = good.secure.exportKeyingMaterial(
+    32,
+    'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2',
+    buildDeviceAuthExporterContext({ deviceId: 'v2-pair-device', mode: 'pair' })
+  );
+  const signature = crypto.sign(null, buildDeviceAuthChallengeV2({
+    deviceId: 'v2-pair-device',
+    mode: 'pair',
+    nonce: challenge.payload.nonce,
+    exporter,
+    publicKeyPem: keys.publicKeyPem,
+    grant: grant.enrollmentGrant
+  }), keys.privateKey).toString('base64');
+  good.send({
+    protocol_version: 2,
+    type: 'auth_response',
+    device_id: 'v2-pair-device',
+    timestamp: Date.now(),
+    payload: { signature }
+  });
+  const ok = await good.next();
+  assert.equal(ok.type, 'auth_ok');
+  assert.equal(f.pairingStore.getStatusByUserCode(grant.userCode).status, 'consumed');
+  assert.equal(f.deviceStore.get('v2-pair-device').ownerAccountId, 'account-example');
+  assert.equal(f.deviceStore.get('v2-pair-device').minProtocol, 2);
 });
 
 test('account ownership filters inventory and is rechecked at every device dispatch', async t => {

@@ -9,6 +9,7 @@ import express from 'express';
 import { createAccountStore } from '../scripts/account-store.mjs';
 import { installAccountRoutes } from '../scripts/account-http.mjs';
 import { installDashboardRoutes } from '../scripts/dashboard-http.mjs';
+import { SQLiteAuthState } from '../scripts/auth-session.mjs';
 import { createDeviceBroker } from '../scripts/device-broker.mjs';
 import { createDeviceStore } from '../scripts/device-store.mjs';
 import { createDeviceUsageStore } from '../scripts/device-usage.mjs';
@@ -31,9 +32,12 @@ async function fixture() {
   const adminBrowser = accountStore.createSession(admin.accountId);
 
   deviceStore.enroll({ deviceId: 'alice-device', deviceName: 'Alice Workstation', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId, agentVersion: 'ignored' });
+  deviceStore.enroll({ deviceId: 'alice-laptop', deviceName: 'Alice Laptop', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId });
+  deviceStore.enroll({ deviceId: 'alice-idle', deviceName: 'Alice Idle', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId });
   deviceStore.enroll({ deviceId: 'bob-device', deviceName: 'Bob Secret Workstation', publicKeyPem: publicKeyPem(), ownerAccountId: bob.accountId });
 
   usageStore.openActivitySession({ activitySessionId: 'alice-activity', accountId: alice.accountId, clientId: 'chatgpt-alice' });
+  usageStore.openActivitySession({ activitySessionId: 'alice-idle-client', accountId: alice.accountId, clientId: 'pi-alice' });
   usageStore.openActivitySession({ activitySessionId: 'bob-activity', accountId: bob.accountId, clientId: 'chatgpt-bob' });
   usageStore.recordToolCall({
     accountId: alice.accountId, activitySessionId: 'alice-activity', deviceId: 'alice-device', tool: 'shell_execute',
@@ -44,7 +48,16 @@ async function fixture() {
     durationMs: 2, success: false, errorCode: 'UNKNOWN_SKILL', inputBytes: 20, outputBytes: 401, callerCategory: 'oauth'
   });
   usageStore.recordToolCall({
-    accountId: bob.accountId, activitySessionId: 'bob-activity', deviceId: 'bob-device', tool: 'read_text_file',
+    accountId: alice.accountId, activitySessionId: 'alice-activity', deviceId: 'alice-laptop', tool: 'read_text_file',
+    durationMs: 3, success: true, inputBytes: 40, outputBytes: 60, callerCategory: 'oauth',
+    requestBody: 'NEVER_RENDER_REQUEST_BODY', responseBody: 'NEVER_RENDER_RESPONSE_BODY'
+  });
+  usageStore.recordToolCall({
+    accountId: alice.accountId, activitySessionId: 'alice-activity', deviceId: 'alice-laptop', tool: 'write_file',
+    durationMs: 4, success: false, errorCode: 'WRITE_FAILED', inputBytes: 20, outputBytes: 20, callerCategory: 'oauth'
+  });
+  usageStore.recordToolCall({
+    accountId: bob.accountId, activitySessionId: 'bob-activity', deviceId: 'bob-device', tool: 'bob_secret_tool',
     durationMs: 1, success: true, inputBytes: 10, outputBytes: 20, callerCategory: 'oauth'
   });
   usageStore.recordCatalogList({
@@ -60,10 +73,39 @@ async function fixture() {
   app.use(express.urlencoded({ extended: false }));
   app.use(express.json());
   const accountHttp = installAccountRoutes(app, { accountStore, needInvite: false });
+  const oauthState = new SQLiteAuthState(dbPath);
+  oauthState.setClient({ client_id: 'chatgpt-alice', client_name: 'ChatGPT' });
+  oauthState.setClient({ client_id: 'pi-alice', client_name: 'Pi Coding Agent' });
+  oauthState.setClient({ client_id: 'chatgpt-bob', client_name: 'Bob OAuth Client' });
+  const toolCatalog = [
+    {
+      name: 'shell_execute',
+      description: 'Execute a shell command on one owned device.',
+      inputSchema: { type: 'object', properties: { command: { type: 'string' }, device_id: { type: 'string' } }, required: ['command', 'device_id'], additionalProperties: false }
+    },
+    {
+      name: 'read_text_file',
+      description: 'Read a text file from one owned device.',
+      inputSchema: { type: 'object', properties: { path: { type: 'string' }, device_id: { type: 'string' } }, required: ['path', 'device_id'], additionalProperties: false }
+    },
+    {
+      name: 'write_file',
+      description: 'Write a text file on one owned device.',
+      inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' }, device_id: { type: 'string' } }, required: ['path', 'content', 'device_id'], additionalProperties: false }
+    },
+    {
+      name: 'bob_secret_tool',
+      description: 'Must never appear in Alice device detail.',
+      inputSchema: { type: 'object', properties: { secret: { type: 'string' } } }
+    }
+  ];
   installDashboardRoutes(app, {
     accountFromRequest: accountHttp.accountFromRequest,
     usageStore,
-    deviceBroker: broker
+    deviceBroker: broker,
+    baseUrlFromRequest: () => 'https://mcp.matcha.me',
+    oauthClientLookup: clientId => oauthState.getClient(clientId),
+    listTools: async () => toolCatalog
   });
   const server = await new Promise(resolve => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
@@ -72,7 +114,7 @@ async function fixture() {
   const base = `http://127.0.0.1:${server.address().port}`;
 
   return {
-    dir, dbPath, accountStore, usageStore, deviceStore, broker, server, base,
+    dir, dbPath, accountStore, usageStore, deviceStore, oauthState, broker, server, base,
     alice, bob, admin,
     aliceCookie: `hcu_account_session=${encodeURIComponent(aliceBrowser.sessionId)}`,
     bobCookie: `hcu_account_session=${encodeURIComponent(bobBrowser.sessionId)}`,
@@ -80,6 +122,7 @@ async function fixture() {
     close: async () => {
       await broker.shutdown();
       await new Promise(resolve => server.close(resolve));
+      oauthState.close();
       deviceStore.close();
       usageStore.close();
       accountStore.close();
@@ -123,18 +166,141 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /alice@example\.com/);
     assert.match(html, /Alice Workstation/);
     assert.match(html, /alice-device/);
-    assert.doesNotMatch(html, /Bob Secret Workstation|bob-device|bob-activity|bob@example\.com/);
+    assert.doesNotMatch(html, /Bob Secret Workstation|bob-device|bob-activity|bob@example\.com|bob_secret_tool/);
     assert.match(html, /Gateway\s+online/i);
     assert.match(html, /16\s+tools/i);
     assert.match(html, /15,297|15297/);
-    assert.match(html, /estimated/i);
-    assert.match(html, /not billing/i);
+    assert.match(html, /Usage for this account/i);
+    assert.match(html, /Estimated I\/O tokens/i);
+    assert.match(html, /~216/);
+    assert.match(html, /UTF-8 bytes .* 4 estimate, not billing tokens/i);
+    assert.match(html, /Estimated schema context/i);
+    assert.match(html, /estimated context size, not billing tokens/i);
+    assert.match(html, /Alice Laptop/);
+    assert.match(html, /alice-laptop/);
+    assert.match(html, /href="\/dashboard\/devices\/alice-device"/);
+    assert.match(html, /href="\/dashboard\/devices\/alice-laptop"/);
+    assert.match(html, /Calls/);
+    assert.match(html, /Input/);
+    assert.match(html, /Output/);
+    assert.match(html, /Est\. I\/O tokens/);
+    assert.match(html, /100 B/);
+    assert.match(html, /200 B/);
+    assert.match(html, /~75/);
+    assert.match(html, /60 B/);
+    assert.match(html, /80 B/);
+    assert.match(html, /~35/);
+    assert.match(html, /Alice Idle[\s\S]*?alice-idle[\s\S]*?<td>0<\/td>\s*<td>0 \/ 0<\/td>\s*<td>0 B<\/td>\s*<td>0 B<\/td>\s*<td>~0<\/td>/);
+    assert.match(html, /section\{overflow-x:auto\}/);
+    assert.match(html, /table\{min-width:760px\}/);
     assert.match(html, /shell_execute/);
     assert.match(html, /mcp_builder/);
     assert.match(html, /UNKNOWN_SKILL/);
+    assert.match(html, /OAuth client sessions/i);
+    assert.match(html, /ChatGPT/);
+    assert.match(html, /Pi Coding Agent/);
+    assert.match(html, /alice-activity[\s\S]*?ChatGPT[\s\S]*?(?:Alice Workstation[\s\S]*?Alice Laptop|Alice Laptop[\s\S]*?Alice Workstation)/);
+    assert.match(html, /alice-idle-client[\s\S]*?Pi Coding Agent[\s\S]*?No device activity yet/i);
+    assert.doesNotMatch(html, /chatgpt-alice/);
+    assert.match(html, /Disconnect client session/i);
     assert.match(html, /alice-activity/);
-    assert.doesNotMatch(html, /command|payload body/i);
+    assert.doesNotMatch(html, /action="\/dashboard\/devices\/alice-device\/revoke"/);
+    assert.match(html, /visibilityState/);
+    assert.match(html, /3500/);
+    assert.match(html, /dirty/);
+    assert.doesNotMatch(html, /payload body/i);
     assert.ok(cookieValue(response, 'hcu_dashboard_csrf'));
+  } finally { await f.close(); }
+});
+
+test('device usage detail is account-owned and aggregates only that device tools', async () => {
+  const f = await fixture();
+  try {
+    const response = await fetch(`${f.base}/dashboard/devices/alice-laptop`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Alice Laptop/);
+    assert.match(html, /alice-laptop/);
+    assert.match(html, /read_text_file/);
+    assert.match(html, /write_file/);
+    assert.match(html, /2/);
+    assert.match(html, /1/);
+    assert.match(html, /60 B/);
+    assert.match(html, /80 B/);
+    assert.match(html, /~35/);
+    assert.match(html, /estimate, not billing tokens/i);
+    assert.match(html, /Tool definitions & input contracts/i);
+    assert.match(html, /Read a text file from one owned device\./);
+    assert.match(html, /Write a text file on one owned device\./);
+    assert.match(html, /device_id/);
+    assert.match(html, /Recent metadata calls/i);
+    assert.match(html, /Duration/);
+    assert.match(html, /3 ms/);
+    assert.match(html, /WRITE_FAILED/);
+    assert.match(html, /ChatGPT/);
+    assert.match(html, /alice-activity/);
+    assert.doesNotMatch(html, /NEVER_RENDER_REQUEST_BODY|NEVER_RENDER_RESPONSE_BODY/);
+    assert.match(html, /Danger zone/i);
+    assert.match(html, /Revoke Alice Laptop/i);
+    assert.match(html, /onsubmit="return confirm\(&quot;Revoke Alice Laptop\?/i);
+    assert.match(html, /disconnects this device/i);
+    assert.match(html, /revoked identity cannot reconnect/i);
+    assert.doesNotMatch(html, /shell_execute|Bob Secret Workstation|bob-device|bob_secret_tool/);
+
+    const foreign = await fetch(`${f.base}/dashboard/devices/bob-device`, { headers: { cookie: f.aliceCookie } });
+    const unknown = await fetch(`${f.base}/dashboard/devices/unknown-device`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(foreign.status, 404);
+    assert.equal(unknown.status, 404);
+    assert.equal(await foreign.text(), 'Resource unavailable.');
+    assert.equal(await unknown.text(), 'Resource unavailable.');
+  } finally { await f.close(); }
+});
+
+test('dashboard empty state onboards the account without hard-coded deployment branding', async () => {
+  const f = await fixture();
+  try {
+    const empty = f.accountStore.createAccount({ email: 'empty@example.com', password: 'empty-password' });
+    const session = f.accountStore.createSession(empty.accountId);
+    const response = await fetch(`${f.base}/dashboard`, {
+      headers: { cookie: `hcu_account_session=${encodeURIComponent(session.sessionId)}` }
+    });
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, /Pair your first device/i);
+    assert.match(html, /href="\/pair"/);
+    assert.match(html, /https:\/\/mcp\.matcha\.me/);
+    assert.match(html, /private device key/i);
+    assert.match(html, /outbound/i);
+    assert.doesNotMatch(html, /HCU CONTROL|mcp-v2\.hcu-lab\.me/i);
+  } finally { await f.close(); }
+});
+
+test('recent errors prefer friendly device names and render only the newest bounded 20', async () => {
+  const f = await fixture();
+  try {
+    for (let index = 0; index < 25; index += 1) {
+      f.usageStore.recordToolCall({
+        accountId: f.alice.accountId,
+        activitySessionId: 'alice-activity',
+        deviceId: 'alice-device',
+        tool: 'bounded_error_tool',
+        durationMs: index,
+        success: false,
+        errorCode: `BOUNDED_${index}`,
+        inputBytes: 1,
+        outputBytes: 2,
+        callerCategory: 'oauth'
+      });
+    }
+    const response = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Alice Workstation/);
+    assert.match(html, /Show 15 more \(max 20\)/);
+    assert.match(html, /BOUNDED_24/);
+    assert.match(html, /BOUNDED_5/);
+    assert.doesNotMatch(html, /BOUNDED_4|BOUNDED_0/);
+    assert.equal((html.match(/BOUNDED_\d+/g) || []).length, 20);
   } finally { await f.close(); }
 });
 
@@ -166,7 +332,7 @@ test('dashboard mutations require CSRF and cannot mutate another account resourc
 
     const ended = await post(f.base, '/dashboard/sessions/alice-activity/end', { _csrf: csrf }, cookies);
     assert.equal(ended.status, 303);
-    assert.ok(f.usageStore.listActivitySessions(f.alice.accountId)[0].endedAt);
+    assert.ok(f.usageStore.listActivitySessions(f.alice.accountId).find(item => item.activitySessionId === 'alice-activity')?.endedAt);
 
     const bobRevoke = await post(f.base, '/dashboard/devices/bob-device/revoke', { _csrf: csrf }, cookies);
     assert.equal(bobRevoke.status, 404);

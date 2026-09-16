@@ -4,11 +4,28 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, sign, verify } from 'node:crypto';
+import tls from 'node:tls';
 import { WebSocket } from 'ws';
 
-import { buildDeviceAuthChallenge, createDeviceBroker } from '../scripts/device-broker.mjs';
+import {
+  buildDeviceAuthChallenge,
+  buildDeviceAuthChallengeV2,
+  buildDeviceAuthExporterContext,
+  createDeviceBroker
+} from '../scripts/device-broker.mjs';
+import {
+  DEVICE_INNER_TLS_SUBPROTOCOL,
+  createJsonFrameParser,
+  createWebSocketDuplex,
+  encodeJsonFrame
+} from '../scripts/device-secure-transport.mjs';
 import { createDeviceStore } from '../scripts/device-store.mjs';
+
+const innerTlsFixtureDir = path.join('tests', 'fixtures', 'device-inner-tls');
+const innerTlsCa = fs.readFileSync(path.join(innerTlsFixtureDir, 'ca-cert.pem'));
+const innerTlsCert = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-cert.pem'));
+const innerTlsKey = fs.readFileSync(path.join(innerTlsFixtureDir, 'server-key.pem'));
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -111,7 +128,13 @@ async function reconnect(ws, { deviceId, privateKey }) {
 async function createHarness(t, dbPath) {
   const store = createDeviceStore({ dbPath });
   const server = http.createServer((_req, res) => res.end('ok'));
-  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', deviceStore: store, requestTimeoutMs: 1000, requireAccountOwnership: false });
+  const broker = createDeviceBroker({
+    enrollmentToken: 'dev-secret',
+    deviceStore: store,
+    requestTimeoutMs: 1000,
+    requireAccountOwnership: false,
+    innerTls: { cert: innerTlsCert, key: innerTlsKey }
+  });
   broker.attach(server);
   const port = await listen(server);
   t.after(async () => {
@@ -121,6 +144,91 @@ async function createHarness(t, dbPath) {
   });
   return { store, broker, port };
 }
+
+async function openV2Tls(port) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, DEVICE_INNER_TLS_SUBPROTOCOL);
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve);
+    ws.once('error', reject);
+  });
+  const secure = tls.connect({
+    socket: createWebSocketDuplex(ws),
+    ca: innerTlsCa,
+    servername: 'localhost',
+    minVersion: 'TLSv1.3',
+    rejectUnauthorized: true
+  });
+  await new Promise((resolve, reject) => {
+    secure.once('secureConnect', resolve);
+    secure.once('error', reject);
+  });
+  const queue = [];
+  const waiters = [];
+  const parser = createJsonFrameParser({
+    onMessage(message) {
+      const waiter = waiters.shift();
+      if (waiter) waiter.resolve(message);
+      else queue.push(message);
+    }
+  });
+  secure.on('data', chunk => parser.push(chunk));
+  secure.on('error', error => {
+    while (waiters.length) waiters.shift().reject(error);
+  });
+  ws.on('close', (code, reason) => {
+    const error = new Error(`socket closed ${code}: ${reason.toString()}`);
+    while (waiters.length) waiters.shift().reject(error);
+  });
+  return {
+    ws,
+    secure,
+    send: message => secure.write(encodeJsonFrame(message)),
+    next: () => queue.length ? Promise.resolve(queue.shift()) : new Promise((resolve, reject) => waiters.push({ resolve, reject }))
+  };
+}
+
+function signV2Reconnect({ secure, deviceId, nonce, publicKeyPem, privateKey }) {
+  const exporter = secure.exportKeyingMaterial(
+    32,
+    'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2',
+    buildDeviceAuthExporterContext({ deviceId, mode: 'reconnect' })
+  );
+  return sign(null, buildDeviceAuthChallengeV2({
+    deviceId,
+    mode: 'reconnect',
+    nonce,
+    exporter,
+    publicKeyPem
+  }), privateKey).toString('base64');
+}
+
+test('v2 challenge encoding binds mode nonce exporter key and grant', async () => {
+  const brokerModule = await import('../scripts/device-broker.mjs');
+  assert.equal(typeof brokerModule.buildDeviceAuthChallengeV2, 'function');
+  const keys = keyPair();
+  const base = {
+    deviceId: 'bound-device',
+    mode: 'pair',
+    nonce: Buffer.alloc(32, 3),
+    exporter: Buffer.alloc(32, 7),
+    publicKeyPem: keys.publicKeyPem,
+    grant: 'grant-one'
+  };
+  const challenge = brokerModule.buildDeviceAuthChallengeV2(base);
+  const signature = sign(null, challenge, keys.privateKey);
+  const otherKeys = keyPair();
+  assert.equal(verify(null, challenge, keys.publicKeyPem, signature), true);
+  for (const mutation of [
+    { mode: 'enroll' },
+    { nonce: Buffer.alloc(32, 4) },
+    { exporter: Buffer.alloc(32, 8) },
+    { publicKeyPem: otherKeys.publicKeyPem },
+    { grant: 'grant-two' },
+    { deviceId: 'other-device' }
+  ]) {
+    assert.equal(verify(null, brokerModule.buildDeviceAuthChallengeV2({ ...base, ...mutation }), keys.publicKeyPem, signature), false);
+  }
+});
 
 test('one-time token enrollment persists Ed25519 identity and reconnect needs only proof of possession', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-'));
@@ -145,6 +253,201 @@ test('one-time token enrollment persists Ed25519 identity and reconnect needs on
   const [device] = broker.listDevices();
   assert.equal(device.online, true);
   assert.equal(device.connectionEpoch, 2);
+});
+
+test('v2 reconnect uses inner TLS exporter proof and raises the durable protocol floor', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-v2-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const first = await openSocket(port, 'dev-secret');
+  await enroll(first, { deviceId: 'v2-device', ...keys });
+  first.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, DEVICE_INNER_TLS_SUBPROTOCOL);
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve);
+    ws.once('error', reject);
+  });
+  const secure = tls.connect({
+    socket: createWebSocketDuplex(ws),
+    ca: innerTlsCa,
+    servername: 'localhost',
+    minVersion: 'TLSv1.3',
+    rejectUnauthorized: true
+  });
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      secure.once('secureConnect', resolve);
+      secure.once('error', reject);
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('inner TLS handshake timeout')), 1000))
+  ]);
+
+  const queue = [];
+  const waiters = [];
+  const parser = createJsonFrameParser({
+    onMessage(message) {
+      const waiter = waiters.shift();
+      if (waiter) waiter(message);
+      else queue.push(message);
+    }
+  });
+  secure.on('data', chunk => parser.push(chunk));
+  const next = async () => queue.length ? queue.shift() : await new Promise(resolve => waiters.push(resolve));
+  const send = message => secure.write(encodeJsonFrame(message));
+
+  send({ protocol_version: 2, type: 'auth_hello', device_id: 'v2-device', timestamp: Date.now(), payload: { capabilities: ['ping'] } });
+  const challenge = await next();
+  assert.equal(challenge.type, 'auth_challenge');
+  assert.equal(challenge.payload.mode, 'reconnect');
+  const exporter = secure.exportKeyingMaterial(
+    32,
+    'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2',
+    buildDeviceAuthExporterContext({ deviceId: 'v2-device', mode: 'reconnect' })
+  );
+  const signature = sign(null, buildDeviceAuthChallengeV2({
+    deviceId: 'v2-device',
+    mode: 'reconnect',
+    nonce: challenge.payload.nonce,
+    exporter,
+    publicKeyPem: keys.publicKeyPem
+  }), keys.privateKey).toString('base64');
+  send({ protocol_version: 2, type: 'auth_response', device_id: 'v2-device', timestamp: Date.now(), payload: { signature } });
+  const ok = await next();
+  assert.equal(ok.type, 'auth_ok');
+  assert.equal(ok.protocol_version, 2);
+  assert.equal(store.get('v2-device').minProtocol, 2);
+  secure.destroy();
+  ws.terminate();
+});
+
+test('copied v2 signature from one inner TLS session is rejected on a new session', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-v2-replay-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const deviceId = 'v2-replay-device';
+
+  const enrolled = await openSocket(port, 'dev-secret');
+  await enroll(enrolled, { deviceId, ...keys });
+  enrolled.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+
+  const first = await openV2Tls(port);
+  first.send({ protocol_version: 2, type: 'auth_hello', device_id: deviceId, timestamp: Date.now(), payload: {} });
+  const firstChallenge = await first.next();
+  const copiedSignature = signV2Reconnect({
+    secure: first.secure,
+    deviceId,
+    nonce: firstChallenge.payload.nonce,
+    publicKeyPem: keys.publicKeyPem,
+    privateKey: keys.privateKey
+  });
+  first.send({ protocol_version: 2, type: 'auth_response', device_id: deviceId, timestamp: Date.now(), payload: { signature: copiedSignature } });
+  assert.equal((await first.next()).type, 'auth_ok');
+  first.secure.destroy();
+  first.ws.terminate();
+  await new Promise(resolve => setTimeout(resolve, 25));
+
+  const second = await openV2Tls(port);
+  t.after(() => {
+    second.secure.destroy();
+    try { second.ws.terminate(); } catch {}
+  });
+  second.send({ protocol_version: 2, type: 'auth_hello', device_id: deviceId, timestamp: Date.now(), payload: {} });
+  const secondChallenge = await second.next();
+  assert.notEqual(secondChallenge.payload.nonce, firstChallenge.payload.nonce);
+  second.send({ protocol_version: 2, type: 'auth_response', device_id: deviceId, timestamp: Date.now(), payload: { signature: copiedSignature } });
+  await assert.rejects(second.next(), /socket closed 4003|invalid signature/i);
+});
+
+test('v2 enrollment token stays inside inner TLS and is bound into the exporter proof', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-v2-enroll-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/device`, DEVICE_INNER_TLS_SUBPROTOCOL);
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+  const secure = tls.connect({
+    socket: createWebSocketDuplex(ws),
+    ca: innerTlsCa,
+    servername: 'localhost',
+    minVersion: 'TLSv1.3',
+    rejectUnauthorized: true
+  });
+  await new Promise((resolve, reject) => { secure.once('secureConnect', resolve); secure.once('error', reject); });
+  const queue = [];
+  const waiters = [];
+  const parser = createJsonFrameParser({
+    onMessage(message) {
+      const waiter = waiters.shift();
+      if (waiter) waiter.resolve(message);
+      else queue.push(message);
+    }
+  });
+  secure.on('data', chunk => parser.push(chunk));
+  secure.once('error', error => { const waiter = waiters.shift(); waiter?.reject(error); });
+  ws.once('close', (code, reason) => { const waiter = waiters.shift(); waiter?.reject(new Error(`socket closed ${code}: ${reason.toString()}`)); });
+  const next = async () => queue.length ? queue.shift() : await new Promise((resolve, reject) => waiters.push({ resolve, reject }));
+  const send = message => secure.write(encodeJsonFrame(message));
+
+  send({
+    protocol_version: 2,
+    type: 'enroll_hello',
+    device_id: 'v2-enroll-device',
+    timestamp: Date.now(),
+    payload: {
+      public_key_pem: keys.publicKeyPem,
+      enrollment_grant: 'dev-secret',
+      capabilities: ['ping']
+    }
+  });
+  const challenge = await next();
+  assert.equal(challenge.payload.mode, 'enroll');
+  const exporter = secure.exportKeyingMaterial(
+    32,
+    'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2',
+    buildDeviceAuthExporterContext({ deviceId: 'v2-enroll-device', mode: 'enroll' })
+  );
+  const signature = sign(null, buildDeviceAuthChallengeV2({
+    deviceId: 'v2-enroll-device',
+    mode: 'enroll',
+    nonce: challenge.payload.nonce,
+    exporter,
+    publicKeyPem: keys.publicKeyPem,
+    grant: 'dev-secret'
+  }), keys.privateKey).toString('base64');
+  send({ protocol_version: 2, type: 'auth_response', device_id: 'v2-enroll-device', timestamp: Date.now(), payload: { signature } });
+  const ok = await next();
+  assert.equal(ok.type, 'auth_ok');
+  assert.equal(store.get('v2-enroll-device').minProtocol, 2);
+  secure.destroy();
+  ws.terminate();
+});
+
+test('v1 reconnect is rejected after the stored protocol floor is raised to v2', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-floor-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keys = keyPair();
+  const first = await openSocket(port, 'dev-secret');
+  await enroll(first, { deviceId: 'floor-device', ...keys });
+  first.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  store.raiseProtocolFloor('floor-device', 2);
+
+  const second = await openSocket(port);
+  const closed = new Promise(resolve => second.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+  second.send(JSON.stringify({ protocol_version: 1, type: 'auth_hello', device_id: 'floor-device', timestamp: Date.now(), payload: {} }));
+  const result = await closed;
+  assert.equal(result.code, 4003);
+  assert.match(result.reason, /protocol|v2|upgrade/i);
 });
 
 test('rotated device key rejects the old key and accepts the new key on reconnect', async t => {

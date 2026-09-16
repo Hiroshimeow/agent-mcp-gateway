@@ -206,6 +206,21 @@ test('legacy device registry migrates authorization generation idempotently', t 
   second.close();
 });
 
+test('protocol floor defaults to v1, raises monotonically, and persists across reopen', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-protocol-floor-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const first = createDeviceStore({ dbPath });
+  first.enroll({ deviceId: 'floor-device', publicKeyPem: publicKeyPem() });
+  assert.equal(first.get('floor-device').minProtocol, 1);
+  assert.equal(first.raiseProtocolFloor('floor-device', 2).minProtocol, 2);
+  assert.equal(first.raiseProtocolFloor('floor-device', 1).minProtocol, 2);
+  first.close();
+  const second = createDeviceStore({ dbPath });
+  assert.equal(second.get('floor-device').minProtocol, 2);
+  second.close();
+});
+
 test('device store rejects stale expected key during rotation', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
   const dbPath = path.join(dir, 'devices.sqlite');

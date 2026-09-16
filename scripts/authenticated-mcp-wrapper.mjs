@@ -33,6 +33,7 @@ import {
   AUTH_SUPPORTED_SCOPES,
   AccountAuthProvider,
   SQLiteAuthState,
+  installAuthorizationGateRoutes,
   isStaticBearerAuthorization,
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
@@ -42,6 +43,7 @@ import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
+import { loadDeviceInnerTlsConfig } from './device-secure-transport.mjs';
 import { listDevicesToolDefinition, paginateDeviceInventory } from './device-inventory.mjs';
 import { installDevicePairingRoutes } from './device-pairing-http.mjs';
 import { createDevicePairingStore } from './device-pairing-store.mjs';
@@ -52,6 +54,7 @@ import { createDeviceAuditRecorder } from './device-audit.mjs';
 import { createAccountStore } from './account-store.mjs';
 import { installAccountRoutes } from './account-http.mjs';
 import { installDashboardRoutes } from './dashboard-http.mjs';
+import { startOperatorDashboard } from './operator-dashboard-http.mjs';
 import { findUnifiedMcpConfigPath } from './projects/trusted-roots-projects.mjs';
 import {
   classifyWorkspaceChange,
@@ -66,6 +69,7 @@ const gatewayHost = String(process.env.MCP_GATEWAY_HOST || '127.0.0.1').trim() |
 const advertisedHost = String(process.env.MCP_ADVERTISE_HOST || '').trim() || (gatewayHost === '0.0.0.0' ? '127.0.0.1' : gatewayHost);
 const advertisedUrl = String(process.env.MCP_ADVERTISE_URL || '').trim();
 const fallbackBaseUrl = `http://${advertisedHost}:${gatewayPort}`;
+const operatorDashboardPort = Number(process.env.MCP_OPERATOR_DASHBOARD_PORT || String(gatewayPort + 1));
 const staticBearerToken = process.env.MCP_BEARER_TOKEN;
 const runtimeProfile = getRuntimeProfile(process.env);
 const useStatefulMcpSessions = shouldUseStatefulSessionTransport(process.env.MCP_STATEFUL_SESSIONS);
@@ -126,7 +130,8 @@ const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
   deviceStore,
   pairingStore: devicePairingStore,
-  usageStore: deviceUsageStore
+  usageStore: deviceUsageStore,
+  innerTls: loadDeviceInnerTlsConfig(process.env)
 });
 const deviceAccessPolicy = createDeviceAccessPolicy({
   raw: process.env.MCP_DEVICE_ACCESS_POLICY || '',
@@ -813,17 +818,26 @@ const accountHttp = installAccountRoutes(app, {
   accountStore,
   needInvite: () => workspaceSnapshot().rawConfig?.auth?.need_invite !== false
 });
+const oauthStateStore = new SQLiteAuthState(gatewayDbPath);
 installDashboardRoutes(app, {
   accountFromRequest: accountHttp.accountFromRequest,
   usageStore: deviceUsageStore,
-  deviceBroker
+  deviceBroker,
+  baseUrlFromRequest: requestBaseUrl,
+  oauthClientLookup: clientId => oauthStateStore.getClient(clientId),
+  listTools: listMergedTools
 });
-const oauthStateStore = new SQLiteAuthState(gatewayDbPath);
 const provider = new AccountAuthProvider({
   stateStore: oauthStateStore,
   accountStore,
   accountFromRequest: accountHttp.accountFromRequest,
+  sessionBindingFromRequest: accountHttp.sessionBindingFromRequest,
   activityStore: deviceUsageStore
+});
+installAuthorizationGateRoutes(app, {
+  provider,
+  clearSession: accountHttp.clearSession,
+  loginLocation: accountHttp.loginLocation
 });
 app.use((req, res, next) => {
   if (req.path !== '/mcp') {
@@ -1111,8 +1125,16 @@ const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
 });
 
 deviceBroker.attach(serverInstance);
+const operatorDashboardServer = await startOperatorDashboard({
+  accountStore,
+  usageStore: deviceUsageStore,
+  deviceBroker,
+  port: operatorDashboardPort
+});
+console.log(`Operator dashboard listening on http://127.0.0.1:${operatorDashboardPort}/`);
 
 async function shutdown() {
+  operatorDashboardServer.close();
   serverInstance.close();
   stopSkillCatalogWatcher();
   workspaceRegistry.close();

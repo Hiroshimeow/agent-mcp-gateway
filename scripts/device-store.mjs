@@ -32,7 +32,8 @@ function rowToDevice(row) {
     publicKeyPem: row.public_key_pem,
     enrolledAt: row.enrolled_at,
     revokedAt: row.revoked_at,
-    authorizationGeneration: Number(row.authorization_generation)
+    authorizationGeneration: Number(row.authorization_generation),
+    minProtocol: Number(row.min_protocol || 1)
   };
 }
 
@@ -49,6 +50,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       enrolled_at TEXT NOT NULL,
       revoked_at TEXT,
       authorization_generation INTEGER NOT NULL DEFAULT 1,
+      min_protocol INTEGER NOT NULL DEFAULT 1,
       device_name TEXT,
       owner_account_id TEXT,
       account_label TEXT,
@@ -62,6 +64,9 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   const columns = db.prepare(`PRAGMA table_info(devices)`).all();
   if (!columns.some(column => column.name === 'authorization_generation')) {
     db.exec('ALTER TABLE devices ADD COLUMN authorization_generation INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!columns.some(column => column.name === 'min_protocol')) {
+    db.exec('ALTER TABLE devices ADD COLUMN min_protocol INTEGER NOT NULL DEFAULT 1');
   }
   if (!columns.some(column => column.name === 'device_name')) {
     db.exec('ALTER TABLE devices ADD COLUMN device_name TEXT');
@@ -78,18 +83,18 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
   db.exec('PRAGMA busy_timeout = 5000');
 
   const getStatement = db.prepare(`
-    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation, min_protocol
     FROM devices
     WHERE device_id = ?
   `);
   const listStatement = db.prepare(`
-    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation
+    SELECT device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation, min_protocol
     FROM devices
     ORDER BY device_id
   `);
   const insertStatement = db.prepare(`
-    INSERT INTO devices (device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)
+    INSERT INTO devices (device_id, device_name, owner_account_id, account_label, hostname, platform, arch, path_style, agent_version, public_key_pem, enrolled_at, revoked_at, authorization_generation, min_protocol)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?)
   `);
   const rotateStatement = db.prepare(`
     UPDATE devices
@@ -111,6 +116,11 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     SET owner_account_id = ?, account_label = ?, authorization_generation = authorization_generation + 1
     WHERE device_id = ? AND revoked_at IS NULL
   `);
+  const raiseProtocolFloorStatement = db.prepare(`
+    UPDATE devices
+    SET min_protocol = ?
+    WHERE device_id = ? AND min_protocol < ?
+  `);
 
   function get(deviceId) {
     return rowToDevice(getStatement.get(normalizeDeviceId(deviceId)));
@@ -120,7 +130,7 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return listStatement.all().map(rowToDevice);
   }
 
-  function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null, agentVersion = null }) {
+  function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null, agentVersion = null, minProtocol = 1 }) {
     const normalizedId = normalizeDeviceId(deviceId);
     const normalizedKey = normalizeEd25519PublicKey(publicKeyPem);
     const normalizedName = String(deviceName || '').trim().slice(0, 128) || normalizedId;
@@ -131,9 +141,10 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     const normalizedArch = String(arch || '').trim().slice(0, 32) || null;
     const normalizedPathStyle = ['windows', 'posix'].includes(String(pathStyle || '').trim()) ? String(pathStyle).trim() : null;
     const normalizedAgentVersion = String(agentVersion || '').trim().slice(0, 64) || null;
+    const normalizedMinProtocol = Math.max(1, Number(minProtocol) || 1);
     if (getStatement.get(normalizedId)) throw new Error(`Device ${normalizedId} is already enrolled.`);
     const enrolledAt = now();
-    insertStatement.run(normalizedId, normalizedName, normalizedOwner, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedAgentVersion, normalizedKey, enrolledAt);
+    insertStatement.run(normalizedId, normalizedName, normalizedOwner, normalizedAccount, normalizedHostname, normalizedPlatform, normalizedArch, normalizedPathStyle, normalizedAgentVersion, normalizedKey, enrolledAt, normalizedMinProtocol);
     return {
       deviceId: normalizedId,
       deviceName: normalizedName,
@@ -147,7 +158,8 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
       publicKeyPem: normalizedKey,
       enrolledAt,
       revokedAt: null,
-      authorizationGeneration: 1
+      authorizationGeneration: 1,
+      minProtocol: normalizedMinProtocol
     };
   }
 
@@ -196,6 +208,15 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     return get(normalizedId);
   }
 
+  function raiseProtocolFloor(deviceId, minProtocol) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    const floor = Math.max(1, Number(minProtocol) || 1);
+    const current = get(normalizedId);
+    if (!current) throw new Error(`Unknown device ${normalizedId}.`);
+    raiseProtocolFloorStatement.run(floor, normalizedId, floor);
+    return get(normalizedId);
+  }
+
   function revoke(deviceId) {
     const normalizedId = normalizeDeviceId(deviceId);
     const result = revokeStatement.run(now(), normalizedId);
@@ -230,5 +251,5 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function close() { db.close(); }
 
-  return { get, list, enroll, rotate, updateMetadata, assignOwner, revoke, withCurrentAuthorization, close };
+  return { get, list, enroll, rotate, updateMetadata, assignOwner, raiseProtocolFloor, revoke, withCurrentAuthorization, close };
 }

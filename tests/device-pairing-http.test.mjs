@@ -36,7 +36,7 @@ async function fixture() {
   installDevicePairingRoutes(app, {
     pairingStore: store,
     accountFromRequest: accountHttp.accountFromRequest,
-    baseUrlFromRequest: () => 'https://mcp-v2.example.test'
+    baseUrlFromRequest: () => 'https://mcp.matcha.me'
   });
   const server = await new Promise(resolve => {
     const value = app.listen(0, '127.0.0.1', () => resolve(value));
@@ -81,8 +81,8 @@ test('device start returns browser verification URLs and poll stays pending befo
   try {
     const { p, data } = await startPairing(f);
     assert.match(data.user_code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
-    assert.equal(data.verification_uri, 'https://mcp-v2.example.test/device/verify');
-    assert.equal(data.verification_uri_complete, `https://mcp-v2.example.test/device/verify?user_code=${encodeURIComponent(data.user_code)}`);
+    assert.equal(data.verification_uri, 'https://mcp.matcha.me/device/verify');
+    assert.equal(data.verification_uri_complete, `https://mcp.matcha.me/device/verify?user_code=${encodeURIComponent(data.user_code)}`);
     assert.equal(data.interval, 2);
 
     const poll = await fetch(`${f.base}/device/poll`, {
@@ -92,6 +92,46 @@ test('device start returns browser verification URLs and poll stays pending befo
     });
     assert.equal(poll.status, 400);
     assert.deepEqual(await poll.json(), { error: 'authorization_pending' });
+  } finally { await f.close(); }
+});
+
+test('pair and help surfaces are host-agnostic and guide the existing device flow', async () => {
+  const f = await fixture();
+  try {
+    const pair = await fetch(`${f.base}/pair`);
+    const pairHtml = await pair.text();
+    assert.equal(pair.status, 200);
+    assert.match(pairHtml, /Pair a device/i);
+    assert.match(pairHtml, /action="\/device\/verify"/);
+    assert.match(pairHtml, /mcp-device login/);
+    assert.match(pairHtml, /mcp-device install/);
+    assert.match(pairHtml, /mcp-device status/);
+    assert.doesNotMatch(pairHtml, /hcu-device/);
+    assert.match(pairHtml, /https:\/\/mcp\.matcha\.me/);
+    assert.doesNotMatch(pairHtml, /mcp-v2\.hcu-lab\.me|HCU/);
+
+    const help = await fetch(`${f.base}/help`);
+    const helpHtml = await help.text();
+    assert.equal(help.status, 200);
+    assert.match(helpHtml, /mcp-device login/);
+    assert.match(helpHtml, /mcp-device install/);
+    assert.match(helpHtml, /mcp-device status/);
+    assert.doesNotMatch(helpHtml, /hcu-device/);
+    assert.match(helpHtml, /https:\/\/mcp\.matcha\.me/);
+  } finally { await f.close(); }
+});
+
+test('device verification keeps friendly missing, invalid, and expired states', async () => {
+  const f = await fixture();
+  try {
+    const missing = await fetch(`${f.base}/device/verify`);
+    assert.equal(missing.status, 200);
+    assert.match(await missing.text(), /Enter the code/i);
+
+    const invalid = await fetch(`${f.base}/device/verify?user_code=NOPE-NOPE`);
+    assert.equal(invalid.status, 404);
+    assert.match(await invalid.text(), /Invalid pairing code/i);
+    assert.match(await (await fetch(`${f.base}/pair`)).text(), /Pair a device/i);
   } finally { await f.close(); }
 });
 

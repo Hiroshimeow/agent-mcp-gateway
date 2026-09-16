@@ -94,6 +94,57 @@ test('SQLite usage store is authoritative for account-scoped tool, skill, catalo
   } finally { f.close(); }
 });
 
+test('tool call events provide account-scoped per-device and per-tool attribution without assigning unattributed history', () => {
+  const f = fixture();
+  try {
+    const events = [
+      { accountId: 'alice', deviceId: 'device-a', tool: 'shell_execute', success: true, inputBytes: 40, outputBytes: 80 },
+      { accountId: 'alice', deviceId: 'device-a', tool: 'shell_execute', success: false, errorCode: 'TOOL_ERROR', inputBytes: 20, outputBytes: 20 },
+      { accountId: 'alice', deviceId: 'device-a', tool: 'read_text_file', success: true, inputBytes: 16, outputBytes: 24 },
+      { accountId: 'alice', deviceId: 'device-b', tool: 'get_skill', success: true, inputBytes: 8, outputBytes: 12 },
+      { accountId: 'alice', deviceId: null, tool: 'legacy_unattributed', success: true, inputBytes: 4, outputBytes: 8 },
+      { accountId: 'bob', deviceId: 'bob-device', tool: 'secret_tool', success: true, inputBytes: 100, outputBytes: 100 }
+    ];
+    for (const event of events) f.store.recordToolCall({ durationMs: 1, callerCategory: 'oauth', ...event });
+
+    assert.deepEqual(f.store.getDeviceUsageForAccount('alice'), [
+      {
+        deviceId: 'device-a',
+        toolCalls: 3,
+        succeeded: 2,
+        failed: 1,
+        inputBytes: 76,
+        outputBytes: 124,
+        estimatedIoTokens: 50,
+        estimationMethod: 'utf8_bytes_div_4_estimate'
+      },
+      {
+        deviceId: 'device-b',
+        toolCalls: 1,
+        succeeded: 1,
+        failed: 0,
+        inputBytes: 8,
+        outputBytes: 12,
+        estimatedIoTokens: 5,
+        estimationMethod: 'utf8_bytes_div_4_estimate'
+      }
+    ]);
+
+    assert.deepEqual(f.store.getDeviceToolUsage('alice', 'device-a'), [
+      { tool: 'shell_execute', calls: 2, failures: 1, inputBytes: 60, outputBytes: 100 },
+      { tool: 'read_text_file', calls: 1, failures: 0, inputBytes: 16, outputBytes: 24 }
+    ]);
+    assert.deepEqual(f.store.getDeviceToolUsage('alice', 'bob-device'), []);
+    assert.equal(JSON.stringify(f.store.getDeviceUsageForAccount('alice')).includes('bob-device'), false);
+
+    const alice = f.store.getAccountUsage('alice');
+    assert.deepEqual(alice.totals, {
+      toolCalls: 5, succeeded: 4, failed: 1, inputBytes: 88, outputBytes: 144
+    });
+    assert.equal(f.store.getDeviceUsageForAccount('alice').reduce((sum, row) => sum + row.toolCalls, 0), 4);
+  } finally { f.close(); }
+});
+
 test('activity sessions are account-scoped, refreshable, endable, and fail closed after end', () => {
   const f = fixture();
   try {

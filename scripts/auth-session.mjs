@@ -2,9 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { publicGatePage } from './account-http.mjs';
+import { escapeHtml } from './enduser-ui.mjs';
 
 const ACCESS_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PENDING_AUTH_TTL_MS = 5 * 60 * 1000;
 
 export const AUTH_SUPPORTED_SCOPES = Object.freeze(['mcp:tools', 'offline_access']);
 
@@ -96,24 +99,33 @@ function activeAccount(accountStore, accountId) {
   return account;
 }
 
+function localReturnPath(req) {
+  const value = String(req?.originalUrl || req?.url || '/').trim();
+  if (!value || value.length > 4096 || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+  return value;
+}
+
 function redirectToAccountLogin(res) {
-  const req = res.req;
-  const returnTo = String(req?.originalUrl || req?.url || '/').trim();
-  res.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+  res.redirect(`/login?return_to=${encodeURIComponent(localReturnPath(res.req))}`);
 }
 
 export class AccountAuthProvider {
-  constructor({ stateStore = null, accountStore, accountFromRequest, activityStore = null } = {}) {
+  constructor({ stateStore = null, accountStore, accountFromRequest, sessionBindingFromRequest, activityStore = null, now = () => Date.now(), pendingAuthTtlMs = PENDING_AUTH_TTL_MS } = {}) {
     if (!accountStore) throw new Error('accountStore is required for AccountAuthProvider.');
     if (typeof accountFromRequest !== 'function') throw new Error('accountFromRequest is required for AccountAuthProvider.');
+    if (sessionBindingFromRequest != null && typeof sessionBindingFromRequest !== 'function') throw new Error('sessionBindingFromRequest must be a function when provided.');
     this.stateStore = stateStore;
     this.accountStore = accountStore;
     this.accountFromRequest = accountFromRequest;
+    this.sessionBindingFromRequest = sessionBindingFromRequest;
     this.activityStore = activityStore;
+    this.now = now;
+    this.pendingAuthTtlMs = pendingAuthTtlMs;
     this.clientsStore = new ClientsStore(stateStore);
     this.codes = new Map();
     this.tokens = new Map();
     this.refreshTokens = new Map();
+    this.pendingAuthorizations = new Map();
   }
 
   ensureActivitySession(tokenData, { token = null, refreshToken = null } = {}) {
@@ -134,6 +146,36 @@ export class AccountAuthProvider {
     return activitySessionId;
   }
 
+  issueAuthorizationCode(client, params, accountId, res) {
+    activeAccount(this.accountStore, accountId);
+    const code = crypto.randomUUID();
+    this.codes.set(code, { client, params, accountId });
+
+    const searchParams = new URLSearchParams({ code });
+    if (params.state !== undefined) searchParams.set('state', params.state);
+    const targetUrl = new URL(String(params.redirectUri).trim());
+    targetUrl.search = searchParams.toString();
+    res.redirect(targetUrl.toString());
+  }
+
+  prunePendingAuthorizations() {
+    const now = Number(this.now());
+    for (const [pendingId, pending] of this.pendingAuthorizations) {
+      if (pending.expiresAt <= now) this.pendingAuthorizations.delete(pendingId);
+    }
+  }
+
+  takePendingAuthorization({ pendingId, csrf, req }) {
+    this.prunePendingAuthorizations();
+    const pending = this.pendingAuthorizations.get(String(pendingId || ''));
+    if (!pending || pending.csrf !== String(csrf || '')) return null;
+    const account = this.accountFromRequest(req);
+    const sessionBinding = this.sessionBindingFromRequest?.(req);
+    if (!account || account.role !== 'user' || account.revokedAt !== null || account.accountId !== pending.accountId || !sessionBinding || sessionBinding !== pending.sessionBinding) return null;
+    this.pendingAuthorizations.delete(String(pendingId));
+    return pending;
+  }
+
   async authorize(client, params, res) {
     const account = this.accountFromRequest(res.req);
     if (!account || account.role !== 'user' || account.revokedAt !== null) {
@@ -142,14 +184,34 @@ export class AccountAuthProvider {
     }
 
     activeAccount(this.accountStore, account.accountId);
-    const code = crypto.randomUUID();
-    this.codes.set(code, { client, params, accountId: account.accountId });
+    this.prunePendingAuthorizations();
+    const pendingId = crypto.randomUUID();
+    const csrf = crypto.randomUUID();
+    const sessionBinding = this.sessionBindingFromRequest?.(res.req);
+    if (!sessionBinding) throw new Error('OAuth account session binding is unavailable.');
+    this.pendingAuthorizations.set(pendingId, {
+      client,
+      params,
+      accountId: account.accountId,
+      sessionBinding,
+      csrf,
+      returnTo: localReturnPath(res.req),
+      expiresAt: Number(this.now()) + this.pendingAuthTtlMs
+    });
+    const hidden = `<input type="hidden" name="pending" value="${escapeHtml(pendingId)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
+    const identity = escapeHtml(account.email || account.identity || account.accountId);
+    res.status(200).type('html').send(publicGatePage(`<div>Continue as ${identity}</div><div class="row"><form class="go-form" method="post" action="/oauth/continue">${hidden}<button class="go" type="submit">Continue</button></form><form class="out-form" method="post" action="/oauth/out">${hidden}<button class="out" type="submit">Use another account</button></form></div>`));
+  }
 
-    const searchParams = new URLSearchParams({ code });
-    if (params.state !== undefined) searchParams.set('state', params.state);
-    const targetUrl = new URL(String(params.redirectUri).trim());
-    targetUrl.search = searchParams.toString();
-    res.redirect(targetUrl.toString());
+  async continueAuthorization({ pendingId, csrf, req, res }) {
+    const pending = this.takePendingAuthorization({ pendingId, csrf, req });
+    if (!pending) return false;
+    this.issueAuthorizationCode(pending.client, pending.params, pending.accountId, res);
+    return true;
+  }
+
+  cancelAuthorization({ pendingId, csrf, req }) {
+    return this.takePendingAuthorization({ pendingId, csrf, req })?.returnTo || null;
   }
 
   async challengeForAuthorizationCode(_client, authorizationCode) {
@@ -265,6 +327,36 @@ export class AccountAuthProvider {
       resource: tokenData.resource
     };
   }
+}
+
+export function installAuthorizationGateRoutes(app, { provider, clearSession, loginLocation } = {}) {
+  if (!app || !provider || typeof clearSession !== 'function' || typeof loginLocation !== 'function') {
+    throw new Error('app, provider, clearSession, and loginLocation are required.');
+  }
+
+  app.post('/oauth/continue', async (req, res) => {
+    const ok = await provider.continueAuthorization({
+      pendingId: req.body?.pending,
+      csrf: req.body?.csrf,
+      req,
+      res
+    });
+    if (!ok && !res.headersSent) res.status(400).end();
+  });
+
+  app.post('/oauth/out', (req, res) => {
+    const returnTo = provider.cancelAuthorization({
+      pendingId: req.body?.pending,
+      csrf: req.body?.csrf,
+      req
+    });
+    if (!returnTo) {
+      res.status(400).end();
+      return;
+    }
+    clearSession(req, res);
+    res.redirect(302, loginLocation(returnTo));
+  });
 }
 
 export function shouldCreateTransportForRequest(sessionId, requestBody, transports) {

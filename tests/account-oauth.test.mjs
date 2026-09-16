@@ -21,7 +21,12 @@ function fixture() {
     const match = raw.match(/(?:^|;\s*)hcu_account_session=([^;]+)/);
     return match ? accountStore.getSessionAccount(decodeURIComponent(match[1])) : null;
   };
-  const provider = new AccountAuthProvider({ stateStore, accountStore, accountFromRequest, activityStore: usageStore });
+  const sessionBindingFromRequest = req => {
+    const raw = String(req?.headers?.cookie || '');
+    const match = raw.match(/(?:^|;\s*)hcu_account_session=([^;]+)/);
+    return match ? `binding:${decodeURIComponent(match[1])}` : null;
+  };
+  const provider = new AccountAuthProvider({ stateStore, accountStore, accountFromRequest, sessionBindingFromRequest, activityStore: usageStore });
   const client = { client_id: 'chatgpt-client' };
   return { dir, accountStore, stateStore, usageStore, provider, client, user, session };
 }
@@ -29,11 +34,49 @@ function fixture() {
 function fakeResponse(req) {
   return {
     req,
+    statusCode: 200,
+    contentType: null,
+    body: null,
     redirectTarget: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    type(value) {
+      this.contentType = value;
+      return this;
+    },
+    send(value) {
+      this.body = String(value);
+      return this;
+    },
     redirect(statusOrUrl, maybeUrl) {
       this.redirectTarget = maybeUrl ?? statusOrUrl;
     }
   };
+}
+
+function visibleText(html) {
+  return String(html)
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hiddenValue(html, name) {
+  return String(html).match(new RegExp(`name="${name}" value="([^"]+)"`))?.[1] || null;
+}
+
+async function authorizeThroughGate(f, params, req) {
+  const gate = fakeResponse(req);
+  await f.provider.authorize(f.client, params, gate);
+  const pendingId = hiddenValue(gate.body, 'pending');
+  const csrf = hiddenValue(gate.body, 'csrf');
+  const continued = fakeResponse(req);
+  assert.equal(await f.provider.continueAuthorization({ pendingId, csrf, req, res: continued }), true);
+  return { gate, continued };
 }
 
 test('OAuth authorization redirects unauthenticated users to product login without shared password', async () => {
@@ -53,6 +96,91 @@ test('OAuth authorization redirects unauthenticated users to product login witho
   }
 });
 
+test('OAuth authenticated session shows account confirmation and preserves validated authorization params', async () => {
+  const f = fixture();
+  try {
+    const req = {
+      headers: { cookie: `hcu_account_session=${encodeURIComponent(f.session.sessionId)}` },
+      originalUrl: '/authorize?client_id=chatgpt-client&state=abc&code_challenge=public-challenge'
+    };
+    const params = {
+      redirectUri: 'https://chat.openai.com/callback',
+      codeChallenge: 'validated-challenge',
+      scopes: ['mcp:tools', 'offline_access'],
+      state: 'validated-state',
+      resource: 'https://example.com/mcp'
+    };
+    const gate = fakeResponse(req);
+    await f.provider.authorize(f.client, params, gate);
+
+    assert.equal(gate.statusCode, 200);
+    assert.equal(gate.contentType, 'html');
+    assert.equal(visibleText(gate.body), 'Continue as user@example.com Continue Use another account');
+    assert.equal(f.provider.codes.size, 0);
+    assert.ok(hiddenValue(gate.body, 'pending'));
+    assert.ok(hiddenValue(gate.body, 'csrf'));
+    assert.doesNotMatch(gate.body, /validated-state|validated-challenge|chat\.openai\.com|client_id/i);
+
+    const continued = fakeResponse(req);
+    assert.equal(await f.provider.continueAuthorization({
+      pendingId: hiddenValue(gate.body, 'pending'),
+      csrf: hiddenValue(gate.body, 'csrf'),
+      req,
+      res: continued
+    }), true);
+    const target = new URL(continued.redirectTarget);
+    assert.equal(target.origin + target.pathname, 'https://chat.openai.com/callback');
+    assert.equal(target.searchParams.get('state'), 'validated-state');
+    const code = target.searchParams.get('code');
+    const stored = f.provider.codes.get(code);
+    assert.equal(stored.accountId, f.user.accountId);
+    assert.equal(stored.params.codeChallenge, 'validated-challenge');
+    assert.equal(stored.params.resource, 'https://example.com/mcp');
+    assert.deepEqual(stored.params.scopes, ['mcp:tools', 'offline_access']);
+  } finally {
+    f.usageStore.close();
+    f.stateStore.close();
+    f.accountStore.close();
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('OAuth pending gate rejects bad CSRF, same-account different session, reuse and OUT consumes only the pending decision', async () => {
+  const f = fixture();
+  try {
+    const req = {
+      headers: { cookie: `hcu_account_session=${encodeURIComponent(f.session.sessionId)}` },
+      originalUrl: '/authorize?client_id=chatgpt-client&state=switch-me'
+    };
+    const gate = fakeResponse(req);
+    await f.provider.authorize(f.client, {
+      redirectUri: 'https://chat.openai.com/callback',
+      codeChallenge: 'challenge',
+      scopes: ['mcp:tools'],
+      state: 'switch-me'
+    }, gate);
+    const pendingId = hiddenValue(gate.body, 'pending');
+    const csrf = hiddenValue(gate.body, 'csrf');
+
+    assert.equal(await f.provider.continueAuthorization({ pendingId, csrf: 'wrong', req, res: fakeResponse(req) }), false);
+    const secondSession = f.accountStore.createSession(f.user.accountId);
+    const secondReq = {
+      ...req,
+      headers: { cookie: `hcu_account_session=${encodeURIComponent(secondSession.sessionId)}` }
+    };
+    assert.equal(await f.provider.continueAuthorization({ pendingId, csrf, req: secondReq, res: fakeResponse(secondReq) }), false);
+    assert.equal(f.provider.codes.size, 0);
+    assert.equal(f.provider.cancelAuthorization({ pendingId, csrf, req }), req.originalUrl);
+    assert.equal(f.provider.cancelAuthorization({ pendingId, csrf, req }), null);
+    assert.equal(await f.provider.continueAuthorization({ pendingId, csrf, req, res: fakeResponse(req) }), false);
+  } finally {
+    f.usageStore.close();
+    f.stateStore.close();
+    f.accountStore.close();
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test('OAuth activity session persists across refresh and ending it blocks access and refresh', async () => {
   const f = fixture();
   try {
@@ -61,13 +189,12 @@ test('OAuth activity session persists across refresh and ending it blocks access
       headers: { cookie: `hcu_account_session=${encodeURIComponent(f.session.sessionId)}` },
       originalUrl: '/authorize?client_id=chatgpt-client'
     };
-    const res = fakeResponse(req);
-    await f.provider.authorize(f.client, {
+    const { continued } = await authorizeThroughGate(f, {
       redirectUri: 'https://chat.openai.com/callback',
       codeChallenge: 'challenge',
       scopes: ['mcp:tools', 'offline_access']
-    }, res);
-    const code = new URL(res.redirectTarget).searchParams.get('code');
+    }, req);
+    const code = new URL(continued.redirectTarget).searchParams.get('code');
     const issued = await f.provider.exchangeAuthorizationCode(f.client, code);
     const first = await f.provider.verifyAccessToken(issued.access_token);
     assert.ok(first.activitySessionId);
@@ -95,14 +222,13 @@ test('OAuth access and refresh tokens preserve account_id and revoke with the ac
       headers: { cookie: `hcu_account_session=${encodeURIComponent(f.session.sessionId)}` },
       originalUrl: '/authorize?client_id=chatgpt-client'
     };
-    const res = fakeResponse(req);
-    await f.provider.authorize(f.client, {
+    const { continued } = await authorizeThroughGate(f, {
       redirectUri: 'https://chat.openai.com/callback',
       codeChallenge: 'challenge',
       scopes: ['mcp:tools', 'offline_access'],
       resource: 'https://example.com/mcp'
-    }, res);
-    const target = new URL(res.redirectTarget);
+    }, req);
+    const target = new URL(continued.redirectTarget);
     const code = target.searchParams.get('code');
     assert.ok(code);
 

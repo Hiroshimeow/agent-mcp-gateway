@@ -288,10 +288,47 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     FROM tool_call_events WHERE account_id = ?
     GROUP BY tool ORDER BY calls DESC, tool ASC LIMIT 10
   `);
+  const deviceUsageForAccount = db.prepare(`
+    SELECT device_id, COUNT(*) AS tool_calls,
+      COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0) AS succeeded,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failed,
+      COALESCE(SUM(input_bytes),0) AS input_bytes,
+      COALESCE(SUM(output_bytes),0) AS output_bytes
+    FROM tool_call_events
+    WHERE account_id = ? AND device_id IS NOT NULL
+    GROUP BY device_id ORDER BY device_id ASC
+  `);
+  const deviceToolUsageForAccount = db.prepare(`
+    SELECT tool, COUNT(*) AS calls,
+      COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failures,
+      COALESCE(SUM(input_bytes),0) AS input_bytes,
+      COALESCE(SUM(output_bytes),0) AS output_bytes
+    FROM tool_call_events
+    WHERE account_id = ? AND device_id = ?
+    GROUP BY tool ORDER BY calls DESC, tool ASC
+  `);
   const recentErrorsForAccount = db.prepare(`
     SELECT event_at, device_id, tool, error_code
     FROM tool_call_events WHERE account_id = ? AND status='error'
     ORDER BY event_at DESC, id DESC LIMIT 20
+  `);
+  const activityDevicesForAccountSession = db.prepare(`
+    SELECT device_id
+    FROM tool_call_events
+    WHERE account_id = ? AND activity_session_id = ? AND device_id IS NOT NULL
+    GROUP BY device_id
+    ORDER BY MAX(event_at) DESC, device_id ASC
+    LIMIT ?
+  `);
+  const recentDeviceCallsForAccount = db.prepare(`
+    SELECT e.event_at, e.activity_session_id, e.tool, e.duration_ms, e.status, e.error_code,
+      e.input_bytes, e.output_bytes, a.client_id
+    FROM tool_call_events e
+    LEFT JOIN activity_sessions a
+      ON a.activity_session_id = e.activity_session_id AND a.account_id = e.account_id
+    WHERE e.account_id = ? AND e.device_id = ?
+    ORDER BY e.event_at DESC, e.id DESC
+    LIMIT ?
   `);
   const skillLoadsForAccount = db.prepare(`
     SELECT skill_name, COUNT(*) AS loads,
@@ -441,6 +478,60 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     );
   }
 
+  function getDeviceUsageForAccount(accountId) {
+    const owner = boundedText(accountId, 128, { required: true });
+    return deviceUsageForAccount.all(owner).map(row => {
+      const inputBytes = Number(row.input_bytes);
+      const outputBytes = Number(row.output_bytes);
+      return {
+        deviceId: row.device_id,
+        toolCalls: Number(row.tool_calls),
+        succeeded: Number(row.succeeded),
+        failed: Number(row.failed),
+        inputBytes,
+        outputBytes,
+        estimatedIoTokens: Math.ceil((inputBytes + outputBytes) / 4),
+        estimationMethod: TOKEN_ESTIMATION_METHOD
+      };
+    });
+  }
+
+  function getDeviceToolUsage(accountId, deviceId) {
+    const owner = boundedText(accountId, 128, { required: true });
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    return deviceToolUsageForAccount.all(owner, normalizedDeviceId).map(row => ({
+      tool: row.tool,
+      calls: Number(row.calls),
+      failures: Number(row.failures),
+      inputBytes: Number(row.input_bytes),
+      outputBytes: Number(row.output_bytes)
+    }));
+  }
+
+  function getActivitySessionDeviceIds(accountId, activitySessionId, { limit = 20 } = {}) {
+    const owner = boundedText(accountId, 128, { required: true });
+    const sessionId = boundedText(activitySessionId, 128, { required: true });
+    const boundedLimit = Math.max(1, Math.min(20, Number.isInteger(Number(limit)) ? Number(limit) : 20));
+    return activityDevicesForAccountSession.all(owner, sessionId, boundedLimit).map(row => row.device_id);
+  }
+
+  function getDeviceRecentToolCalls(accountId, deviceId, { limit = 20 } = {}) {
+    const owner = boundedText(accountId, 128, { required: true });
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    const boundedLimit = Math.max(1, Math.min(20, Number.isInteger(Number(limit)) ? Number(limit) : 20));
+    return recentDeviceCallsForAccount.all(owner, normalizedDeviceId, boundedLimit).map(row => ({
+      eventAt: Number(row.event_at),
+      activitySessionId: row.activity_session_id || null,
+      clientId: row.client_id || null,
+      tool: row.tool,
+      success: row.status === 'success',
+      durationMs: Number(row.duration_ms),
+      inputBytes: Number(row.input_bytes),
+      outputBytes: Number(row.output_bytes),
+      errorCode: row.error_code || null
+    }));
+  }
+
   function getAccountUsage(accountId) {
     const owner = boundedText(accountId, 128, { required: true });
     const totalsRow = totalsForAccount.get(owner);
@@ -501,6 +592,10 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     setSchemaSnapshot,
     getSchemaSnapshot,
     recordDeviceStatus,
+    getDeviceUsageForAccount,
+    getDeviceToolUsage,
+    getActivitySessionDeviceIds,
+    getDeviceRecentToolCalls,
     getAccountUsage,
     close
   };

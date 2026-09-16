@@ -1,7 +1,15 @@
-import { randomBytes, randomUUID, timingSafeEqual, verify } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  DEVICE_INNER_TLS_SUBPROTOCOL,
+  createJsonFrameParser,
+  createServerInnerTls,
+  encodeJsonFrame
+} from './device-secure-transport.mjs';
 
 export const DEVICE_PROTOCOL_VERSION = 1;
+export const DEVICE_PROTOCOL_VERSION_V2 = 2;
+const DEVICE_AUTH_EXPORTER_LABEL = 'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -9,6 +17,44 @@ const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export function buildDeviceAuthChallenge({ deviceId, nonce }) {
   return Buffer.from(`mcp-device-auth-v1\n${deviceId}\n${nonce}`, 'utf8');
+}
+
+const DEVICE_AUTH_V2_MODE = Object.freeze({ reconnect: 0, enroll: 1, pair: 2 });
+
+function fixed32(value, name) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value || ''), 'base64url');
+  if (bytes.length !== 32) throw new Error(`${name} must be exactly 32 bytes.`);
+  return bytes;
+}
+
+export function buildDeviceAuthExporterContext({ deviceId, mode }) {
+  if (!DEVICE_ID_PATTERN.test(String(deviceId || ''))) throw new Error('Invalid device_id.');
+  if (!(mode in DEVICE_AUTH_V2_MODE)) throw new Error('Invalid device authentication mode.');
+  return createHash('sha256').update(`hcu-mcp-device-auth-v2\n${deviceId}\n${mode}`, 'utf8').digest();
+}
+
+export function buildDeviceAuthChallengeV2({ deviceId, mode, nonce, exporter, publicKeyPem, grant = null }) {
+  const deviceBytes = Buffer.from(String(deviceId || ''), 'utf8');
+  if (!DEVICE_ID_PATTERN.test(String(deviceId || '')) || deviceBytes.length > 0xffff) throw new Error('Invalid device_id.');
+  if (!(mode in DEVICE_AUTH_V2_MODE)) throw new Error('Invalid device authentication mode.');
+  const publicKey = createPublicKey(publicKeyPem);
+  if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('Device public key must be Ed25519.');
+  const publicKeyDer = publicKey.export({ type: 'spki', format: 'der' });
+  const grantDigest = mode === 'reconnect'
+    ? Buffer.alloc(32)
+    : createHash('sha256').update(String(grant || ''), 'utf8').digest();
+  const deviceLength = Buffer.allocUnsafe(2);
+  deviceLength.writeUInt16BE(deviceBytes.length, 0);
+  return Buffer.concat([
+    Buffer.from('hcu-mcp-device-auth-v2\0', 'ascii'),
+    Buffer.from([2, DEVICE_AUTH_V2_MODE[mode]]),
+    deviceLength,
+    deviceBytes,
+    fixed32(nonce, 'gateway nonce'),
+    fixed32(exporter, 'TLS exporter'),
+    createHash('sha256').update(publicKeyDer).digest(),
+    grantDigest
+  ]);
 }
 
 function bearerToken(request) {
@@ -30,14 +76,17 @@ function rejectUpgrade(socket, statusCode, message) {
   socket.destroy();
 }
 
-function parseMessage(raw) {
-  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
-  if (Buffer.byteLength(text, 'utf8') > MAX_MESSAGE_BYTES) throw new Error('Device message exceeds maximum size.');
-  const message = JSON.parse(text);
+function validateMessage(message, expectedVersion) {
   if (!message || typeof message !== 'object') throw new Error('Device message must be an object.');
-  if (message.protocol_version !== DEVICE_PROTOCOL_VERSION) throw new Error('Unsupported device protocol version.');
+  if (message.protocol_version !== expectedVersion) throw new Error('Unsupported device protocol version.');
   if (typeof message.type !== 'string' || !message.type) throw new Error('Device message type is required.');
   return message;
+}
+
+function parseMessage(raw, expectedVersion = DEVICE_PROTOCOL_VERSION) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  if (Buffer.byteLength(text, 'utf8') > MAX_MESSAGE_BYTES) throw new Error('Device message exceeds maximum size.');
+  return validateMessage(JSON.parse(text), expectedVersion);
 }
 
 function normalizeDeviceId(value) {
@@ -101,6 +150,7 @@ export function createDeviceBroker(options = {}) {
   const deviceStore = options.deviceStore || null;
   const pairingStore = options.pairingStore || null;
   const usageStore = options.usageStore || null;
+  const innerTls = options.innerTls || null;
   const durableAuth = Boolean(deviceStore);
   const requireAccountOwnership = options.requireAccountOwnership !== false;
   let schemaSnapshot = normalizeSchemaSnapshot(options.schemaSnapshot);
@@ -164,16 +214,41 @@ export function createDeviceBroker(options = {}) {
     };
   }
 
+  function socketProtocolVersion(ws) {
+    return ws?.deviceProtocolVersion === DEVICE_PROTOCOL_VERSION_V2
+      ? DEVICE_PROTOCOL_VERSION_V2
+      : DEVICE_PROTOCOL_VERSION;
+  }
+
+  function sendDeviceMessage(ws, message, callback = undefined) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      callback?.(new Error('Device WebSocket is not open.'));
+      return false;
+    }
+    const protocolVersion = socketProtocolVersion(ws);
+    const payload = { ...message, protocol_version: protocolVersion };
+    if (protocolVersion === DEVICE_PROTOCOL_VERSION_V2) {
+      if (!ws.innerTlsSocket || ws.innerTlsSocket.destroyed) {
+        callback?.(new Error('Device inner TLS socket is not open.'));
+        return false;
+      }
+      const frame = encodeJsonFrame(payload, MAX_MESSAGE_BYTES);
+      ws.innerTlsSocket.write(frame, callback);
+      return true;
+    }
+    ws.send(JSON.stringify(payload), callback);
+    return true;
+  }
+
   function sendStatusSnapshot(ws, device) {
     if (!ws || ws.readyState !== WebSocket.OPEN || !device) return;
-    ws.send(JSON.stringify({
-      protocol_version: DEVICE_PROTOCOL_VERSION,
+    sendDeviceMessage(ws, {
       type: 'status_snapshot',
       device_id: device.deviceId,
       connection_epoch: device.connectionEpoch,
       timestamp: Date.now(),
       payload: statusPayload(device)
-    }));
+    });
   }
 
   if (durableAuth) {
@@ -277,21 +352,38 @@ export function createDeviceBroker(options = {}) {
   }
 
   function sendAuthChallenge(ws, authState) {
-    ws.authState = { ...authState, nonce: randomBytes(32).toString('base64url') };
-    ws.send(JSON.stringify({
-      protocol_version: DEVICE_PROTOCOL_VERSION,
+    const nonce = randomBytes(32).toString('base64url');
+    const protocolVersion = socketProtocolVersion(ws);
+    let exporter = null;
+    if (protocolVersion === DEVICE_PROTOCOL_VERSION_V2) {
+      exporter = ws.innerTlsSocket.exportKeyingMaterial(
+        32,
+        DEVICE_AUTH_EXPORTER_LABEL,
+        buildDeviceAuthExporterContext({ deviceId: authState.deviceId, mode: authState.mode })
+      );
+    }
+    ws.authState = { ...authState, nonce, exporter };
+    sendDeviceMessage(ws, {
       type: 'auth_challenge',
       device_id: authState.deviceId,
       timestamp: Date.now(),
-      payload: { nonce: ws.authState.nonce }
-    }));
+      payload: {
+        nonce,
+        ...(protocolVersion === DEVICE_PROTOCOL_VERSION_V2 ? { mode: authState.mode } : {})
+      }
+    });
   }
 
   function handleAuthHello(ws, message) {
     const deviceId = normalizeDeviceId(message.device_id);
+    const v2 = socketProtocolVersion(ws) === DEVICE_PROTOCOL_VERSION_V2;
+    const innerCredential = v2 ? String(message.payload?.enrollment_grant || '').trim() : '';
     if (message.type === 'enroll_hello') {
-      const pairingCredential = String(ws.enrollmentCredential || '').trim();
-      if (!ws.enrollmentAuthorized && !(pairingStore && pairingCredential)) {
+      const pairingCredential = v2 ? innerCredential : String(ws.enrollmentCredential || '').trim();
+      const legacyEnrollmentAuthorized = v2
+        ? tokenMatches(pairingCredential, enrollmentToken)
+        : Boolean(ws.enrollmentAuthorized);
+      if (!legacyEnrollmentAuthorized && !(pairingStore && pairingCredential)) {
         return authFailure(ws, 'enrollment authorization required');
       }
       const existing = deviceStore.get(deviceId);
@@ -305,14 +397,15 @@ export function createDeviceBroker(options = {}) {
         agentVersion: message.payload?.agent_version,
         capabilities: message.payload?.capabilities,
         ...machineMetadata(message.payload),
-        legacyEnrollmentAuthorized: Boolean(ws.enrollmentAuthorized),
-        enrollmentGrant: ws.enrollmentAuthorized ? null : pairingCredential
+        legacyEnrollmentAuthorized,
+        enrollmentGrant: pairingCredential
       });
       return;
     }
     const stored = deviceStore.get(deviceId);
+    if (!v2 && stored?.minProtocol >= 2) return authFailure(ws, 'device requires protocol v2');
     if (message.type === 'pair_hello') {
-      const pairingCredential = String(ws.enrollmentCredential || '').trim();
+      const pairingCredential = v2 ? innerCredential : String(ws.enrollmentCredential || '').trim();
       if (!pairingStore || !pairingCredential) return authFailure(ws, 'pairing grant required');
       if (stored?.revokedAt) return authFailure(ws, 'revoked device');
       const publicKeyPem = stored?.publicKeyPem || String(message.payload?.public_key_pem || '');
@@ -350,12 +443,17 @@ export function createDeviceBroker(options = {}) {
     }
     let signature;
     try { signature = Buffer.from(String(message.payload?.signature || ''), 'base64'); } catch { return authFailure(ws); }
-    const valid = signature.length > 0 && verify(
-      null,
-      buildDeviceAuthChallenge({ deviceId: state.deviceId, nonce: state.nonce }),
-      state.publicKeyPem,
-      signature
-    );
+    const challenge = socketProtocolVersion(ws) === DEVICE_PROTOCOL_VERSION_V2
+      ? buildDeviceAuthChallengeV2({
+          deviceId: state.deviceId,
+          mode: state.mode,
+          nonce: state.nonce,
+          exporter: state.exporter,
+          publicKeyPem: state.publicKeyPem,
+          grant: state.enrollmentGrant
+        })
+      : buildDeviceAuthChallenge({ deviceId: state.deviceId, nonce: state.nonce });
+    const valid = signature.length > 0 && verify(null, challenge, state.publicKeyPem, signature);
     if (!valid) return authFailure(ws, 'invalid signature');
 
     let authorizedPublicKeyPem = state.publicKeyPem;
@@ -446,20 +544,22 @@ export function createDeviceBroker(options = {}) {
         try { deviceStore.updateMetadata({ deviceId: state.deviceId, agentVersion: state.agentVersion }); }
         catch (error) { console.error(`[device-broker] agent version persist failed: ${error.message}`); }
       }
+      if (socketProtocolVersion(ws) === DEVICE_PROTOCOL_VERSION_V2 && typeof deviceStore.raiseProtocolFloor === 'function') {
+        deviceStore.raiseProtocolFloor(state.deviceId, DEVICE_PROTOCOL_VERSION_V2);
+      }
       ws.authState = null;
       if (usageStore) {
         const previousUsage = usageStore.get(current.deviceId);
         usageStore.recordConnection(current.deviceId, { reconnect: previousUsage.connections > 0 });
         recordDeviceStatus(current, 'online');
       }
-      ws.send(JSON.stringify({
-        protocol_version: DEVICE_PROTOCOL_VERSION,
+      sendDeviceMessage(ws, {
         type: 'auth_ok',
         device_id: current.deviceId,
         connection_epoch: current.connectionEpoch,
         timestamp: Date.now(),
         payload: statusPayload(current)
-      }));
+      });
     } catch { return authFailure(ws, 'device authorization changed'); }
   }
 
@@ -549,16 +649,19 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  wss.on('connection', ws => {
+  wss.on('connection', (ws, request) => {
     sockets.add(ws);
+    ws.deviceProtocolVersion = ws.protocol === DEVICE_INNER_TLS_SUBPROTOCOL
+      ? DEVICE_PROTOCOL_VERSION_V2
+      : DEVICE_PROTOCOL_VERSION;
     const helloTimer = setTimeout(() => {
       if (!ws.authenticated && ws.readyState === WebSocket.OPEN) ws.close(4000, 'authentication required');
     }, helloTimeoutMs);
     helloTimer.unref?.();
 
-    ws.on('message', raw => {
+    const handleLogicalMessage = message => {
       try {
-        const message = parseMessage(raw);
+        validateMessage(message, socketProtocolVersion(ws));
         if (!ws.authenticated) {
           if (durableAuth) {
             if (ws.authState) handleAuthResponse(ws, message);
@@ -575,11 +678,41 @@ export function createDeviceBroker(options = {}) {
       } catch (error) {
         if (ws.readyState === WebSocket.OPEN) ws.close(durableAuth ? 4003 : 4002, String(error.message).slice(0, 120));
       }
-    });
+    };
+
+    if (ws.deviceProtocolVersion === DEVICE_PROTOCOL_VERSION_V2) {
+      if (!innerTls) {
+        ws.close(1011, 'device inner TLS is unavailable');
+      } else {
+        const secureSocket = createServerInnerTls(ws, innerTls);
+        ws.innerTlsSocket = secureSocket;
+        const frameParser = createJsonFrameParser({
+          maxMessageBytes: MAX_MESSAGE_BYTES,
+          onMessage: handleLogicalMessage
+        });
+        secureSocket.on('data', chunk => {
+          try { frameParser.push(chunk); }
+          catch (error) {
+            if (ws.readyState === WebSocket.OPEN) ws.close(4003, String(error.message).slice(0, 120));
+          }
+        });
+        secureSocket.once('error', error => {
+          if (ws.readyState === WebSocket.OPEN) ws.close(4003, String(error.message).slice(0, 120));
+        });
+      }
+    } else {
+      ws.on('message', raw => {
+        try { handleLogicalMessage(parseMessage(raw)); }
+        catch (error) {
+          if (ws.readyState === WebSocket.OPEN) ws.close(durableAuth ? 4003 : 4002, String(error.message).slice(0, 120));
+        }
+      });
+    }
 
     ws.on('close', () => {
       sockets.delete(ws);
       clearTimeout(helloTimer);
+      try { ws.innerTlsSocket?.destroy(); } catch {}
       if (!ws.deviceId) return;
       const current = devices.get(ws.deviceId);
       if (!current || current.socket !== ws || current.connectionEpoch !== ws.connectionEpoch) return;
@@ -599,13 +732,21 @@ export function createDeviceBroker(options = {}) {
       try { pathname = new URL(request.url || '/', 'http://localhost').pathname; }
       catch { return rejectUpgrade(socket, 400, 'Bad Request'); }
       if (pathname !== endpointPath) return;
+      const requestedProtocols = String(request.headers['sec-websocket-protocol'] || '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean);
+      const requestsV2 = requestedProtocols.includes(DEVICE_INNER_TLS_SUBPROTOCOL);
+      if (requestsV2 && !innerTls) return rejectUpgrade(socket, 503, 'Device Inner TLS Unavailable');
+      if (requestedProtocols.length > 0 && !requestsV2) return rejectUpgrade(socket, 400, 'Unsupported Device Protocol');
       if (!durableAuth) {
         if (!enrollmentToken) return rejectUpgrade(socket, 503, 'Device Enrollment Disabled');
         if (!tokenMatches(bearerToken(request), enrollmentToken)) return rejectUpgrade(socket, 401, 'Unauthorized');
       }
       wss.handleUpgrade(request, socket, head, ws => {
-        const credential = bearerToken(request);
-        ws.enrollmentAuthorized = tokenMatches(credential, enrollmentToken);
+        const v2 = ws.protocol === DEVICE_INNER_TLS_SUBPROTOCOL;
+        const credential = v2 ? '' : bearerToken(request);
+        ws.enrollmentAuthorized = !v2 && tokenMatches(credential, enrollmentToken);
         ws.enrollmentCredential = ws.enrollmentAuthorized ? '' : credential;
         wss.emit('connection', ws, request);
       });
@@ -695,16 +836,16 @@ export function createDeviceBroker(options = {}) {
     if (!requestId || requestId.length > 128) throw new Error('Device request_id must be between 1 and 128 characters.');
     if (pending.has(requestId)) throw new Error(`Device request ${requestId} is already pending.`);
     const wireRequestId = randomUUID();
-    const wireMessage = JSON.stringify({
-      protocol_version: DEVICE_PROTOCOL_VERSION,
+    const wireMessage = {
       type: 'tool_call',
       request_id: wireRequestId,
       device_id: device.deviceId,
       connection_epoch: device.connectionEpoch,
       timestamp: Date.now(),
       payload: { tool, arguments: args }
-    });
-    const requestBytes = Buffer.byteLength(wireMessage, 'utf8');
+    };
+    const wireVersion = socketProtocolVersion(device.socket);
+    const requestBytes = Buffer.byteLength(JSON.stringify({ ...wireMessage, protocol_version: wireVersion }), 'utf8');
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
@@ -720,7 +861,7 @@ export function createDeviceBroker(options = {}) {
         timer.unref?.();
         pending.set(requestId, entry);
         pendingByWireRequestId.set(wireRequestId, entry);
-        device.socket.send(wireMessage, error => {
+        sendDeviceMessage(device.socket, wireMessage, error => {
           if (!error || pending.get(requestId) !== entry) return;
           clearTimeout(entry.timer);
           pending.delete(requestId);
