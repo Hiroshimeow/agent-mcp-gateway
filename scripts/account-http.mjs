@@ -98,9 +98,12 @@ function loginPasswordPage(identity, returnTo = '/dashboard', failed = false) {
   return publicGatePage(`<div class="row"><form class="go-form" method="post" action="/login"><input name="password" type="password" autocomplete="current-password" aria-label="Password" placeholder="password" aria-invalid="${failed ? 'true' : 'false'}" autofocus required><input type="hidden" name="identity" value="${escapeHtml(identity)}"><input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="go" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(target)}">OUT</a></div>`, { failed });
 }
 
-function signupPage(returnTo = '/dashboard', failed = false, needInvite = true) {
+function signupPage(returnTo = '/dashboard', failed = false, needInvite = true, inviteInvalid = false) {
   const target = safeReturnTo(returnTo);
-  return publicGatePage(`<div class="row"><form class="signup-form" method="post" action="/signup"><input name="identity" type="email" autocomplete="username" aria-label="Email" placeholder="email" aria-invalid="${failed ? 'true' : 'false'}" required><input name="password" type="password" autocomplete="new-password" aria-label="Password" placeholder="password" required>${needInvite ? '<input name="invite" autocomplete="one-time-code" aria-label="Invite code" placeholder="invite code" maxlength="8" required>' : ''}<input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="out" type="submit">OUT</button></form><a class="go" href="/login?return_to=${encodeURIComponent(target)}">GO</a></div>`, { failed });
+  const inviteInput = inviteInvalid
+    ? '<input name="invite" autocomplete="one-time-code" aria-label="Invite code" aria-invalid="true" placeholder="invalid invite code" maxlength="8" autofocus required>'
+    : '<input name="invite" autocomplete="one-time-code" aria-label="Invite code" placeholder="invite code" maxlength="8" required>';
+  return publicGatePage(`<div class="row"><form class="signup-form" method="post" action="/signup"><input name="identity" type="email" autocomplete="username" aria-label="Email" placeholder="email" aria-invalid="${failed ? 'true' : 'false'}" required><input name="password" type="password" autocomplete="new-password" aria-label="Password" placeholder="password" required>${needInvite ? inviteInput : ''}<input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="out" type="submit">OUT</button></form><a class="go" href="/login?return_to=${encodeURIComponent(target)}">GO</a></div>`, { failed });
 }
 
 export function installAccountRoutes(app, {
@@ -198,8 +201,9 @@ export function installAccountRoutes(app, {
       });
       setSession(req, res, account.accountId);
       res.redirect(302, returnTo);
-    } catch {
-      res.status(200).type('html').send(signupPage(returnTo, true, requiresInvite()));
+    } catch (error) {
+      const inviteInvalid = error?.code === 'INVITE_REQUIRED' || error?.code === 'INVITE_INVALID';
+      res.status(200).type('html').send(signupPage(returnTo, true, requiresInvite(), inviteInvalid));
     }
   });
 
