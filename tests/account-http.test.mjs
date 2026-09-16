@@ -170,8 +170,8 @@ test('signup respects need_invite without email verification', async () => {
     assert.match(signupHtml, /name="return_to" value="\/dashboard"/);
     assert.equal(visibleText(signupHtml), 'OUT GO');
     assert.match(signupHtml, /name="invite"/);
-    assert.match(signupHtml, /<button[^>]*>OUT<\/button>/);
-    assert.match(signupHtml, /href="\/login\?return_to=%2Fdashboard"[^>]*>GO<\/a>/);
+    assert.match(signupHtml, /<button[^>]*class="go"[^>]*type="submit"[^>]*form="signup-form"[^>]*>GO<\/button>/);
+    assert.match(signupHtml, /href="\/login\?return_to=%2Fdashboard"[^>]*class="out"[^>]*>OUT<\/a>/);
     assert.match(signupHtml, /placeholder="email"/i);
     assert.match(signupHtml, /placeholder="password"/i);
     assert.match(signupHtml, /placeholder="invite code"/i);
