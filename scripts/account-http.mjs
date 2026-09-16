@@ -27,7 +27,7 @@ function parseCookies(header = '') {
 
 function safeReturnTo(value) {
   const target = String(value || '').trim();
-  if (!target || target.length > 2048 || !target.startsWith('/') || target.startsWith('//') || target.includes('\\')) return '/';
+  if (!target || target.length > 2048 || !target.startsWith('/') || target.startsWith('//') || target.includes('\\')) return '/dashboard';
   return target;
 }
 
@@ -89,21 +89,21 @@ function shell({ title, body }) {
 </style></head><body><main class="box"><div class="brand">HCU</div>${body}</main></body></html>`;
 }
 
-function loginIdentityPage(returnTo = '/') {
+function loginIdentityPage(returnTo = '/dashboard') {
   return shell({
     title: 'HCU Login',
     body: `<p class="msg"></p><form method="post" action="/login/email"><input name="identity" type="email" autocomplete="username" autofocus required><input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-green" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">OUT</a>`
   });
 }
 
-function loginPasswordPage(identity, returnTo = '/', failed = false) {
+function loginPasswordPage(identity, returnTo = '/dashboard', failed = false) {
   return shell({
     title: 'HCU Login',
     body: `<p class="msg">${failed ? 'Authentication failed' : ''}</p><form method="post" action="/login"><input name="password" type="password" autocomplete="current-password" autofocus required><input type="hidden" name="identity" value="${escapeHtml(identity)}"><input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-red" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">OUT</a>`
   });
 }
 
-function signupPage(returnTo = '/', failed = false, needInvite = true) {
+function signupPage(returnTo = '/dashboard', failed = false, needInvite = true) {
   return shell({
     title: 'HCU Signup',
     body: `<p class="msg">${failed ? 'Registration failed' : ''}</p><form method="post" action="/signup" style="display:grid"><input name="identity" type="email" autocomplete="username" placeholder="email" required><input name="password" type="password" autocomplete="new-password" placeholder="password" required>${needInvite ? '<input name="invite" autocomplete="one-time-code" placeholder="invite" maxlength="8" required>' : ''}<input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-green" type="submit">OUT</button></form><a class="out" href="/login?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">GO BACK</a>`

@@ -63,6 +63,7 @@ test('login UI is dark/progressive and email stage does not reveal account exist
     f.store.createAccount({ email: 'known@example.com', password: 'known-password' });
     const page = await fetch(`${f.base}/login`);
     const html = await page.text();
+    assert.match(html, /name="return_to" value="\/dashboard"/);
     assert.match(html, /background:\s*#0[0-9a-f]{5}/i);
     assert.match(html, />GO</);
     assert.match(html, />OUT</);
@@ -104,6 +105,9 @@ test('normal user login creates account-bound session while admin has no public 
 test('signup respects need_invite without email verification', async () => {
   const gated = await fixture({ needInvite: true });
   try {
+    const signupPage = await fetch(`${gated.base}/signup`);
+    assert.match(await signupPage.text(), /name="return_to" value="\/dashboard"/);
+
     const denied = await post(gated.base, '/signup', { identity: 'new@example.com', password: 'new-password' });
     assert.equal(denied.status, 200);
     assert.match(await denied.text(), /Registration failed/);
@@ -111,6 +115,7 @@ test('signup respects need_invite without email verification', async () => {
     const invite = gated.store.createInvite().code;
     const allowed = await post(gated.base, '/signup', { identity: 'new@example.com', password: 'new-password', invite });
     assert.equal(allowed.status, 302);
+    assert.equal(allowed.headers.get('location'), '/dashboard');
     assert.ok(cookieValue(allowed));
     assert.equal(gated.store.getAccountByEmail('new@example.com')?.role, 'user');
   } finally { await gated.close(); }
