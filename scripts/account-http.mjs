@@ -80,34 +80,27 @@ export function createLoginRateLimiter({ now = () => Date.now() } = {}) {
   return { canAttempt, recordFailure, recordSuccess };
 }
 
-function shell({ title, body }) {
+export function publicGatePage(body, { failed = false } = {}) {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title></title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#050505;color:#e8e8e8;font:15px ui-monospace,SFMono-Regular,Consolas,monospace}.box{width:min(92vw,440px)}form{display:flex;gap:10px}input{min-width:0;flex:1;background:#0b0b0b;color:#f4f4f4;border:1px solid #292929;padding:13px 14px;outline:none}input:focus{border-color:#666}button,.link{border:0;padding:13px 16px;background:#222;color:#eee;text-decoration:none;font:inherit;cursor:pointer}.go-green{background:#0b5;color:#001b0e}.go-red{background:#b21;color:#fff}.out{display:inline-block;margin-top:12px;color:#777}.msg{min-height:22px;color:#a7a7a7;margin:0 0 12px}.brand{color:#555;margin-bottom:14px;letter-spacing:.18em}
-</style></head><body><main class="box"><div class="brand">HCU</div>${body}</main></body></html>`;
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#050505;color:#eee;font:15px ui-monospace,SFMono-Regular,Consolas,monospace}.gate{width:min(92vw,440px);display:grid;gap:10px}.row{display:flex;gap:10px}.row>*{min-width:0}form{margin:0}.go-form{display:flex;gap:10px;flex:1}.signup-form{display:grid;gap:10px;flex:1}input{min-width:0;flex:1;background:#0b0b0b;color:#f4f4f4;border:1px solid ${failed ? '#733' : '#292929'};padding:13px 14px;outline:none}input::placeholder{color:#666}input:focus{border-color:#666}button,a{border:0;padding:13px 16px;background:#222;color:#eee;text-decoration:none;font:inherit;cursor:pointer}.go{background:#176b45;color:#f2f2f2}.out{background:#8f342c;color:#f2f2f2}
+</style></head><body><main class="gate">${body}</main></body></html>`;
 }
 
 function loginIdentityPage(returnTo = '/dashboard') {
-  return shell({
-    title: 'HCU Login',
-    body: `<p class="msg"></p><form method="post" action="/login/email"><input name="identity" type="email" autocomplete="username" autofocus required><input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-green" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">OUT</a>`
-  });
+  const target = safeReturnTo(returnTo);
+  return publicGatePage(`<div class="row"><form class="go-form" method="post" action="/login/email"><input name="identity" type="email" autocomplete="username" aria-label="Email" placeholder="email" autofocus required><input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="go" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(target)}">OUT</a></div>`);
 }
 
 function loginPasswordPage(identity, returnTo = '/dashboard', failed = false) {
-  return shell({
-    title: 'HCU Login',
-    body: `<p class="msg">${failed ? 'Authentication failed' : ''}</p><form method="post" action="/login"><input name="password" type="password" autocomplete="current-password" autofocus required><input type="hidden" name="identity" value="${escapeHtml(identity)}"><input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-red" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">OUT</a>`
-  });
+  const target = safeReturnTo(returnTo);
+  return publicGatePage(`<div class="row"><form class="go-form" method="post" action="/login"><input name="password" type="password" autocomplete="current-password" aria-label="Password" placeholder="password" aria-invalid="${failed ? 'true' : 'false'}" autofocus required><input type="hidden" name="identity" value="${escapeHtml(identity)}"><input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="go" type="submit">GO</button></form><a class="out" href="/signup?return_to=${encodeURIComponent(target)}">OUT</a></div>`, { failed });
 }
 
 function signupPage(returnTo = '/dashboard', failed = false, needInvite = true) {
-  return shell({
-    title: 'HCU Signup',
-    body: `<p class="msg">${failed ? 'Registration failed' : ''}</p><form method="post" action="/signup" style="display:grid"><input name="identity" type="email" autocomplete="username" placeholder="email" required><input name="password" type="password" autocomplete="new-password" placeholder="password" required>${needInvite ? '<input name="invite" autocomplete="one-time-code" placeholder="invite" maxlength="8" required>' : ''}<input type="hidden" name="return_to" value="${escapeHtml(safeReturnTo(returnTo))}"><button class="go-green" type="submit">OUT</button></form><a class="out" href="/login?return_to=${encodeURIComponent(safeReturnTo(returnTo))}">GO BACK</a>`
-  });
+  const target = safeReturnTo(returnTo);
+  return publicGatePage(`<div class="row"><form class="signup-form" method="post" action="/signup"><input name="identity" type="email" autocomplete="username" aria-label="Email" placeholder="email" aria-invalid="${failed ? 'true' : 'false'}" required><input name="password" type="password" autocomplete="new-password" aria-label="Password" placeholder="password" required>${needInvite ? '<input name="invite" autocomplete="one-time-code" aria-label="Invite code" placeholder="invite code" maxlength="8" required>' : ''}<input type="hidden" name="return_to" value="${escapeHtml(target)}"><button class="out" type="submit">OUT</button></form><a class="go" href="/login?return_to=${encodeURIComponent(target)}">GO</a></div>`, { failed });
 }
 
 export function installAccountRoutes(app, {
@@ -138,6 +131,27 @@ export function installAccountRoutes(app, {
     });
     return session;
   }
+
+  function clearSession(req, res) {
+    const sessionId = parseCookies(req.headers?.cookie || '')[ACCOUNT_COOKIE];
+    if (sessionId) accountStore.revokeSession(sessionId);
+    res.clearCookie(ACCOUNT_COOKIE, { path: '/' });
+  }
+
+  function sessionBindingFromRequest(req) {
+    const sessionId = parseCookies(req?.headers?.cookie || '')[ACCOUNT_COOKIE];
+    if (!sessionId || !accountStore.getSessionAccount(sessionId)) return null;
+    return crypto.createHash('sha256').update(sessionId, 'utf8').digest('hex');
+  }
+
+  function loginLocation(returnTo) {
+    const target = safeReturnTo(returnTo);
+    return target === '/dashboard' ? '/login' : `/login?return_to=${encodeURIComponent(target)}`;
+  }
+
+  app.get('/', (req, res) => {
+    res.redirect(302, accountFromRequest(req) ? '/dashboard' : '/login');
+  });
 
   app.get('/login', (req, res) => {
     res.status(200).type('html').send(loginIdentityPage(req.query?.return_to));
@@ -190,11 +204,9 @@ export function installAccountRoutes(app, {
   });
 
   app.post('/logout', (req, res) => {
-    const sessionId = parseCookies(req.headers?.cookie || '')[ACCOUNT_COOKIE];
-    if (sessionId) accountStore.revokeSession(sessionId);
-    res.clearCookie(ACCOUNT_COOKIE, { path: '/' });
+    clearSession(req, res);
     res.redirect(302, '/login');
   });
 
-  return { accountFromRequest, cookieName: ACCOUNT_COOKIE };
+  return { accountFromRequest, cookieName: ACCOUNT_COOKIE, clearSession, loginLocation, sessionBindingFromRequest };
 }
