@@ -179,14 +179,14 @@ test('signup respects need_invite without email verification', async () => {
     const denied = await post(gated.base, '/signup', { identity: 'new@example.com', password: 'new-password' });
     assert.equal(denied.status, 200);
     const deniedHtml = await denied.text();
-    assert.equal(visibleText(deniedHtml), 'OUT GO');
+    assert.equal(visibleText(deniedHtml), 'INVALID INVITE OUT GO');
     assert.match(deniedHtml, /placeholder="invalid invite code"/i);
     assert.match(deniedHtml, /name="invite"[^>]*aria-invalid="true"/i);
 
     const invalid = await post(gated.base, '/signup', { identity: 'new@example.com', password: 'new-password', invite: 'ABCDEFGH' });
     assert.equal(invalid.status, 200);
     const invalidHtml = await invalid.text();
-    assert.equal(visibleText(invalidHtml), 'OUT GO');
+    assert.equal(visibleText(invalidHtml), 'INVALID INVITE OUT GO');
     assert.match(invalidHtml, /placeholder="invalid invite code"/i);
     assert.match(invalidHtml, /name="invite"[^>]*aria-invalid="true"/i);
     assert.equal(gated.store.getAccountByEmail('new@example.com'), null);
