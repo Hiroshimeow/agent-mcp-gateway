@@ -2,7 +2,7 @@
   "source": "hallmark",
   "repository": "https://github.com/nutlope/hallmark.git",
   "ref": "main",
-  "commit": "aeb42fb354ff4efa36ab475773a082315a3af2ce",
+  "commit": "13ac0ec7e148655948100b6396439e481361d690",
   "path": "skills/hallmark",
   "license": "MIT",
   "overrides": {
@@ -142,6 +142,11 @@
         "path": "references/upstream/study-examples.md",
         "search": "](study.md)",
         "replace": "](../study.md)"
+      },
+      {
+        "path": "references/component-cookbook.md",
+        "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+        "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
       }
     ]
   }

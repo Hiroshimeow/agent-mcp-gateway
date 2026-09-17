@@ -50,19 +50,19 @@ Any successful `get_skill(...)` call suppresses further advisory for the TTL. Th
 
 ## Managed upstream skills
 
-`sources.json` is the reviewable source manifest. It contains explicit repositories, branches, included skill folders, compatibility metadata, license requirements, and documented exclusions. `sources.lock.json` records the exact upstream commits currently vendored.
+`sources.json` is the reviewable source manifest. It contains explicit repositories, branches, optional exact `pin` commits, included skill folders, compatibility metadata, license requirements, and documented exclusions. `sources.lock.json` records the exact upstream commits currently vendored. Use a `pin` when one logical source should remain frozen while another source from the same upstream tracks a newer branch commit.
 
 Current managed sources:
 
 - `DietrichGebert/ponytail` — MIT
 - `obra/superpowers` — MIT
-- redistributable Apache-2.0 skills from `anthropics/skills`
+- redistributable Apache-2.0 skills from `anthropics/skills`, with provider-neutral skills allowed to track independently from Claude-specific references
 - selected Apache-2.0 design skills from `google-labs-code/stitch-skills`
 - `nutlope/hallmark` — MIT
 
 Anthropic's proprietary `docx`, `pdf`, `pptx`, and `xlsx` skills are not vendored because their license prohibits redistribution. `doc-coauthoring` is excluded because its folder does not declare a redistributable license. `canvas-design` is excluded because it includes bundled font files.
 
-From Stitch Skills, only `extract-design-md` and `enhance-prompt` are vendored. Stitch-MCP-dependent workflows are excluded until that server is configured. `taste-design` is excluded because it overlaps `frontend-design` while imposing brittle universal font, motion, and layout rules; the more context-sensitive `frontend-design` remains the default visual-design skill.
+From Stitch Skills, only `extract-design-md` and `enhance-prompt` are vendored. Stitch-MCP/Build-Loop-dependent workflows such as `site-md` are excluded until that runtime is configured. `taste-design` is excluded because it overlaps `frontend-design` while imposing brittle universal font, motion, and layout rules; the more context-sensitive `frontend-design` remains the default visual-design skill.
 
 Hallmark is vendored as an opt-in anti-AI-slop design workflow. Its local selection trigger is intentionally narrower than upstream so generic UI work continues to use `frontend-design`; Hallmark activates when named explicitly or for Hallmark `audit`, `redesign`, or `study` requests.
 

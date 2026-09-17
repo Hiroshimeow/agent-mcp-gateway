@@ -34,6 +34,10 @@ test('managed skill lock matches the source manifest and vendored metadata', () 
     assert.match(source.commit, /^[0-9a-f]{40}$/);
     assert.equal(source.repository, configured.repository);
     assert.equal(source.ref, configured.ref);
+    if (configured.pin) {
+      assert.match(configured.pin, /^[0-9a-f]{40}$/);
+      assert.equal(source.commit, configured.pin, `managed source pin drifted: ${source.id}`);
+    }
     assert.deepEqual(source.skills.map(skill => skill.target), configured.include);
 
     for (const skill of source.skills) {
@@ -110,7 +114,7 @@ test('Hallmark is a pinned managed MIT skill with explicit aliases', () => {
   assert.deepEqual(source.include, ['hallmark']);
   assert.equal(source.license, 'MIT');
   assert.equal(source.compatibility.hallmark.files.length, 3);
-  assert.equal(source.compatibility.hallmark.replacements.length, 22);
+  assert.equal(source.compatibility.hallmark.replacements.length, 23);
 
   const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
   assert.equal(registry.getSkillDefinition('anti_ai_slop')?.name, 'hallmark');

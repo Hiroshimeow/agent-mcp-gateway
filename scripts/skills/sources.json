@@ -5,6 +5,7 @@
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail.git",
       "ref": "main",
+      "pin": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
       "skillRoot": "skills",
       "license": "MIT",
       "requireRootLicense": {
@@ -134,13 +135,13 @@
       "id": "anthropic",
       "repository": "https://github.com/anthropics/skills.git",
       "ref": "main",
+      "pin": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
       "skillRoot": "skills",
       "license": "Apache-2.0 per included skill",
       "include": [
         "algorithmic-art",
         "brand-guidelines",
         "claude-api",
-        "frontend-design",
         "internal-comms",
         "mcp-builder",
         "skill-creator",
@@ -150,9 +151,6 @@
         "webapp-testing"
       ],
       "overrides": {
-        "frontend-design": {
-          "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
-        },
         "theme-factory": {
           "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
         },
@@ -171,6 +169,8 @@
         }
       ],
       "excluded": {
+        "academy-guide": "Claude Academy-specific guidance is not useful to the provider-neutral agent workflows in this catalog.",
+        "discernment-nudge": "Global response-shaping behavior that appends reflective follow-up questions; excluded to keep interaction policy host-controlled rather than skill-controlled.",
         "canvas-design": "Not vendored because its directory contains bundled font files.",
         "doc-coauthoring": "No redistributable license is declared in the skill directory.",
         "docx": "Anthropic source-available proprietary license prohibits redistribution.",
@@ -180,9 +180,29 @@
       }
     },
     {
+      "id": "anthropic-frontend",
+      "repository": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "skillRoot": "skills",
+      "license": "Apache-2.0 per included skill",
+      "include": [
+        "frontend-design"
+      ],
+      "overrides": {
+        "frontend-design": {
+          "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+        }
+      },
+      "requireSkillLicense": {
+        "path": "LICENSE.txt",
+        "contains": "Apache License"
+      }
+    },
+    {
       "id": "stitch-design",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
+      "pin": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
       "skillRoot": "plugins/stitch-design/skills",
       "license": "Apache-2.0",
       "requireRootLicense": {
@@ -219,6 +239,7 @@
       "id": "stitch-utilities",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
+      "pin": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
       "skillRoot": "plugins/stitch-utilities/skills",
       "license": "Apache-2.0",
       "requireRootLicense": {
@@ -237,8 +258,25 @@
           "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
         }
       },
+      "compatibility": {
+        "enhance-prompt": {
+          "replacements": [
+            {
+              "path": "SKILL.md",
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+            },
+            {
+              "path": "SKILL.md",
+              "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
+              "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+            }
+          ]
+        }
+      },
       "excluded": {
         "design-md": "Requires an existing Stitch project and Stitch MCP server; extract-design-md covers local source analysis.",
+        "site-md": "Targets the Stitch Build Loop and a fixed .stitch/SITE.md project constitution; defer until that workflow is configured as a first-class runtime surface.",
         "stitch-loop": "Requires Stitch and Chrome MCP servers and adds an autonomous workflow outside the requested design scope.",
         "taste-design": "Overlaps frontend-design but is less context-sensitive and imposes brittle universal rules such as mandatory perpetual motion and blanket font/layout bans."
       }
@@ -396,6 +434,11 @@
               "path": "references/upstream/study-examples.md",
               "search": "](study.md)",
               "replace": "](../study.md)"
+            },
+            {
+              "path": "references/component-cookbook.md",
+              "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+              "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
             }
           ]
         }

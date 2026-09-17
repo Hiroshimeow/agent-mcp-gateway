@@ -70,7 +70,7 @@
       "id": "superpowers",
       "repository": "https://github.com/obra/superpowers.git",
       "ref": "main",
-      "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "commit": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
       "license": "MIT",
       "skills": [
         {
@@ -184,13 +184,6 @@
           "path": "skills/claude-api"
         },
         {
-          "target": "frontend-design",
-          "path": "skills/frontend-design",
-          "overrides": {
-            "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
-          }
-        },
-        {
           "target": "internal-comms",
           "path": "skills/internal-comms"
         },
@@ -223,6 +216,22 @@
         {
           "target": "webapp-testing",
           "path": "skills/webapp-testing"
+        }
+      ]
+    },
+    {
+      "id": "anthropic-frontend",
+      "repository": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "commit": "34040c9c568585f6929bedeaad110ad08f079624",
+      "license": "Apache-2.0 per included skill",
+      "skills": [
+        {
+          "target": "frontend-design",
+          "path": "skills/frontend-design",
+          "overrides": {
+            "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+          }
         }
       ]
     },
@@ -262,6 +271,20 @@
               "stitch_prompt"
             ],
             "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+          },
+          "compatibility": {
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill. This ensures all generated pages share the \r\nsame visual language.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill. This ensures all generated pages share the\r\nsame visual language."
+              },
+              {
+                "path": "SKILL.md",
+                "search": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md \r\nfile using the `design-md` skill.",
+                "replace": "💡 **Tip:** For consistent designs across multiple screens, create a DESIGN.md\r\nfile using the `design-md` skill."
+              }
+            ]
           }
         }
       ]
@@ -270,7 +293,7 @@
       "id": "hallmark",
       "repository": "https://github.com/nutlope/hallmark.git",
       "ref": "main",
-      "commit": "aeb42fb354ff4efa36ab475773a082315a3af2ce",
+      "commit": "13ac0ec7e148655948100b6396439e481361d690",
       "license": "MIT",
       "skills": [
         {
@@ -413,6 +436,11 @@
                 "path": "references/upstream/study-examples.md",
                 "search": "](study.md)",
                 "replace": "](../study.md)"
+              },
+              {
+                "path": "references/component-cookbook.md",
+                "search": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n\r\n\r\n",
+                "replace": "- Auto-play video respects `data-saver` (`navigator.connection.saveData`) — replaces with poster when set.\r\n"
               }
             ]
           }

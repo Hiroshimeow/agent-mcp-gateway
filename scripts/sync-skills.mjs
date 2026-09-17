@@ -36,6 +36,21 @@ function git(args, cwd) {
   }).trim();
 }
 
+function checkoutSource(source, cloneDirectory) {
+  if (!source.pin) {
+    git(['clone', '--depth', '1', '--single-branch', '--branch', source.ref, source.repository, cloneDirectory]);
+    return;
+  }
+  if (!/^[0-9a-f]{40}$/i.test(source.pin)) {
+    throw new Error(`Invalid exact source pin for ${source.id}: ${source.pin}`);
+  }
+  fs.mkdirSync(cloneDirectory, { recursive: true });
+  git(['init', '--quiet'], cloneDirectory);
+  git(['remote', 'add', 'origin', source.repository], cloneDirectory);
+  git(['fetch', '--depth', '1', 'origin', source.pin], cloneDirectory);
+  git(['checkout', '--quiet', '--detach', 'FETCH_HEAD'], cloneDirectory);
+}
+
 function assertSafeSegment(value, label) {
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(value) || value === '.' || value === '..') {
     throw new Error(`Unsafe ${label}: ${value}`);
@@ -149,9 +164,12 @@ try {
     }
 
     const cloneDirectory = path.join(temporaryRoot, `source-${source.id}`);
-    console.log(`[skills] fetching ${source.id} (${source.ref})`);
-    git(['clone', '--depth', '1', '--single-branch', '--branch', source.ref, source.repository, cloneDirectory]);
+    console.log(`[skills] fetching ${source.id} (${source.ref}${source.pin ? ` @ ${source.pin}` : ''})`);
+    checkoutSource(source, cloneDirectory);
     const commit = git(['rev-parse', 'HEAD'], cloneDirectory);
+    if (source.pin && commit.toLowerCase() !== source.pin.toLowerCase()) {
+      throw new Error(`Exact source pin mismatch for ${source.id}: expected ${source.pin}, got ${commit}`);
+    }
     const installed = [];
 
     if (source.requireRootLicense) {
