@@ -19,8 +19,22 @@ export function pageShell({ title, body, wide = false }) {
 export function quickGuide(baseUrl) {
   const base = String(baseUrl || '').replace(/\/+$/, '');
   const escaped = escapeHtml(base || 'https://your-mcp-host.example');
-  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><pre>MCP_GATEWAY_URL=${escaped}
+  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><pre>npm install -g @hcu-lab.me/mcp-device@1.0.0
+
+# Set the gateway for your shell, then sign in
+# PowerShell:
+$env:MCP_GATEWAY_URL="${escaped}"
+# macOS / Linux:
+export MCP_GATEWAY_URL="${escaped}"
+
 mcp-device login
 mcp-device install
-mcp-device status</pre><p class="muted">The device connects outbound to the gateway; no inbound port is required.</p></div>`;
+mcp-device status
+
+# Stop without removing identity/account state
+mcp-device stop
+
+# Remove the installed service/runtime, then remove the package
+mcp-device uninstall
+npm uninstall -g @hcu-lab.me/mcp-device</pre><p class="muted"><code>login</code> links this device to your account, <code>install</code> enables the background service, and <code>status</code> verifies the connection. Use only the gateway-setting command for your shell. The device connects outbound to the gateway; no inbound port is required.</p></div>`;
 }
