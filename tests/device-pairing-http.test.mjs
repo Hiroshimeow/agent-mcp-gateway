@@ -103,7 +103,7 @@ test('pair and help surfaces are host-agnostic and guide the existing device flo
     assert.equal(pair.status, 200);
     assert.match(pairHtml, /Pair a device/i);
     assert.match(pairHtml, /action="\/device\/verify"/);
-    assert.match(pairHtml, /npm install -g @hcu-lab\.me\/mcp-device@1\.0\.2/);
+    assert.match(pairHtml, /npm install -g @hcu-lab\.me\/mcp-device(?:\s|$)/);
     assert.match(pairHtml, /mcp-device login/);
     assert.match(pairHtml, /mcp-device install/);
     assert.match(pairHtml, /mcp-device status/);
@@ -118,7 +118,7 @@ test('pair and help surfaces are host-agnostic and guide the existing device flo
     const help = await fetch(`${f.base}/help`);
     const helpHtml = await help.text();
     assert.equal(help.status, 200);
-    assert.match(helpHtml, /npm install -g @hcu-lab\.me\/mcp-device@1\.0\.2/);
+    assert.match(helpHtml, /npm install -g @hcu-lab\.me\/mcp-device(?:\s|$)/);
     assert.match(helpHtml, /mcp-device login/);
     assert.match(helpHtml, /mcp-device install/);
     assert.match(helpHtml, /mcp-device status/);

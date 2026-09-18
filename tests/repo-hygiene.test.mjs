@@ -10,7 +10,7 @@ test('readmes point to the canonical device gateway and current device package',
   for (const file of ['README.md', 'README.vi.md']) {
     const readme = read(file);
     assert.match(readme, /https:\/\/device\.hcu-lab\.me/);
-    assert.match(readme, /@hcu-lab\.me\/mcp-device@1\.0\.2/);
+    assert.match(readme, /@hcu-lab\.me\/mcp-device(?:\s|$)/);
     assert.match(readme, /\/dashboard/);
     assert.match(readme, /\/pair/);
     assert.match(readme, /\/help/);

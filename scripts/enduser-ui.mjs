@@ -22,7 +22,7 @@ export function quickGuide(baseUrl) {
   const dashboardUrl = escapeHtml(`${base}/dashboard`);
   const pairUrl = escapeHtml(`${base}/pair`);
   const helpUrl = escapeHtml(`${base}/help`);
-  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><div class="actions"><a href="${dashboardUrl}">Dashboard</a><a href="${pairUrl}">Pair device</a><a href="${helpUrl}">Help</a></div><pre>npm install -g @hcu-lab.me/mcp-device@1.0.2
+  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><div class="actions"><a href="${dashboardUrl}">Dashboard</a><a href="${pairUrl}">Pair device</a><a href="${helpUrl}">Help</a></div><pre>npm install -g @hcu-lab.me/mcp-device
 
 # Set the gateway for your shell, then sign in
 # PowerShell:

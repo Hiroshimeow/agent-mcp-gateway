@@ -13,7 +13,7 @@ Các link production hiện tại:
 Cài MCP Device hiện tại bằng:
 
 ```bash
-npm install -g @hcu-lab.me/mcp-device@1.0.2
+npm install -g @hcu-lab.me/mcp-device
 ```
 
 Quick start card trên web cố ý lấy gateway origin và các link Dashboard/Pair/Help từ request hiện tại thay vì hard-code hostname production. Vì vậy preview, staging hoặc custom deployment vẫn tự sinh đúng link; README chỉ ghi host production chuẩn.

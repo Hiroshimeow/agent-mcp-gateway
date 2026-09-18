@@ -13,7 +13,7 @@ Current production links:
 Install the current device package with:
 
 ```bash
-npm install -g @hcu-lab.me/mcp-device@1.0.2
+npm install -g @hcu-lab.me/mcp-device
 ```
 
 The hosted Quick start card is intentionally deployment-aware: it derives the gateway origin and Dashboard/Pair/Help links from the current request instead of embedding the production hostname in the UI. That keeps preview, staging, and custom deployments usable while this README documents the canonical production host.
