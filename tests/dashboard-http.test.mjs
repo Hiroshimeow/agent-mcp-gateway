@@ -304,6 +304,28 @@ test('recent errors prefer friendly device names and render only the newest boun
   } finally { await f.close(); }
 });
 
+test('dashboard hides revoked devices by default and can reveal them on demand', async () => {
+  const f = await fixture();
+  try {
+    f.broker.revokeOwnedDevice({ accountId: f.alice.accountId, deviceId: 'alice-device' });
+
+    const hidden = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(hidden.status, 200);
+    const hiddenHtml = await hidden.text();
+    assert.doesNotMatch(hiddenHtml, /href="\/dashboard\/devices\/alice-device"/);
+    assert.match(hiddenHtml, /Show revoked \(1\)/);
+    assert.match(hiddenHtml, /0\/2<\/strong> devices online/);
+
+    const shown = await fetch(`${f.base}/dashboard?show_revoked=1`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(shown.status, 200);
+    const shownHtml = await shown.text();
+    assert.match(shownHtml, /href="\/dashboard\/devices\/alice-device"/);
+    assert.match(shownHtml, /alice-device · revoked/);
+    assert.match(shownHtml, /Hide revoked/);
+    assert.match(shownHtml, /0\/2<\/strong> devices online/);
+  } finally { await f.close(); }
+});
+
 test('dashboard mutations require CSRF and cannot mutate another account resources', async () => {
   const f = await fixture();
   try {
