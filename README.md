@@ -1,6 +1,22 @@
 # Local Coding MCP Gateway
 
-Generic authenticated MCP gateway for local coding workspaces. Deployment and connector names belong to host configuration; the repository itself is machine-neutral.
+Generic authenticated MCP gateway for local coding workspaces. The canonical hosted deployment is https://device.hcu-lab.me, while the runtime remains host-configurable.
+
+## Hosted quick start
+
+Current production links:
+
+- Dashboard: https://device.hcu-lab.me/dashboard
+- Pair device: https://device.hcu-lab.me/pair
+- Help / setup guide: https://device.hcu-lab.me/help
+
+Install the current device package with:
+
+```bash
+npm install -g @hcu-lab.me/mcp-device@1.0.2
+```
+
+The hosted Quick start card is intentionally deployment-aware: it derives the gateway origin and Dashboard/Pair/Help links from the current request instead of embedding the production hostname in the UI. That keeps preview, staging, and custom deployments usable while this README documents the canonical production host.
 
 ## Core catalog
 

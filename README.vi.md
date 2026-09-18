@@ -1,6 +1,22 @@
 # Local Coding MCP Gateway
 
-MCP gateway có xác thực, dùng chung cho workspace coding local. Tên deployment và connector thuộc cấu hình host; source của repo không phụ thuộc máy cụ thể.
+MCP gateway có xác thực, dùng chung cho workspace coding local. Deployment production chuẩn hiện tại là https://device.hcu-lab.me, còn runtime vẫn cho phép cấu hình host khác.
+
+## Quick start trên production
+
+Các link production hiện tại:
+
+- Dashboard: https://device.hcu-lab.me/dashboard
+- Pair device: https://device.hcu-lab.me/pair
+- Help / hướng dẫn setup: https://device.hcu-lab.me/help
+
+Cài MCP Device hiện tại bằng:
+
+```bash
+npm install -g @hcu-lab.me/mcp-device@1.0.2
+```
+
+Quick start card trên web cố ý lấy gateway origin và các link Dashboard/Pair/Help từ request hiện tại thay vì hard-code hostname production. Vì vậy preview, staging hoặc custom deployment vẫn tự sinh đúng link; README chỉ ghi host production chuẩn.
 
 ## Catalog core
 

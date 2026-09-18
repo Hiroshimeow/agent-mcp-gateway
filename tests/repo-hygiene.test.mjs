@@ -6,6 +6,18 @@ function read(relativePath) {
   return fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 }
 
+test('readmes point to the canonical device gateway and current device package', () => {
+  for (const file of ['README.md', 'README.vi.md']) {
+    const readme = read(file);
+    assert.match(readme, /https:\/\/device\.hcu-lab\.me/);
+    assert.match(readme, /@hcu-lab\.me\/mcp-device@1\.0\.2/);
+    assert.match(readme, /\/dashboard/);
+    assert.match(readme, /\/pair/);
+    assert.match(readme, /\/help/);
+    assert.doesNotMatch(readme, /mcp\.matcha\.me|mcp-v2\.hcu-lab\.me/);
+  }
+});
+
 test('unified config is committed and local package artifacts are ignored', () => {
   const gitignore = read('.gitignore');
   assert.doesNotMatch(gitignore, /^config\/trusted-roots\.txt$/m);

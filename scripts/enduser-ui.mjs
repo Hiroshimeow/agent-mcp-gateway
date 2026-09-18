@@ -17,9 +17,12 @@ export function pageShell({ title, body, wide = false }) {
 }
 
 export function quickGuide(baseUrl) {
-  const base = String(baseUrl || '').replace(/\/+$/, '');
-  const escaped = escapeHtml(base || 'https://your-mcp-host.example');
-  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><pre>npm install -g @hcu-lab.me/mcp-device@1.0.0
+  const base = String(baseUrl || '').replace(/\/+$/, '') || 'https://your-mcp-host.example';
+  const escaped = escapeHtml(base);
+  const dashboardUrl = escapeHtml(`${base}/dashboard`);
+  const pairUrl = escapeHtml(`${base}/pair`);
+  const helpUrl = escapeHtml(`${base}/help`);
+  return `<div class="card"><h2>Quick start</h2><p class="muted">Gateway: <code>${escaped}</code></p><div class="actions"><a href="${dashboardUrl}">Dashboard</a><a href="${pairUrl}">Pair device</a><a href="${helpUrl}">Help</a></div><pre>npm install -g @hcu-lab.me/mcp-device@1.0.2
 
 # Set the gateway for your shell, then sign in
 # PowerShell:
