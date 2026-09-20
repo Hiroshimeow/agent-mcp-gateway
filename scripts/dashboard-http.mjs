@@ -377,6 +377,7 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     const csrf = ensureCsrf(req, res);
     const { usage, devices } = await loadDashboardData(account);
     const baseUrl = typeof baseUrlFromRequest === 'function' ? baseUrlFromRequest(req) : `${req.protocol}://${req.get('host')}`;
+    res.set('Cache-Control', 'no-store');
     res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl, serverVersion }));
   });
 
