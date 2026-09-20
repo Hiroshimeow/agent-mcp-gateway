@@ -45,6 +45,7 @@ import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
 import { createDeviceBroker } from './device-broker.mjs';
+import { createDeviceReleaseProvider } from './device-release.mjs';
 import { loadDeviceInnerTlsConfig } from './device-secure-transport.mjs';
 import { listDevicesToolDefinition, paginateDeviceInventory } from './device-inventory.mjs';
 import { installDevicePairingRoutes } from './device-pairing-http.mjs';
@@ -73,6 +74,7 @@ const gatewayBuildSha = String(process.env.MCP_GATEWAY_BUILD_SHA || '').trim() |
   catch { return ''; }
 })();
 const gatewayServerVersion = String(process.env.MCP_GATEWAY_SERVER_VERSION || '').trim() || [gatewayPackageVersion, gatewayBuildSha].filter(Boolean).join(' · ');
+const deviceReleaseProvider = createDeviceReleaseProvider({ fallbackVersion: process.env.MCP_DEVICE_LATEST_VERSION || null });
 const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(packageRoot, '.runtime'));
 const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
@@ -837,7 +839,8 @@ installDashboardRoutes(app, {
   baseUrlFromRequest: requestBaseUrl,
   oauthClientLookup: clientId => oauthStateStore.getClient(clientId),
   listTools: listMergedTools,
-  serverVersion: gatewayServerVersion
+  serverVersion: gatewayServerVersion,
+  deviceReleaseProvider
 });
 const provider = new AccountAuthProvider({
   stateStore: oauthStateStore,

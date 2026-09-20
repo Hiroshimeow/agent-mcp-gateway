@@ -6,6 +6,7 @@ import {
   createServerInnerTls,
   encodeJsonFrame
 } from './device-secure-transport.mjs';
+import { compareStableVersions, normalizeStableVersion } from './device-release.mjs';
 
 export const DEVICE_PROTOCOL_VERSION = 1;
 export const DEVICE_PROTOCOL_VERSION_V2 = 2;
@@ -127,6 +128,7 @@ function publicDevice(device, { stored = null, usage = null, schema = null } = {
     revoked: Boolean(stored?.revokedAt || device.revoked),
     connectionEpoch: device.connectionEpoch || 0,
     agentVersion: device.agentVersion || stored?.agentVersion || 'unknown',
+    packageVersion: device.packageVersion || stored?.packageVersion || null,
     capabilities: [...(device.capabilities || [])],
     connectedAt: device.connectedAt || null,
     lastSeenAt: device.lastSeenAt || null,
@@ -159,6 +161,7 @@ export function createDeviceBroker(options = {}) {
   const devices = new Map();
   const pending = new Map();
   const pendingByWireRequestId = new Map();
+  const updateStates = new Map();
   const sockets = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   let attachedServer = null;
@@ -182,7 +185,8 @@ export function createDeviceBroker(options = {}) {
   function statusForDevice(device) {
     const stored = durableAuth ? deviceStore.get(device.deviceId) : null;
     const usage = usageStore ? usageStore.get(device.deviceId) : null;
-    return publicDevice(device, { stored, usage, schema: schemaSnapshot });
+    const status = publicDevice(device, { stored, usage, schema: schemaSnapshot });
+    return { ...status, update: updateStates.get(device.deviceId) || null };
   }
 
   function recordDeviceStatus(device, status) {
@@ -260,6 +264,7 @@ export function createDeviceBroker(options = {}) {
         revoked: Boolean(stored.revokedAt),
         connectionEpoch: 0,
         agentVersion: stored.agentVersion || 'unknown',
+        packageVersion: stored.packageVersion || null,
         hostname: stored.hostname || null,
         platform: stored.platform || null,
         arch: stored.arch || null,
@@ -284,7 +289,7 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  function registerConnection(ws, { deviceId, agentVersion, capabilities, hostname = null, platform = null, arch = null, pathStyle = null, publicKeyPem = null, authorizationGeneration = null }) {
+  function registerConnection(ws, { deviceId, agentVersion, packageVersion = null, capabilities, hostname = null, platform = null, arch = null, pathStyle = null, publicKeyPem = null, authorizationGeneration = null }) {
     const previous = devices.get(deviceId);
     const connectionEpoch = (previous?.connectionEpoch || 0) + 1;
     const current = {
@@ -294,6 +299,7 @@ export function createDeviceBroker(options = {}) {
       revoked: false,
       connectionEpoch,
       agentVersion: String(agentVersion || 'unknown'),
+      packageVersion: String(packageVersion || '').trim().slice(0, 32) || null,
       hostname: String(hostname || '').trim().slice(0, 128) || null,
       platform: String(platform || '').trim().slice(0, 32) || null,
       arch: String(arch || '').trim().slice(0, 32) || null,
@@ -305,6 +311,10 @@ export function createDeviceBroker(options = {}) {
       authenticatedAuthorizationGeneration: durableAuth ? Number(authorizationGeneration) : null
     };
     devices.set(deviceId, current);
+    const update = updateStates.get(deviceId);
+    if (update?.targetVersion && current.packageVersion === update.targetVersion) {
+      updateStates.set(deviceId, { ...update, state: 'complete', completedAt: Date.now(), error: null });
+    }
     ws.deviceId = deviceId;
     ws.connectionEpoch = connectionEpoch;
     ws.authenticated = true;
@@ -395,6 +405,7 @@ export function createDeviceBroker(options = {}) {
         deviceId,
         publicKeyPem,
         agentVersion: message.payload?.agent_version,
+        packageVersion: message.payload?.package_version,
         capabilities: message.payload?.capabilities,
         ...machineMetadata(message.payload),
         legacyEnrollmentAuthorized,
@@ -415,6 +426,7 @@ export function createDeviceBroker(options = {}) {
         deviceId,
         publicKeyPem,
         agentVersion: message.payload?.agent_version,
+        packageVersion: message.payload?.package_version,
         capabilities: message.payload?.capabilities,
         ...machineMetadata(message.payload),
         authorizationGeneration: stored?.authorizationGeneration ?? null,
@@ -430,6 +442,7 @@ export function createDeviceBroker(options = {}) {
       deviceId,
       publicKeyPem: stored.publicKeyPem,
       agentVersion: message.payload?.agent_version,
+      packageVersion: message.payload?.package_version,
       capabilities: message.payload?.capabilities,
       ...machineMetadata(message.payload),
       authorizationGeneration: stored.authorizationGeneration
@@ -478,7 +491,8 @@ export function createDeviceBroker(options = {}) {
           platform: state.platform,
           arch: state.arch,
           pathStyle: state.pathStyle,
-          agentVersion: state.agentVersion
+          agentVersion: state.agentVersion,
+          packageVersion: state.packageVersion
         });
         authorizedPublicKeyPem = enrolled.publicKeyPem;
         authorizationGeneration = enrolled.authorizationGeneration;
@@ -505,7 +519,8 @@ export function createDeviceBroker(options = {}) {
             platform: state.platform,
             arch: state.arch,
             pathStyle: state.pathStyle,
-            agentVersion: state.agentVersion
+            agentVersion: state.agentVersion,
+            packageVersion: state.packageVersion
           });
         } else {
           if (current.revokedAt || current.publicKeyPem !== state.publicKeyPem) throw new Error('device authorization changed');
@@ -517,7 +532,8 @@ export function createDeviceBroker(options = {}) {
             platform: state.platform,
             arch: state.arch,
             pathStyle: state.pathStyle,
-            agentVersion: state.agentVersion
+            agentVersion: state.agentVersion,
+            packageVersion: state.packageVersion
           });
           updated = deviceStore.assignOwner({
             deviceId: state.deviceId,
@@ -540,9 +556,9 @@ export function createDeviceBroker(options = {}) {
         { deviceId: state.deviceId, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration },
         () => registerConnection(ws, { ...state, publicKeyPem: authorizedPublicKeyPem, authorizationGeneration })
       );
-      if (state.agentVersion !== undefined && typeof deviceStore.updateMetadata === 'function') {
-        try { deviceStore.updateMetadata({ deviceId: state.deviceId, agentVersion: state.agentVersion }); }
-        catch (error) { console.error(`[device-broker] agent version persist failed: ${error.message}`); }
+      if ((state.agentVersion !== undefined || state.packageVersion !== undefined) && typeof deviceStore.updateMetadata === 'function') {
+        try { deviceStore.updateMetadata({ deviceId: state.deviceId, agentVersion: state.agentVersion, packageVersion: state.packageVersion }); }
+        catch (error) { console.error(`[device-broker] device version persist failed: ${error.message}`); }
       }
       if (socketProtocolVersion(ws) === DEVICE_PROTOCOL_VERSION_V2 && typeof deviceStore.raiseProtocolFloor === 'function') {
         deviceStore.raiseProtocolFloor(state.deviceId, DEVICE_PROTOCOL_VERSION_V2);
@@ -568,6 +584,7 @@ export function createDeviceBroker(options = {}) {
     const current = registerConnection(ws, {
       deviceId,
       agentVersion: message.payload?.agent_version,
+      packageVersion: message.payload?.package_version,
       capabilities: message.payload?.capabilities,
       ...machineMetadata(message.payload)
     });
@@ -604,11 +621,30 @@ export function createDeviceBroker(options = {}) {
     if (message.type === 'capability_sync') {
       device.capabilities = normalizeCapabilities(message.payload?.capabilities);
       device.agentVersion = String(message.payload?.agent_version || device.agentVersion);
-      if (durableAuth && message.payload?.agent_version !== undefined) {
-        deviceStore.updateMetadata({ deviceId: device.deviceId, agentVersion: device.agentVersion });
+      device.packageVersion = String(message.payload?.package_version || device.packageVersion || '').trim().slice(0, 32) || null;
+      if (durableAuth && (message.payload?.agent_version !== undefined || message.payload?.package_version !== undefined)) {
+        deviceStore.updateMetadata({ deviceId: device.deviceId, agentVersion: device.agentVersion, packageVersion: device.packageVersion });
       }
       usageStore?.touch(device.deviceId);
       sendStatusSnapshot(ws, device);
+      return;
+    }
+    if (message.type === 'device_update_status') {
+      const current = updateStates.get(device.deviceId);
+      const requestId = String(message.request_id || '').trim();
+      const targetVersion = String(message.payload?.target_version || '').trim();
+      if (!current || current.requestId !== requestId || current.targetVersion !== targetVersion) return;
+      const state = String(message.payload?.state || '').trim();
+      if (!['accepted', 'installed', 'failed'].includes(state)) return;
+      updateStates.set(device.deviceId, {
+        ...current,
+        state,
+        updatedAt: Date.now(),
+        error: state === 'failed' ? {
+          code: String(message.payload?.code || 'DEVICE_UPDATE_FAILED').slice(0, 64),
+          message: String(message.payload?.message || 'Device update failed.').slice(0, 240)
+        } : null
+      });
       return;
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
@@ -816,6 +852,73 @@ export function createDeviceBroker(options = {}) {
     return revokeDevice(stored.deviceId);
   }
 
+  function requestDeviceUpdate({ accountId, deviceId, targetVersion }) {
+    const stored = requireOwnedDevice(accountId, deviceId);
+    const device = devices.get(stored.deviceId);
+    if (device?.online && !refreshAuthorization(device)) {
+      throw deviceBrokerError(`Device ${stored.deviceId} authorization changed or was revoked; it is offline.`, 'DEVICE_OFFLINE');
+    }
+    if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) {
+      throw deviceBrokerError(`Device ${stored.deviceId} is offline.`, 'DEVICE_OFFLINE');
+    }
+    const target = normalizeStableVersion(targetVersion);
+    let current;
+    try { current = normalizeStableVersion(device.packageVersion || stored.packageVersion); }
+    catch { throw deviceBrokerError('Device package version is unavailable; bootstrap MCP Device 1.0.5 once before dashboard updates.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'); }
+    if (compareStableVersions(current, '1.0.5') < 0) {
+      throw deviceBrokerError('Device must be bootstrapped to MCP Device 1.0.5 before dashboard self-update is available.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED');
+    }
+    if (compareStableVersions(target, current) <= 0) {
+      throw deviceBrokerError(`Device is already on ${current} or newer.`, 'DEVICE_UPDATE_NOT_NEEDED');
+    }
+    const existing = updateStates.get(device.deviceId);
+    if (existing && ['requested', 'accepted', 'installed'].includes(existing.state)) {
+      if (existing.targetVersion === target) return existing;
+      throw deviceBrokerError('Another device update is already in progress.', 'DEVICE_UPDATE_IN_PROGRESS');
+    }
+    const requestId = randomUUID();
+    const update = {
+      requestId,
+      targetVersion: target,
+      state: 'requested',
+      requestedAt: Date.now(),
+      updatedAt: Date.now(),
+      error: null
+    };
+    const wireMessage = {
+      type: 'device_update',
+      request_id: requestId,
+      device_id: device.deviceId,
+      connection_epoch: device.connectionEpoch,
+      timestamp: Date.now(),
+      payload: { target_version: target }
+    };
+    const dispatch = () => {
+      updateStates.set(device.deviceId, update);
+      const sent = sendDeviceMessage(device.socket, wireMessage, error => {
+        if (!error) return;
+        const currentUpdate = updateStates.get(device.deviceId);
+        if (currentUpdate?.requestId !== requestId) return;
+        updateStates.set(device.deviceId, {
+          ...currentUpdate,
+          state: 'failed',
+          updatedAt: Date.now(),
+          error: { code: 'DEVICE_UPDATE_SEND_ERROR', message: String(error.message || error).slice(0, 240) }
+        });
+      });
+      if (!sent) throw deviceBrokerError('Device update could not be sent.', 'DEVICE_UPDATE_SEND_ERROR');
+    };
+    deviceStore.withCurrentAuthorization(
+      {
+        deviceId: device.deviceId,
+        publicKeyPem: device.authenticatedPublicKeyPem,
+        authorizationGeneration: device.authenticatedAuthorizationGeneration
+      },
+      dispatch
+    );
+    return updateStates.get(device.deviceId);
+  }
+
   async function callDevice({ requestId: requestedRequestId, accountId = null, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
     const device = devices.get(String(deviceId || ''));
     if (device?.online && !refreshAuthorization(device)) {
@@ -921,5 +1024,5 @@ export function createDeviceBroker(options = {}) {
     return schemaSnapshot;
   }
 
-  return { attach, listDevices, renameOwnedDevice, revokeDevice, revokeOwnedDevice, callDevice, setSchemaSnapshot, shutdown };
+  return { attach, listDevices, renameOwnedDevice, revokeDevice, revokeOwnedDevice, requestDeviceUpdate, callDevice, setSchemaSnapshot, shutdown };
 }

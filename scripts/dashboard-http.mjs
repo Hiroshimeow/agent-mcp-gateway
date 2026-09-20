@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { escapeHtml, quickGuide } from './enduser-ui.mjs';
+import { compareStableVersions, isNewerStableVersion } from './device-release.mjs';
 
 const CSRF_COOKIE = 'hcu_dashboard_csrf';
 const CSRF_TTL_MS = 8 * 60 * 60 * 1000;
@@ -69,17 +70,33 @@ function metric(label, value, detail = '') {
 }
 
 function renderDeviceRows(devices, csrf) {
-  if (!devices.length) return '<tr><td colspan="6" class="empty">No paired devices.</td></tr>';
+  if (!devices.length) return '<tr><td colspan="7" class="empty">No paired devices.</td></tr>';
   return devices.map(device => {
     const status = device.online ? 'online' : 'offline';
     const usage = device.attributedUsage || {};
+    const update = device.update || null;
+    const currentVersion = device.packageVersion || 'unknown';
+    let updateControl = '';
+    if (update && ['requested', 'accepted', 'installed'].includes(update.state)) {
+      updateControl = `<span class="muted">Updating → ${escapeHtml(update.targetVersion)}</span>`;
+    } else if (device.updateAvailable && device.selfUpdateSupported && device.online) {
+      updateControl = `<form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/update">${csrfField(csrf)}<button type="submit">Update → ${escapeHtml(device.latestPackageVersion)}</button></form>`;
+    } else if (device.updateAvailable && !device.selfUpdateSupported) {
+      updateControl = '<span class="muted">Bootstrap 1.0.5 once</span>';
+    } else if (device.packageVersion && device.latestPackageVersion && !device.updateAvailable) {
+      updateControl = '<span class="muted">Up to date</span>';
+    }
+    if (update?.state === 'failed') {
+      updateControl = `<span class="muted">Update failed${update.error?.code ? ` · ${escapeHtml(update.error.code)}` : ''}</span> ${updateControl}`;
+    }
     return `<tr>
 <td><span class="dot ${status}"></span><strong>${escapeHtml(device.deviceName)}</strong> <span class="muted">${escapeHtml(device.platform || 'unknown')} / ${escapeHtml(device.arch || 'unknown')}</span><small>${escapeHtml(device.deviceId)} · ${escapeHtml(status)}</small></td>
+<td><code>${escapeHtml(currentVersion)}</code>${device.latestPackageVersion ? `<small>latest ${escapeHtml(device.latestPackageVersion)}</small>` : ''}</td>
 <td>${escapeHtml(formatTime(usage.lastSeenAt))}</td>
 <td>${formatNumber(usage.succeeded || 0)} / ${formatNumber(usage.failed || 0)}</td>
 <td>${formatBytes(usage.inputBytes || 0)} / ${formatBytes(usage.outputBytes || 0)}</td>
 <td>~${formatNumber(usage.estimatedIoTokens || 0)}</td>
-<td class="actions"><a href="/dashboard/devices/${encodeURIComponent(device.deviceId)}">View tools</a> <form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/rename">${csrfField(csrf)}<input name="device_name" maxlength="128" value="${escapeHtml(device.deviceName)}" aria-label="Device name"><button type="submit">Rename</button></form></td>
+<td class="actions"><a href="/dashboard/devices/${encodeURIComponent(device.deviceId)}">View tools</a> ${updateControl} <form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/rename">${csrfField(csrf)}<input name="device_name" maxlength="128" value="${escapeHtml(device.deviceName)}" aria-label="Device name"><button type="submit">Rename</button></form></td>
 </tr>`;
   }).join('');
 }
@@ -181,7 +198,7 @@ function renderAccountMetrics(usage) {
 }
 
 function renderDevicesTable(devices, csrf) {
-  return `<table><thead><tr><th>Device</th><th>Last seen</th><th>OK / Fail</th><th>Input / Output</th><th>Estimated tokens</th><th>Controls</th></tr></thead><tbody>${renderDeviceRows(devices, csrf)}</tbody></table>`;
+  return `<table><thead><tr><th>Device</th><th>Version</th><th>Last seen</th><th>OK / Fail</th><th>Input / Output</th><th>Estimated tokens</th><th>Controls</th></tr></thead><tbody>${renderDeviceRows(devices, csrf)}</tbody></table>`;
 }
 
 function renderTopToolsTable(items) {
@@ -260,7 +277,7 @@ ${devices.length ? '' : `<div class="onboarding"><h2>Pair your first device</h2>
 </main></body></html>`;
 }
 
-export function installDashboardRoutes(app, { accountFromRequest, usageStore, deviceBroker, baseUrlFromRequest, oauthClientLookup, listTools, serverVersion = 'unknown' } = {}) {
+export function installDashboardRoutes(app, { accountFromRequest, usageStore, deviceBroker, baseUrlFromRequest, oauthClientLookup, listTools, serverVersion = 'unknown', deviceReleaseProvider = null } = {}) {
   if (!app || typeof accountFromRequest !== 'function' || !usageStore || !deviceBroker) {
     throw new Error('app, accountFromRequest, usageStore, and deviceBroker are required.');
   }
@@ -302,14 +319,25 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     res.status(404).type('text').send('Resource unavailable.');
   }
 
-  function loadDashboardData(account) {
+  async function loadDashboardData(account) {
+    const latestPackageVersion = typeof deviceReleaseProvider?.latestVersion === 'function'
+      ? await deviceReleaseProvider.latestVersion().catch(() => null)
+      : null;
     const usage = usageStore.getAccountUsage(account.accountId);
     const deviceUsage = usageStore.getDeviceUsageForAccount(account.accountId);
     const usageByDevice = new Map(deviceUsage.map(item => [item.deviceId, item]));
     const devices = deviceBroker.listDevices({ accountId: account.accountId })
       .filter(device => !device.revoked)
-      .map(device => ({
+      .map(device => {
+        const packageVersion = device.packageVersion || null;
+        let selfUpdateSupported = false;
+        try { selfUpdateSupported = Boolean(packageVersion) && compareStableVersions(packageVersion, '1.0.5') >= 0; } catch {}
+        const updateAvailable = Boolean(latestPackageVersion) && (!packageVersion || isNewerStableVersion(packageVersion, latestPackageVersion));
+        return {
         ...device,
+        latestPackageVersion,
+        selfUpdateSupported,
+        updateAvailable,
         attributedUsage: usageByDevice.get(device.deviceId) || {
           deviceId: device.deviceId,
           lastSeenAt: null,
@@ -321,7 +349,8 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
           estimatedIoTokens: 0,
           estimationMethod: 'utf8_bytes_div_4_estimate'
         }
-      }));
+      };
+      });
     const devicesById = new Map(devices.map(device => [device.deviceId, device]));
     usage.recentErrors = usage.recentErrors.map(item => ({
       ...item,
@@ -342,20 +371,20 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     return { usage, devices };
   }
 
-  app.get('/dashboard', (req, res) => {
+  app.get('/dashboard', async (req, res) => {
     const account = requireAccount(req, res);
     if (!account) return;
     const csrf = ensureCsrf(req, res);
-    const { usage, devices } = loadDashboardData(account);
+    const { usage, devices } = await loadDashboardData(account);
     const baseUrl = typeof baseUrlFromRequest === 'function' ? baseUrlFromRequest(req) : `${req.protocol}://${req.get('host')}`;
     res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl, serverVersion }));
   });
 
-  app.get('/dashboard/state', (req, res) => {
+  app.get('/dashboard/state', async (req, res) => {
     const account = requireAccount(req, res);
     if (!account) return;
     const csrf = ensureCsrf(req, res);
-    const { usage, devices } = loadDashboardData(account);
+    const { usage, devices } = await loadDashboardData(account);
     res.set('Cache-Control', 'no-store');
     res.status(200).json(dashboardFragments({ usage, devices, csrf, serverVersion }));
   });
@@ -379,6 +408,33 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
       ? (await listTools()).filter(tool => usedTools.has(tool.name))
       : [];
     res.status(200).type('html').send(deviceUsageHtml({ device, toolUsage, recentCalls, toolDefinitions, csrf }));
+  });
+
+  app.post('/dashboard/devices/:deviceId/update', async (req, res) => {
+    const account = requireAccount(req, res);
+    if (!account || !requireCsrf(req, res)) return;
+    const targetVersion = typeof deviceReleaseProvider?.latestVersion === 'function'
+      ? await deviceReleaseProvider.latestVersion().catch(() => null)
+      : null;
+    if (!targetVersion) {
+      res.status(503).type('text').send('Latest MCP Device release is temporarily unavailable.');
+      return;
+    }
+    try {
+      deviceBroker.requestDeviceUpdate({ accountId: account.accountId, deviceId: req.params.deviceId, targetVersion });
+      res.redirect(303, '/dashboard');
+    } catch (error) {
+      if (error?.code === 'DEVICE_ACCESS_DENIED' || /Unknown device/i.test(String(error?.message || ''))) return unavailable(res);
+      if (error?.code === 'DEVICE_UPDATE_NOT_NEEDED') {
+        res.redirect(303, '/dashboard');
+        return;
+      }
+      if (['DEVICE_OFFLINE', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED', 'DEVICE_UPDATE_IN_PROGRESS', 'DEVICE_UPDATE_SEND_ERROR'].includes(error?.code)) {
+        res.status(409).type('text').send(String(error?.message || 'Device update is unavailable.'));
+        return;
+      }
+      res.status(400).type('text').send('Invalid device update request.');
+    }
   });
 
   app.post('/dashboard/devices/:deviceId/rename', (req, res) => {

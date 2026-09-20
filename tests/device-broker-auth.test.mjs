@@ -102,14 +102,14 @@ async function enroll(ws, { deviceId, publicKeyPem, privateKey }) {
   return await okPromise;
 }
 
-async function reconnect(ws, { deviceId, privateKey }) {
+async function reconnect(ws, { deviceId, privateKey, packageVersion = null }) {
   const challengePromise = nextMessage(ws);
   ws.send(JSON.stringify({
     protocol_version: 1,
     type: 'auth_hello',
     device_id: deviceId,
     timestamp: Date.now(),
-    payload: { agent_version: 'test-2', capabilities: ['ping'] }
+    payload: { agent_version: 'test-2', capabilities: ['ping'], ...(packageVersion ? { package_version: packageVersion } : {}) }
   }));
   const challenge = await challengePromise;
   assert.equal(challenge.type, 'auth_challenge');
@@ -1032,5 +1032,70 @@ test('request id can be safely reused within the same connection epoch after tim
   }));
   const result = await secondCall;
   assert.equal(result.content[0].text, 'new-result');
+});
+
+test('account owner can dispatch a fixed-version device update and completion follows reconnect version', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-self-update-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'update-device',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.5'
+  });
+
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'update-device', privateKey: keys.privateKey, packageVersion: '1.0.5' });
+
+  const updateMessagePromise = nextMessage(ws);
+  const requested = broker.requestDeviceUpdate({
+    accountId: 'account-1',
+    deviceId: 'update-device',
+    targetVersion: '1.0.6'
+  });
+  assert.equal(requested.state, 'requested');
+  assert.equal(requested.targetVersion, '1.0.6');
+
+  const updateMessage = await updateMessagePromise;
+  assert.equal(updateMessage.type, 'device_update');
+  assert.equal(updateMessage.device_id, 'update-device');
+  assert.equal(updateMessage.payload.target_version, '1.0.6');
+
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'device_update_status',
+    request_id: updateMessage.request_id,
+    device_id: 'update-device',
+    connection_epoch: updateMessage.connection_epoch,
+    timestamp: Date.now(),
+    payload: { state: 'accepted', target_version: '1.0.6', package_version: '1.0.5' }
+  }));
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(broker.listDevices({ accountId: 'account-1' })[0].update.state, 'accepted');
+
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'device_update_status',
+    request_id: updateMessage.request_id,
+    device_id: 'update-device',
+    connection_epoch: updateMessage.connection_epoch,
+    timestamp: Date.now(),
+    payload: { state: 'installed', target_version: '1.0.6', package_version: '1.0.5' }
+  }));
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(broker.listDevices({ accountId: 'account-1' })[0].update.state, 'installed');
+
+  const replacement = await openSocket(port);
+  t.after(() => replacement.close());
+  await reconnect(replacement, { deviceId: 'update-device', privateKey: keys.privateKey, packageVersion: '1.0.6' });
+  const visible = broker.listDevices({ accountId: 'account-1' })[0];
+  assert.equal(visible.packageVersion, '1.0.6');
+  assert.equal(visible.update.state, 'complete');
 });
 
