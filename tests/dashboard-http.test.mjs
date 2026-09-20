@@ -201,8 +201,11 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /OAuth client sessions/i);
     assert.match(html, /ChatGPT/);
     assert.match(html, /Pi Coding Agent/);
-    assert.match(html, /alice-activity[\s\S]*?ChatGPT[\s\S]*?(?:Alice Workstation[\s\S]*?Alice Laptop|Alice Laptop[\s\S]*?Alice Workstation)/);
-    assert.match(html, /alice-idle-client[\s\S]*?Pi Coding Agent[\s\S]*?No device activity yet/i);
+    assert.match(html, /<th>OAuth client<\/th>[\s\S]*?<th>Started<\/th>[\s\S]*?<th>Last seen<\/th>[\s\S]*?<th>Client session<\/th>[\s\S]*?<th>State<\/th>/);
+    assert.match(html, /ChatGPT[\s\S]*?<div class="session-devices">[\s\S]*?(?:Alice Workstation[\s\S]*?Alice Laptop|Alice Laptop[\s\S]*?Alice Workstation)[\s\S]*?alice-activity/);
+    assert.match(html, /Pi Coding Agent[\s\S]*?No device activity yet[\s\S]*?alice-idle-client/i);
+    assert.match(html, /session-device/);
+    assert.match(html, /session-devices\{display:flex;flex-wrap:wrap/);
     assert.doesNotMatch(html, /chatgpt-alice/);
     assert.match(html, /Disconnect client session/i);
     assert.match(html, /alice-activity/);
