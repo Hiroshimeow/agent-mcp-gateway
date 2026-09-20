@@ -171,26 +171,23 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /16\s+tools/i);
     assert.match(html, /15,297|15297/);
     assert.match(html, /Usage for this account/i);
-    assert.match(html, /Estimated I\/O tokens/i);
+    assert.match(html, /Estimated tokens/i);
     assert.match(html, /~216/);
-    assert.match(html, /UTF-8 bytes .* 4 estimate, not billing tokens/i);
-    assert.match(html, /Estimated schema context/i);
-    assert.match(html, /estimated context size, not billing tokens/i);
+    assert.doesNotMatch(html, /Estimated I\/O tokens|Estimated schema context|not billing tokens|estimated context size/i);
     assert.match(html, /Alice Laptop/);
     assert.match(html, /alice-laptop/);
     assert.match(html, /href="\/dashboard\/devices\/alice-device"/);
     assert.match(html, /href="\/dashboard\/devices\/alice-laptop"/);
-    assert.match(html, /Calls/);
-    assert.match(html, /Input/);
-    assert.match(html, /Output/);
-    assert.match(html, /Est\. I\/O tokens/);
+    assert.doesNotMatch(html, /Platform \/ agent|agent ignored/i);
+    assert.match(html, /<th>Device<\/th><th>Last seen<\/th><th>OK \/ Fail<\/th><th>Input \/ Output<\/th><th>Estimated tokens<\/th>/);
+    assert.match(html, /<strong>0<\/strong> online[\s\S]*?<strong>3<\/strong> offline/i);
     assert.match(html, /100 B/);
     assert.match(html, /200 B/);
     assert.match(html, /~75/);
     assert.match(html, /60 B/);
     assert.match(html, /80 B/);
     assert.match(html, /~35/);
-    assert.match(html, /Alice Idle[\s\S]*?alice-idle[\s\S]*?<td>0<\/td>\s*<td>0 \/ 0<\/td>\s*<td>0 B<\/td>\s*<td>0 B<\/td>\s*<td>~0<\/td>/);
+    assert.match(html, /Alice Idle[\s\S]*?alice-idle · offline[\s\S]*?<td>—<\/td>\s*<td>0 \/ 0<\/td>\s*<td>0 B \/ 0 B<\/td>\s*<td>~0<\/td>/);
     assert.match(html, /section\{overflow-x:auto\}/);
     assert.match(html, /table\{min-width:760px\}/);
     assert.match(html, /shell_execute/);
@@ -206,8 +203,10 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /alice-activity/);
     assert.doesNotMatch(html, /action="\/dashboard\/devices\/alice-device\/revoke"/);
     assert.match(html, /visibilityState/);
-    assert.match(html, /3500/);
+    assert.match(html, /\/dashboard\/state/);
+    assert.match(html, /fetch\(/);
     assert.match(html, /dirty/);
+    assert.doesNotMatch(html, /location\.reload\(/);
     assert.doesNotMatch(html, /payload body/i);
     assert.ok(cookieValue(response, 'hcu_dashboard_csrf'));
   } finally { await f.close(); }
@@ -228,7 +227,8 @@ test('device usage detail is account-owned and aggregates only that device tools
     assert.match(html, /60 B/);
     assert.match(html, /80 B/);
     assert.match(html, /~35/);
-    assert.match(html, /estimate, not billing tokens/i);
+    assert.match(html, /Estimated tokens/i);
+    assert.doesNotMatch(html, /not billing tokens/i);
     assert.match(html, /Tool definitions & input contracts/i);
     assert.match(html, /Read a text file from one owned device\./);
     assert.match(html, /Write a text file on one owned device\./);
@@ -253,6 +253,20 @@ test('device usage detail is account-owned and aggregates only that device tools
     assert.equal(unknown.status, 404);
     assert.equal(await foreign.text(), 'Resource unavailable.');
     assert.equal(await unknown.text(), 'Resource unavailable.');
+  } finally { await f.close(); }
+});
+
+test('dashboard live state returns account-scoped fragments without a page reload', async () => {
+  const f = await fixture();
+  try {
+    const response = await fetch(`${f.base}/dashboard/state`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') || '', /application\/json/);
+    const state = await response.json();
+    assert.match(state.status, /0[\s\S]*online[\s\S]*3[\s\S]*offline/i);
+    assert.match(state.devices, /Alice Workstation/);
+    assert.match(state.sessions, /ChatGPT/);
+    assert.doesNotMatch(JSON.stringify(state), /Bob Secret Workstation|bob-device|bob-activity/);
   } finally { await f.close(); }
 });
 
@@ -304,25 +318,18 @@ test('recent errors prefer friendly device names and render only the newest boun
   } finally { await f.close(); }
 });
 
-test('dashboard hides revoked devices by default and can reveal them on demand', async () => {
+test('dashboard permanently excludes revoked devices from inventory and counts', async () => {
   const f = await fixture();
   try {
     f.broker.revokeOwnedDevice({ accountId: f.alice.accountId, deviceId: 'alice-device' });
 
-    const hidden = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
-    assert.equal(hidden.status, 200);
-    const hiddenHtml = await hidden.text();
-    assert.doesNotMatch(hiddenHtml, /href="\/dashboard\/devices\/alice-device"/);
-    assert.match(hiddenHtml, /Show revoked \(1\)/);
-    assert.match(hiddenHtml, /0\/2<\/strong> devices online/);
-
-    const shown = await fetch(`${f.base}/dashboard?show_revoked=1`, { headers: { cookie: f.aliceCookie } });
-    assert.equal(shown.status, 200);
-    const shownHtml = await shown.text();
-    assert.match(shownHtml, /href="\/dashboard\/devices\/alice-device"/);
-    assert.match(shownHtml, /alice-device · revoked/);
-    assert.match(shownHtml, /Hide revoked/);
-    assert.match(shownHtml, /0\/2<\/strong> devices online/);
+    for (const route of ['/dashboard', '/dashboard?show_revoked=1']) {
+      const response = await fetch(`${f.base}${route}`, { headers: { cookie: f.aliceCookie } });
+      assert.equal(response.status, 200);
+      const html = await response.text();
+      assert.doesNotMatch(html, /href="\/dashboard\/devices\/alice-device"|alice-device · revoked|Show revoked|Hide revoked/);
+      assert.match(html, /<strong>0<\/strong> online[\s\S]*?<strong>2<\/strong> offline/i);
+    }
   } finally { await f.close(); }
 });
 
@@ -347,6 +354,16 @@ test('dashboard mutations require CSRF and cannot mutate another account resourc
     const renamed = await post(f.base, '/dashboard/devices/alice-device/rename', { _csrf: csrf, device_name: 'Alice Renamed' }, cookies);
     assert.equal(renamed.status, 303);
     assert.equal(f.deviceStore.get('alice-device').deviceName, 'Alice Renamed');
+
+    const bobClientRename = await post(f.base, '/dashboard/sessions/bob-activity/rename', { _csrf: csrf, client_name: 'Stolen client' }, cookies);
+    assert.equal(bobClientRename.status, 404);
+    assert.equal(f.usageStore.listActivitySessions(f.bob.accountId)[0].displayName, null);
+
+    const clientRenamed = await post(f.base, '/dashboard/sessions/alice-activity/rename', { _csrf: csrf, client_name: 'ChatGPT G6' }, cookies);
+    assert.equal(clientRenamed.status, 303);
+    assert.equal(f.usageStore.listActivitySessions(f.alice.accountId).find(item => item.activitySessionId === 'alice-activity')?.displayName, 'ChatGPT G6');
+    const renamedPage = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
+    assert.match(await renamedPage.text(), /ChatGPT G6/);
 
     const bobEnd = await post(f.base, '/dashboard/sessions/bob-activity/end', { _csrf: csrf }, cookies);
     assert.equal(bobEnd.status, 404);

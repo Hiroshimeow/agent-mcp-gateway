@@ -65,7 +65,8 @@ test('operator dashboard is loopback-only and keeps account/device/tool usage gr
     assert.match(aliceSection, /<b>1<\/b> fail/i);
     assert.match(aliceSection, /<b>60 B<\/b> input/i);
     assert.match(aliceSection, /<b>100 B<\/b> output/i);
-    assert.match(aliceSection, /<b>~40<\/b> I\/O tokens/i);
+    assert.match(aliceSection, /<b>~40<\/b> Estimated tokens/i);
+    assert.doesNotMatch(aliceSection, /non-billing|<th>Platform<\/th>|<th>Agent<\/th>/i);
     assert.doesNotMatch(aliceSection, /bob-device|bob@example\.com|100 B input|300 B output/);
     assert.match(bobSection, new RegExp(f.bob.accountId));
     assert.match(bobSection, /bob-device/);
@@ -73,12 +74,12 @@ test('operator dashboard is loopback-only and keeps account/device/tool usage gr
     assert.match(bobSection, /<b>1<\/b> calls/i);
     assert.match(bobSection, /<b>100 B<\/b> input/i);
     assert.match(bobSection, /<b>300 B<\/b> output/i);
-    assert.match(bobSection, /<b>~100<\/b> I\/O tokens/i);
+    assert.match(bobSection, /<b>~100<\/b> Estimated tokens/i);
     assert.doesNotMatch(bobSection, /alice-device|read_text_file/);
   } finally { await f.close(); }
 });
 
-test('operator dashboard includes lazy 3.5s auto refresh with hidden-tab pause and toggle', async () => {
+test('operator dashboard refreshes live content without reloading the page', async () => {
   const f = await fixture();
   try {
     const html = await (await fetch(f.base)).text();
@@ -87,6 +88,26 @@ test('operator dashboard includes lazy 3.5s auto refresh with hidden-tab pause a
     assert.match(html, /visibilitychange/);
     assert.match(html, /document\.hidden/);
     assert.match(html, /localStorage/);
-    assert.match(html, /selection/i);
+    assert.match(html, /fetch\('\/state'/);
+    assert.doesNotMatch(html, /location\.reload/);
+
+    const state = await fetch(`${f.base}/state`);
+    assert.equal(state.status, 200);
+    const payload = await state.json();
+    assert.match(payload.content, /alice@example\.com/);
+    assert.match(payload.content, /bob@example\.com/);
+  } finally { await f.close(); }
+});
+
+test('operator dashboard excludes revoked devices from inventory', async () => {
+  const f = await fixture();
+  try {
+    f.broker.revokeOwnedDevice({ accountId: f.alice.accountId, deviceId: 'alice-device' });
+    const html = await (await fetch(f.base)).text();
+    const aliceStart = html.indexOf('alice@example.com');
+    const bobStart = html.indexOf('bob@example.com');
+    const aliceSection = html.slice(aliceStart, bobStart);
+    assert.doesNotMatch(aliceSection, /alice-device|revoked/);
+    assert.match(aliceSection, /<b>0<\/b> devices/i);
   } finally { await f.close(); }
 });

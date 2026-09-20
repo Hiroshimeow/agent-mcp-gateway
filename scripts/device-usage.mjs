@@ -71,6 +71,7 @@ function rowToActivity(row) {
     activitySessionId: row.activity_session_id,
     accountId: row.account_id,
     clientId: row.client_id || null,
+    displayName: row.display_name || null,
     startedAt: Number(row.started_at),
     lastSeenAt: Number(row.last_seen_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at)
@@ -146,6 +147,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       activity_session_id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
       client_id TEXT,
+      display_name TEXT,
       started_at INTEGER NOT NULL,
       last_seen_at INTEGER NOT NULL,
       ended_at INTEGER
@@ -181,6 +183,10 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     );
     CREATE INDEX IF NOT EXISTS device_status_events_account_time_idx ON device_status_events(account_id, event_at DESC, id DESC);
   `);
+  const activityColumns = db.prepare('PRAGMA table_info(activity_sessions)').all();
+  if (!activityColumns.some(column => column.name === 'display_name')) {
+    db.exec('ALTER TABLE activity_sessions ADD COLUMN display_name TEXT');
+  }
 
   const getStatement = db.prepare('SELECT * FROM device_usage WHERE device_id = ?');
   const connectionStatement = db.prepare(`
@@ -248,6 +254,10 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     UPDATE activity_sessions SET ended_at = ?, last_seen_at = ?
     WHERE activity_session_id = ? AND account_id = ? AND ended_at IS NULL
   `);
+  const renameActivity = db.prepare(`
+    UPDATE activity_sessions SET display_name = ?
+    WHERE activity_session_id = ? AND account_id = ?
+  `);
   const listActivities = db.prepare(`
     SELECT * FROM activity_sessions WHERE account_id = ?
     ORDER BY started_at DESC, activity_session_id DESC LIMIT ?
@@ -290,6 +300,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
   `);
   const deviceUsageForAccount = db.prepare(`
     SELECT device_id, COUNT(*) AS tool_calls,
+      MAX(event_at) AS last_seen_at,
       COALESCE(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),0) AS succeeded,
       COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failed,
       COALESCE(SUM(input_bytes),0) AS input_bytes,
@@ -440,6 +451,16 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     return rowToActivity(getActivity.get(id));
   }
 
+  function renameActivitySession({ activitySessionId, accountId, displayName } = {}) {
+    const id = boundedText(activitySessionId, 128, { required: true });
+    const owner = boundedText(accountId, 128, { required: true });
+    const current = getActivity.get(id);
+    if (!current || current.account_id !== owner) throw new Error('Activity session not found for this account.');
+    const name = boundedText(displayName, 128, { required: true });
+    renameActivity.run(name, id, owner);
+    return rowToActivity(getActivity.get(id));
+  }
+
   function listActivitySessions(accountId, { limit = 50 } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
     const boundedLimit = Math.max(1, Math.min(200, Number.isInteger(Number(limit)) ? Number(limit) : 50));
@@ -485,6 +506,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       const outputBytes = Number(row.output_bytes);
       return {
         deviceId: row.device_id,
+        lastSeenAt: row.last_seen_at === null ? null : Number(row.last_seen_at),
         toolCalls: Number(row.tool_calls),
         succeeded: Number(row.succeeded),
         failed: Number(row.failed),
@@ -587,6 +609,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     openActivitySession,
     touchActivitySession,
     endActivitySession,
+    renameActivitySession,
     listActivitySessions,
     recordCatalogList,
     setSchemaSnapshot,

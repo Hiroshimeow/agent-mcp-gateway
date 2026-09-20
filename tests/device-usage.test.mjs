@@ -48,3 +48,31 @@ test('device usage persists metadata-only connection, call, byte, and error coun
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+test('dashboard usage uses latest tool call for last seen and supports per-session OAuth labels', () => {
+  const f = fixture();
+  try {
+    f.store.openActivitySession({ activitySessionId: 'session-1', accountId: 'account-1', clientId: 'chatgpt-client' });
+    f.store.recordToolCall({
+      accountId: 'account-1', activitySessionId: 'session-1', deviceId: 'device-1', tool: 'read_text_file',
+      durationMs: 1, success: true, inputBytes: 10, outputBytes: 20, callerCategory: 'oauth'
+    });
+    const toolSeenAt = 1_700_000_000_000;
+    f.tick();
+    f.store.recordConnection('device-1', { reconnect: true });
+    f.tick();
+    f.store.touch('device-1');
+
+    assert.equal(f.store.getDeviceUsageForAccount('account-1')[0].lastSeenAt, toolSeenAt);
+    const renamed = f.store.renameActivitySession({ activitySessionId: 'session-1', accountId: 'account-1', displayName: 'ChatGPT office' });
+    assert.equal(renamed.displayName, 'ChatGPT office');
+    assert.equal(f.store.listActivitySessions('account-1')[0].displayName, 'ChatGPT office');
+    assert.throws(
+      () => f.store.renameActivitySession({ activitySessionId: 'session-1', accountId: 'account-2', displayName: 'stolen' }),
+      /not found/i
+    );
+  } finally {
+    try { f.store.close(); } catch {}
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});

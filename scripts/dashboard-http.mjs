@@ -52,10 +52,10 @@ function shortId(value) {
   return text.length <= 12 ? text : `${text.slice(0, 8)}…${text.slice(-4)}`;
 }
 
-function clientLabel(clientId, oauthClientLookup) {
+function clientLabel(clientId, oauthClientLookup, displayName = null) {
   const metadata = clientId && typeof oauthClientLookup === 'function' ? oauthClientLookup(clientId) : null;
   return {
-    name: String(metadata?.client_name || metadata?.clientName || 'OAuth client'),
+    name: String(displayName || metadata?.client_name || metadata?.clientName || 'OAuth client'),
     raw: clientId ? shortId(clientId) : 'unknown'
   };
 }
@@ -69,21 +69,17 @@ function metric(label, value, detail = '') {
 }
 
 function renderDeviceRows(devices, csrf) {
-  if (!devices.length) return '<tr><td colspan="9" class="empty">No paired devices.</td></tr>';
+  if (!devices.length) return '<tr><td colspan="6" class="empty">No paired devices.</td></tr>';
   return devices.map(device => {
-    const status = device.revoked ? 'revoked' : device.online ? 'online' : 'offline';
+    const status = device.online ? 'online' : 'offline';
     const usage = device.attributedUsage || {};
-    const lastSeenAt = device.lastSeenAt || device.usage?.lastSeenAt;
     return `<tr>
-<td><span class="dot ${status}"></span><strong>${escapeHtml(device.deviceName)}</strong><small>${escapeHtml(device.deviceId)} · ${escapeHtml(status)}</small></td>
-<td>${escapeHtml(device.platform || 'unknown')} / ${escapeHtml(device.arch || 'unknown')}<small>agent ${escapeHtml(device.agentVersion || 'unknown')}</small></td>
-<td>${escapeHtml(formatTime(lastSeenAt))}</td>
-<td>${formatNumber(usage.toolCalls || 0)}</td>
+<td><span class="dot ${status}"></span><strong>${escapeHtml(device.deviceName)}</strong> <span class="muted">${escapeHtml(device.platform || 'unknown')} / ${escapeHtml(device.arch || 'unknown')}</span><small>${escapeHtml(device.deviceId)} · ${escapeHtml(status)}</small></td>
+<td>${escapeHtml(formatTime(usage.lastSeenAt))}</td>
 <td>${formatNumber(usage.succeeded || 0)} / ${formatNumber(usage.failed || 0)}</td>
-<td>${formatBytes(usage.inputBytes || 0)}</td>
-<td>${formatBytes(usage.outputBytes || 0)}</td>
+<td>${formatBytes(usage.inputBytes || 0)} / ${formatBytes(usage.outputBytes || 0)}</td>
 <td>~${formatNumber(usage.estimatedIoTokens || 0)}</td>
-<td class="actions"><a href="/dashboard/devices/${encodeURIComponent(device.deviceId)}">View tools</a> ${device.revoked ? '· revoked' : `<form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/rename">${csrfField(csrf)}<input name="device_name" maxlength="128" value="${escapeHtml(device.deviceName)}" aria-label="Device name"><button type="submit">Rename</button></form>`}</td>
+<td class="actions"><a href="/dashboard/devices/${encodeURIComponent(device.deviceId)}">View tools</a> <form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/rename">${csrfField(csrf)}<input name="device_name" maxlength="128" value="${escapeHtml(device.deviceName)}" aria-label="Device name"><button type="submit">Rename</button></form></td>
 </tr>`;
   }).join('');
 }
@@ -131,7 +127,8 @@ function renderSessionRows(items, csrf) {
     const devices = item.devices?.length
       ? item.devices.map(device => `<strong>${escapeHtml(device.deviceName)}</strong><small>${escapeHtml(shortId(device.deviceId))}</small>`).join('')
       : '<span class="muted">No device activity yet</span>';
-    return `<tr><td><code>${escapeHtml(item.activitySessionId)}</code></td><td><strong>${escapeHtml(item.clientName)}</strong><small>${escapeHtml(item.clientRaw)}</small></td><td>${devices}</td><td>${escapeHtml(formatTime(item.startedAt))}</td><td>${escapeHtml(formatTime(item.lastSeenAt))}</td><td>${item.endedAt ? `disconnected ${escapeHtml(formatTime(item.endedAt))}` : `<form method="post" action="/dashboard/sessions/${encodeURIComponent(item.activitySessionId)}/end">${csrfField(csrf)}<button type="submit">Disconnect client session</button></form>`}</td></tr>`;
+    const rename = `<form method="post" action="/dashboard/sessions/${encodeURIComponent(item.activitySessionId)}/rename">${csrfField(csrf)}<input name="client_name" maxlength="128" value="${escapeHtml(item.clientName)}" aria-label="OAuth client name"><button type="submit">Rename</button></form>`;
+    return `<tr><td><code>${escapeHtml(item.activitySessionId)}</code></td><td><strong>${escapeHtml(item.clientName)}</strong><small>${escapeHtml(item.clientRaw)}</small>${rename}</td><td>${devices}</td><td>${escapeHtml(formatTime(item.startedAt))}</td><td>${escapeHtml(formatTime(item.lastSeenAt))}</td><td>${item.endedAt ? `disconnected ${escapeHtml(formatTime(item.endedAt))}` : `<form method="post" action="/dashboard/sessions/${encodeURIComponent(item.activitySessionId)}/end">${csrfField(csrf)}<button type="submit">Disconnect client session</button></form>`}</td></tr>`;
   }).join('');
 }
 
@@ -154,16 +151,16 @@ function renderRecentCallRows(items) {
 function deviceUsageHtml({ device, toolUsage, recentCalls, toolDefinitions, csrf }) {
   const status = device.revoked ? 'revoked' : device.online ? 'online' : 'offline';
   const summary = summarizeToolUsage(toolUsage);
-  const lastSeenAt = device.lastSeenAt || device.usage?.lastSeenAt;
+  const lastSeenAt = recentCalls[0]?.eventAt || null;
   const revokeConfirm = escapeHtml(JSON.stringify(`Revoke ${device.deviceName}? This disconnects this device, and the revoked identity cannot reconnect.`));
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(device.deviceName)} · MCP Gateway</title>
 <style>
-:root{color-scheme:dark;--bg:#080a0d;--panel:#0d1117;--line:#252b34;--text:#e6edf3;--muted:#8b949e;--good:#3fb950;--warn:#d29922;--bad:#f85149;--accent:#58a6ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px ui-monospace,SFMono-Regular,Consolas,monospace}main{width:min(1100px,94vw);margin:24px auto 48px}a{color:var(--accent)}header{border-bottom:1px solid var(--line);padding-bottom:14px}.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));border:1px solid var(--line);background:var(--panel);margin-top:18px}.metric{padding:12px;border-right:1px solid var(--line)}.metric:last-child{border-right:0}.metric span,.metric small{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:20px;margin:5px 0 2px}section{margin-top:20px;border-top:1px solid var(--line);overflow-x:auto}h1{font-size:20px;margin:10px 0 6px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:10px 0}table{width:100%;border-collapse:collapse;background:var(--panel);min-width:680px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500;font-size:11px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.dot.online{background:var(--good)}.dot.offline{background:var(--warn)}.dot.revoked{background:var(--bad)}.tool-contract{border:1px solid var(--line);background:var(--panel);padding:12px;margin:8px 0}.tool-contract h3{margin:0 0 8px}.tool-contract p{color:var(--muted)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080a0d;padding:10px;border:1px solid var(--line)}.danger-zone{border:1px solid #5b2525;padding:14px;overflow:visible}.danger-zone p{color:var(--muted)}button.danger{color:#ffb4ad;border:1px solid #5b2525;background:#241313;padding:7px 10px;font:inherit;cursor:pointer}@media(max-width:760px){.metrics{grid-template-columns:repeat(2,1fr)}.metric:nth-child(even){border-right:0}}
+:root{color-scheme:dark;--bg:#080a0d;--panel:#0d1117;--line:#252b34;--text:#e6edf3;--muted:#8b949e;--good:#3fb950;--warn:#d29922;--bad:#f85149;--accent:#58a6ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px ui-monospace,SFMono-Regular,Consolas,monospace}main{width:min(1100px,94vw);margin:24px auto 48px}a{color:var(--accent)}header{border-bottom:1px solid var(--line);padding-bottom:14px}.muted{color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));border:1px solid var(--line);background:var(--panel);margin-top:18px}.metric{padding:12px;border-right:1px solid var(--line)}.metric:last-child{border-right:0}.metric span,.metric small{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:20px;margin:5px 0 2px}section{margin-top:20px;border-top:1px solid var(--line);overflow-x:auto}h1{font-size:20px;margin:10px 0 6px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:10px 0}table{width:100%;border-collapse:collapse;background:var(--panel);min-width:680px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500;font-size:11px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.dot.online{background:var(--good)}.dot.offline{background:var(--warn)}.dot.revoked{background:var(--bad)}.tool-contract{border:1px solid var(--line);background:var(--panel);padding:12px;margin:8px 0}.tool-contract h3{margin:0 0 8px}.tool-contract p{color:var(--muted)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#080a0d;padding:10px;border:1px solid var(--line)}.danger-zone{border:1px solid #5b2525;padding:14px;overflow:visible}.danger-zone p{color:var(--muted)}button.danger{color:#ffb4ad;border:1px solid #5b2525;background:#241313;padding:7px 10px;font:inherit;cursor:pointer}@media(max-width:760px){.metrics{grid-template-columns:repeat(2,1fr)}.metric:nth-child(even){border-right:0}}
 </style></head><body><main>
 <header><a href="/dashboard">← Dashboard</a><h1><span class="dot ${status}"></span>${escapeHtml(device.deviceName)}</h1><div class="muted">${escapeHtml(device.deviceId)} · ${escapeHtml(status)} · last seen ${escapeHtml(formatTime(lastSeenAt))}</div></header>
-<div class="metrics">${metric('Tool calls', formatNumber(summary.toolCalls))}${metric('Success', formatNumber(summary.succeeded))}${metric('Failed', formatNumber(summary.failed))}${metric('Input bytes', formatBytes(summary.inputBytes))}${metric('Output bytes', formatBytes(summary.outputBytes))}${metric('Estimated I/O tokens', `~${formatNumber(summary.estimatedIoTokens)}`, 'UTF-8 bytes ÷ 4 estimate, not billing tokens')}</div>
+<div class="metrics">${metric('Tool calls', formatNumber(summary.toolCalls))}${metric('Success', formatNumber(summary.succeeded))}${metric('Failed', formatNumber(summary.failed))}${metric('Input / Output', `${formatBytes(summary.inputBytes)} / ${formatBytes(summary.outputBytes)}`)}${metric('Estimated tokens', `~${formatNumber(summary.estimatedIoTokens)}`)}</div>
 <section><h2>Tools used by this device</h2><table><thead><tr><th>Tool</th><th>Calls</th><th>Failures</th><th>Input</th><th>Output</th></tr></thead><tbody>${renderToolRows(toolUsage)}</tbody></table></section>
 <section><h2>Tool definitions & input contracts</h2>${renderToolDefinitions(toolUsage, toolDefinitions)}</section>
 <section><h2>Recent metadata calls</h2><table><thead><tr><th>Time</th><th>Tool</th><th>Result</th><th>Duration</th><th>Input</th><th>Output</th><th>Error code</th><th>Activity / OAuth client</th></tr></thead><tbody>${renderRecentCallRows(recentCalls)}</tbody></table></section>
@@ -171,46 +168,93 @@ function deviceUsageHtml({ device, toolUsage, recentCalls, toolDefinitions, csrf
 </main></body></html>`;
 }
 
-function dashboardHtml({ account, usage, devices, csrf, baseUrl, showRevoked = false }) {
-  const activeDevices = devices.filter(device => !device.revoked);
-  const revokedCount = devices.length - activeDevices.length;
-  const visibleDevices = showRevoked ? devices : activeDevices;
-  const online = activeDevices.filter(device => device.online).length;
+function renderGatewayStatus(devices, schema) {
+  const online = devices.filter(device => device.online).length;
+  const offline = devices.length - online;
+  return `<span class="health">● Gateway online</span><span><strong>${online}</strong> online · <strong>${offline}</strong> offline</span><span><strong>${formatNumber(schema.toolCount)} tools</strong></span><span><strong>${formatNumber(schema.schemaBytes)} B schema</strong></span>`;
+}
+
+function renderAccountMetrics(usage) {
   const schema = usage.schema || {};
-  const estimatedIoTokens = Math.ceil((Number(usage.totals.inputBytes || 0) + Number(usage.totals.outputBytes || 0)) / 4);
+  const estimatedTokens = Math.ceil((Number(usage.totals.inputBytes || 0) + Number(usage.totals.outputBytes || 0)) / 4);
+  return `${metric('Tool calls', formatNumber(usage.totals.toolCalls))}${metric('Success', formatNumber(usage.totals.succeeded))}${metric('Failed', formatNumber(usage.totals.failed))}${metric('Input / Output', `${formatBytes(usage.totals.inputBytes)} / ${formatBytes(usage.totals.outputBytes)}`)}${metric('Estimated tokens', `~${formatNumber(estimatedTokens)}`)}${metric('tools/list', formatNumber(usage.catalog.listCalls))}${metric('Schema tokens', `~${formatNumber(schema.estimatedTokens)}`)}`;
+}
+
+function renderDevicesTable(devices, csrf) {
+  return `<table><thead><tr><th>Device</th><th>Last seen</th><th>OK / Fail</th><th>Input / Output</th><th>Estimated tokens</th><th>Controls</th></tr></thead><tbody>${renderDeviceRows(devices, csrf)}</tbody></table>`;
+}
+
+function renderTopToolsTable(items) {
+  return `<table><thead><tr><th>Tool</th><th>Calls</th><th>Failures</th><th>Input</th><th>Output</th></tr></thead><tbody>${renderToolRows(items)}</tbody></table>`;
+}
+
+function renderSkillLoadsTable(items) {
+  return `<table><thead><tr><th>Skill</th><th>Loads</th><th>Failures</th><th>Output</th><th>Estimated tokens</th></tr></thead><tbody>${renderSkillRows(items)}</tbody></table>`;
+}
+
+function renderSessionsTable(items, csrf) {
+  return `<table><thead><tr><th>Client session</th><th>OAuth client</th><th>Devices used</th><th>Started</th><th>Last seen</th><th>State</th></tr></thead><tbody>${renderSessionRows(items, csrf)}</tbody></table>`;
+}
+
+function dashboardFragments({ usage, devices, csrf }) {
+  return {
+    status: renderGatewayStatus(devices, usage.schema || {}),
+    metrics: renderAccountMetrics(usage),
+    devices: renderDevicesTable(devices, csrf),
+    topTools: renderTopToolsTable(usage.topTools),
+    skillLoads: renderSkillLoadsTable(usage.skillLoads),
+    errors: renderRecentErrors(usage.recentErrors),
+    sessions: renderSessionsTable(usage.activitySessions, csrf)
+  };
+}
+
+function dashboardHtml({ account, usage, devices, csrf, baseUrl }) {
+  const fragments = dashboardFragments({ usage, devices, csrf });
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MCP Gateway Dashboard</title>
 <style>
 :root{color-scheme:dark;--bg:#080a0d;--panel:#0d1117;--line:#252b34;--text:#e6edf3;--muted:#8b949e;--good:#3fb950;--warn:#d29922;--bad:#f85149;--accent:#58a6ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px ui-monospace,SFMono-Regular,Consolas,monospace}main{width:min(1500px,96vw);margin:24px auto 48px}.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding:0 0 14px}.brand{font-size:18px;letter-spacing:.18em}.account{color:var(--muted);text-align:right}.strip{display:flex;gap:18px;flex-wrap:wrap;padding:12px 0;color:var(--muted)}.strip strong{color:var(--text)}.health{color:var(--good)}.scope{padding:16px 0 8px;color:var(--muted)}.scope strong{color:var(--text)}.metrics{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));border:1px solid var(--line);background:var(--panel)}.metric{padding:12px;border-right:1px solid var(--line);min-width:0}.metric:last-child{border-right:0}.metric span,.metric small{display:block;color:var(--muted);font-size:11px}.metric strong{display:block;font-size:20px;margin:5px 0 2px}section{margin-top:20px;border-top:1px solid var(--line)}h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:10px 0}table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;font-size:11px}tr:last-child td{border-bottom:0}td small{display:block;color:var(--muted);margin-top:3px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.dot.online{background:var(--good)}.dot.offline{background:var(--warn)}.dot.revoked{background:var(--bad)}code{color:#c9d1d9}form{display:inline-flex;gap:5px;margin:0 5px 3px 0}input{max-width:180px;background:#080a0d;color:var(--text);border:1px solid var(--line);padding:5px 7px}button{background:#1f2937;color:var(--text);border:1px solid #374151;padding:5px 8px;font:inherit;cursor:pointer}button:hover{border-color:var(--accent)}button.danger{color:#ffb4ad;border-color:#5b2525}.empty,.muted{color:var(--muted)}.onboarding{margin:18px 0;padding:18px;border:1px solid var(--line);background:var(--panel)}.onboarding h2{font-size:18px;text-transform:none;letter-spacing:0;color:var(--text);margin-top:0}.onboarding .button{display:inline-block;background:#1769aa;color:#fff;border:1px solid #2586d7;padding:9px 12px;text-decoration:none}.privacy{padding:12px 0;color:var(--muted);line-height:1.55}.foot{margin-top:18px;color:var(--muted);font-size:11px}.foot form{float:right}@media(max-width:900px){.metrics{grid-template-columns:repeat(2,1fr)}.metric:nth-child(even){border-right:0}section{overflow-x:auto}table{min-width:760px}.top{align-items:flex-start;flex-direction:column}.account{text-align:left}}
 </style></head><body><main>
-<header class="top"><div><div class="brand">MCP GATEWAY</div><div><a href="/dashboard">Dashboard</a> · <a href="/pair">Pair device</a> · <a href="/help">Help</a></div><div class="strip"><span class="health">● Gateway online</span><span><strong>${online}/${activeDevices.length}</strong> devices online</span><span><strong>${formatNumber(schema.toolCount)} tools</strong></span><span><strong>${formatNumber(schema.schemaBytes)} B schema</strong></span></div></div><div class="account">${escapeHtml(account.email || account.accountId)}<br>${escapeHtml(account.accountId)}</div></header>
+<header class="top"><div><div class="brand">MCP GATEWAY</div><div><a href="/dashboard">Dashboard</a> · <a href="/pair">Pair device</a> · <a href="/help">Help</a></div><div class="strip" data-live="status">${fragments.status}</div></div><div class="account">${escapeHtml(account.email || account.accountId)}<br>${escapeHtml(account.accountId)}</div></header>
 ${devices.length ? '' : `<div class="onboarding"><h2>Pair your first device</h2><p>Connect a device to make its tools available through this gateway.</p><a class="button" href="/pair">Pair a device</a>${quickGuide(baseUrl)}</div>`}
 <div class="scope"><strong>Usage for this account</strong> · tool traffic below is attributed from observed MCP gateway events only.</div>
-<div class="metrics">${metric('Tool calls', formatNumber(usage.totals.toolCalls), `${formatNumber(usage.totals.failed)} failed`)}${metric('Success', formatNumber(usage.totals.succeeded))}${metric('Input bytes', formatBytes(usage.totals.inputBytes))}${metric('Output bytes', formatBytes(usage.totals.outputBytes))}${metric('Estimated I/O tokens', `~${formatNumber(estimatedIoTokens)}`, 'UTF-8 bytes ÷ 4 estimate, not billing tokens')}${metric('tools/list', formatNumber(usage.catalog.listCalls))}${metric('Estimated schema context', `~${formatNumber(schema.estimatedTokens)}`, 'estimated context size, not billing tokens')}</div>
-<section><h2>Devices</h2>${revokedCount ? `<p class="muted">${showRevoked ? '<a href="/dashboard">Hide revoked</a>' : `<a href="/dashboard?show_revoked=1">Show revoked (${revokedCount})</a>`}</p>` : ''}<table><thead><tr><th>Device</th><th>Platform / agent</th><th>Last seen</th><th>Calls</th><th>OK / Fail</th><th>Input</th><th>Output</th><th>Est. I/O tokens</th><th>Controls</th></tr></thead><tbody>${renderDeviceRows(visibleDevices, csrf)}</tbody></table></section>
-<section><h2>Top tools</h2><table><thead><tr><th>Tool</th><th>Calls</th><th>Failures</th><th>Input</th><th>Output</th></tr></thead><tbody>${renderToolRows(usage.topTools)}</tbody></table></section>
-<section><h2>Skill loads</h2><table><thead><tr><th>Skill</th><th>Loads</th><th>Failures</th><th>Output</th><th>Estimated tokens</th></tr></thead><tbody>${renderSkillRows(usage.skillLoads)}</tbody></table></section>
-<section><h2>Recent errors</h2>${renderRecentErrors(usage.recentErrors)}</section>
-<section><h2>OAuth client sessions</h2><table><thead><tr><th>Client session</th><th>OAuth client</th><th>Devices used</th><th>Started</th><th>Last seen</th><th>State</th></tr></thead><tbody>${renderSessionRows(usage.activitySessions, csrf)}</tbody></table></section>
+<div class="metrics" data-live="metrics">${fragments.metrics}</div>
+<section><h2>Devices</h2><div data-live="devices">${fragments.devices}</div></section>
+<section><h2>Top tools</h2><div data-live="topTools">${fragments.topTools}</div></section>
+<section><h2>Skill loads</h2><div data-live="skillLoads">${fragments.skillLoads}</div></section>
+<section><h2>Recent errors</h2><div data-live="errors">${fragments.errors}</div></section>
+<section><h2>OAuth client sessions</h2><div data-live="sessions">${fragments.sessions}</div></section>
 <section class="privacy"><h2>Privacy and connection model</h2><p>Your account only lists devices owned by this account. The private device key stays on the local device; the gateway stores public identity, ownership, and operational usage metadata. Devices connect outbound to the gateway, so no inbound device port is required.</p></section>
-<div class="foot">Schema token values use <code>${escapeHtml(schema.estimationMethod || 'utf8_bytes_div_4_estimate')}</code>; they are estimated context size, not billing tokens.<form method="post" action="/logout"><button type="submit">Sign out</button></form></div>
+<div class="foot"><form method="post" action="/logout"><button type="submit">Sign out</button></form></div>
 <script>
 (() => {
   let dirty = false;
-  let pauseUntil = 0;
+  let inFlight = false;
   const controls = 'input,button,select,textarea,[contenteditable="true"]';
   document.addEventListener('input', event => {
     if (event.target?.matches?.('input,textarea,select,[contenteditable="true"]')) dirty = true;
   });
-  for (const name of ['scroll', 'wheel', 'touchstart', 'pointerdown', 'keydown']) {
-    window.addEventListener(name, () => { pauseUntil = Date.now() + 5000; }, { passive: name !== 'keydown' });
-  }
-  setInterval(() => {
+  async function refreshDashboard() {
     const focused = document.activeElement?.matches?.(controls);
-    if (document.visibilityState !== 'visible' || !document.hasFocus() || dirty || focused || window.scrollY !== 0 || Date.now() < pauseUntil) return;
-    location.reload();
-  }, 3500);
+    if (document.visibilityState !== 'visible' || dirty || focused || inFlight) return;
+    inFlight = true;
+    try {
+      const response = await fetch('/dashboard/state', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } });
+      if (!response.ok) return;
+      const fragments = await response.json();
+      for (const [key, html] of Object.entries(fragments)) {
+        const target = document.querySelector('[data-live="' + key + '"]');
+        if (target && target.innerHTML !== html) target.innerHTML = html;
+      }
+    } catch { /* retain the last known dashboard state */ }
+    finally { inFlight = false; }
+  }
+  const timer = setInterval(refreshDashboard, 3500);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshDashboard();
+  });
+  window.addEventListener('beforeunload', () => clearInterval(timer), { once: true });
 })();
 </script>
 </main></body></html>`;
@@ -258,33 +302,33 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     res.status(404).type('text').send('Resource unavailable.');
   }
 
-  app.get('/dashboard', (req, res) => {
-    const account = requireAccount(req, res);
-    if (!account) return;
-    const csrf = ensureCsrf(req, res);
+  function loadDashboardData(account) {
     const usage = usageStore.getAccountUsage(account.accountId);
     const deviceUsage = usageStore.getDeviceUsageForAccount(account.accountId);
     const usageByDevice = new Map(deviceUsage.map(item => [item.deviceId, item]));
-    const devices = deviceBroker.listDevices({ accountId: account.accountId }).map(device => ({
-      ...device,
-      attributedUsage: usageByDevice.get(device.deviceId) || {
-        deviceId: device.deviceId,
-        toolCalls: 0,
-        succeeded: 0,
-        failed: 0,
-        inputBytes: 0,
-        outputBytes: 0,
-        estimatedIoTokens: 0,
-        estimationMethod: 'utf8_bytes_div_4_estimate'
-      }
-    }));
+    const devices = deviceBroker.listDevices({ accountId: account.accountId })
+      .filter(device => !device.revoked)
+      .map(device => ({
+        ...device,
+        attributedUsage: usageByDevice.get(device.deviceId) || {
+          deviceId: device.deviceId,
+          lastSeenAt: null,
+          toolCalls: 0,
+          succeeded: 0,
+          failed: 0,
+          inputBytes: 0,
+          outputBytes: 0,
+          estimatedIoTokens: 0,
+          estimationMethod: 'utf8_bytes_div_4_estimate'
+        }
+      }));
     const devicesById = new Map(devices.map(device => [device.deviceId, device]));
     usage.recentErrors = usage.recentErrors.map(item => ({
       ...item,
       deviceName: item.deviceId ? devicesById.get(item.deviceId)?.deviceName || null : null
     }));
     usage.activitySessions = usage.activitySessions.map(item => {
-      const client = clientLabel(item.clientId, oauthClientLookup);
+      const client = clientLabel(item.clientId, oauthClientLookup, item.displayName);
       const deviceIds = typeof usageStore.getActivitySessionDeviceIds === 'function'
         ? usageStore.getActivitySessionDeviceIds(account.accountId, item.activitySessionId, { limit: 20 })
         : [];
@@ -295,16 +339,32 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
         devices: deviceIds.map(deviceId => devicesById.get(deviceId)).filter(Boolean)
       };
     });
+    return { usage, devices };
+  }
+
+  app.get('/dashboard', (req, res) => {
+    const account = requireAccount(req, res);
+    if (!account) return;
+    const csrf = ensureCsrf(req, res);
+    const { usage, devices } = loadDashboardData(account);
     const baseUrl = typeof baseUrlFromRequest === 'function' ? baseUrlFromRequest(req) : `${req.protocol}://${req.get('host')}`;
-    const showRevoked = String(req.query?.show_revoked || '') === '1';
-    res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl, showRevoked }));
+    res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl }));
+  });
+
+  app.get('/dashboard/state', (req, res) => {
+    const account = requireAccount(req, res);
+    if (!account) return;
+    const csrf = ensureCsrf(req, res);
+    const { usage, devices } = loadDashboardData(account);
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(dashboardFragments({ usage, devices, csrf }));
   });
 
   app.get('/dashboard/devices/:deviceId', async (req, res) => {
     const account = requireAccount(req, res);
     if (!account) return;
     const device = deviceBroker.listDevices({ accountId: account.accountId })
-      .find(item => item.deviceId === req.params.deviceId);
+      .find(item => !item.revoked && item.deviceId === req.params.deviceId);
     if (!device) return unavailable(res);
     const csrf = ensureCsrf(req, res);
     const toolUsage = usageStore.getDeviceToolUsage(account.accountId, device.deviceId);
@@ -342,6 +402,22 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     } catch (error) {
       if (error?.code === 'DEVICE_ACCESS_DENIED' || /Unknown device/i.test(String(error?.message || ''))) return unavailable(res);
       res.status(400).type('text').send('Invalid device revoke.');
+    }
+  });
+
+  app.post('/dashboard/sessions/:activitySessionId/rename', (req, res) => {
+    const account = requireAccount(req, res);
+    if (!account || !requireCsrf(req, res)) return;
+    try {
+      usageStore.renameActivitySession({
+        activitySessionId: req.params.activitySessionId,
+        accountId: account.accountId,
+        displayName: req.body?.client_name
+      });
+      res.redirect(303, '/dashboard');
+    } catch (error) {
+      if (/not found/i.test(String(error?.message || ''))) return unavailable(res);
+      res.status(400).type('text').send('Invalid OAuth client name.');
     }
   });
 

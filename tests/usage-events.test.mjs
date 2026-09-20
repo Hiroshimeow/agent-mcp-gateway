@@ -110,6 +110,7 @@ test('tool call events provide account-scoped per-device and per-tool attributio
     assert.deepEqual(f.store.getDeviceUsageForAccount('alice'), [
       {
         deviceId: 'device-a',
+        lastSeenAt: 1_700_000_000_000,
         toolCalls: 3,
         succeeded: 2,
         failed: 1,
@@ -120,6 +121,7 @@ test('tool call events provide account-scoped per-device and per-tool attributio
       },
       {
         deviceId: 'device-b',
+        lastSeenAt: 1_700_000_000_000,
         toolCalls: 1,
         succeeded: 1,
         failed: 0,
