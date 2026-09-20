@@ -124,7 +124,7 @@ function publicDevice(device, { stored = null, usage = null, schema = null } = {
       label: stored?.accountLabel || null
     },
     online: Boolean(device.online),
-    revoked: Boolean(device.revoked),
+    revoked: Boolean(stored?.revokedAt || device.revoked),
     connectionEpoch: device.connectionEpoch || 0,
     agentVersion: device.agentVersion || stored?.agentVersion || 'unknown',
     capabilities: [...(device.capabilities || [])],

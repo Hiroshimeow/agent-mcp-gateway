@@ -168,10 +168,10 @@ function deviceUsageHtml({ device, toolUsage, recentCalls, toolDefinitions, csrf
 </main></body></html>`;
 }
 
-function renderGatewayStatus(devices, schema) {
+function renderGatewayStatus(devices, schema, serverVersion) {
   const online = devices.filter(device => device.online).length;
   const offline = devices.length - online;
-  return `<span class="health">● Gateway online</span><span><strong>${online}</strong> online · <strong>${offline}</strong> offline</span><span><strong>${formatNumber(schema.toolCount)} tools</strong></span><span><strong>${formatNumber(schema.schemaBytes)} B schema</strong></span>`;
+  return `<span class="health">● Gateway online</span><span><strong>${online}</strong> online · <strong>${offline}</strong> offline</span><span><strong>${formatNumber(schema.toolCount)} tools</strong></span><span><strong>${formatNumber(schema.schemaBytes)} B schema</strong></span><span><strong>Server ${escapeHtml(serverVersion || 'unknown')}</strong></span>`;
 }
 
 function renderAccountMetrics(usage) {
@@ -196,9 +196,9 @@ function renderSessionsTable(items, csrf) {
   return `<table><thead><tr><th>Client session</th><th>OAuth client</th><th>Devices used</th><th>Started</th><th>Last seen</th><th>State</th></tr></thead><tbody>${renderSessionRows(items, csrf)}</tbody></table>`;
 }
 
-function dashboardFragments({ usage, devices, csrf }) {
+function dashboardFragments({ usage, devices, csrf, serverVersion }) {
   return {
-    status: renderGatewayStatus(devices, usage.schema || {}),
+    status: renderGatewayStatus(devices, usage.schema || {}, serverVersion),
     metrics: renderAccountMetrics(usage),
     devices: renderDevicesTable(devices, csrf),
     topTools: renderTopToolsTable(usage.topTools),
@@ -208,8 +208,8 @@ function dashboardFragments({ usage, devices, csrf }) {
   };
 }
 
-function dashboardHtml({ account, usage, devices, csrf, baseUrl }) {
-  const fragments = dashboardFragments({ usage, devices, csrf });
+function dashboardHtml({ account, usage, devices, csrf, baseUrl, serverVersion }) {
+  const fragments = dashboardFragments({ usage, devices, csrf, serverVersion });
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MCP Gateway Dashboard</title>
@@ -260,7 +260,7 @@ ${devices.length ? '' : `<div class="onboarding"><h2>Pair your first device</h2>
 </main></body></html>`;
 }
 
-export function installDashboardRoutes(app, { accountFromRequest, usageStore, deviceBroker, baseUrlFromRequest, oauthClientLookup, listTools } = {}) {
+export function installDashboardRoutes(app, { accountFromRequest, usageStore, deviceBroker, baseUrlFromRequest, oauthClientLookup, listTools, serverVersion = 'unknown' } = {}) {
   if (!app || typeof accountFromRequest !== 'function' || !usageStore || !deviceBroker) {
     throw new Error('app, accountFromRequest, usageStore, and deviceBroker are required.');
   }
@@ -348,7 +348,7 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     const csrf = ensureCsrf(req, res);
     const { usage, devices } = loadDashboardData(account);
     const baseUrl = typeof baseUrlFromRequest === 'function' ? baseUrlFromRequest(req) : `${req.protocol}://${req.get('host')}`;
-    res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl }));
+    res.status(200).type('html').send(dashboardHtml({ account, usage, devices, csrf, baseUrl, serverVersion }));
   });
 
   app.get('/dashboard/state', (req, res) => {
@@ -357,7 +357,7 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
     const csrf = ensureCsrf(req, res);
     const { usage, devices } = loadDashboardData(account);
     res.set('Cache-Control', 'no-store');
-    res.status(200).json(dashboardFragments({ usage, devices, csrf }));
+    res.status(200).json(dashboardFragments({ usage, devices, csrf, serverVersion }));
   });
 
   app.get('/dashboard/devices/:deviceId', async (req, res) => {

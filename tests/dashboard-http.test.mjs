@@ -105,7 +105,8 @@ async function fixture() {
     deviceBroker: broker,
     baseUrlFromRequest: () => 'https://mcp.matcha.me',
     oauthClientLookup: clientId => oauthState.getClient(clientId),
-    listTools: async () => toolCatalog
+    listTools: async () => toolCatalog,
+    serverVersion: '1.0.0 · testsha'
   });
   const server = await new Promise(resolve => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
@@ -309,6 +310,7 @@ test('recent errors prefer friendly device names and render only the newest boun
     const response = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
     assert.equal(response.status, 200);
     const html = await response.text();
+    assert.match(html, /Server 1\.0\.0 · testsha/);
     assert.match(html, /Alice Workstation/);
     assert.match(html, /Show 15 more \(max 20\)/);
     assert.match(html, /BOUNDED_24/);
@@ -321,7 +323,7 @@ test('recent errors prefer friendly device names and render only the newest boun
 test('dashboard permanently excludes revoked devices from inventory and counts', async () => {
   const f = await fixture();
   try {
-    f.broker.revokeOwnedDevice({ accountId: f.alice.accountId, deviceId: 'alice-device' });
+    f.deviceStore.revoke('alice-device');
 
     for (const route of ['/dashboard', '/dashboard?show_revoked=1']) {
       const response = await fetch(`${f.base}${route}`, { headers: { cookie: f.aliceCookie } });

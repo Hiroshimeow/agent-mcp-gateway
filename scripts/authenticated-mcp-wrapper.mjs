@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -62,6 +64,15 @@ import {
 } from './workspace-registry.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const gatewayPackageVersion = (() => {
+  try { return String(JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))?.version || 'unknown'); }
+  catch { return 'unknown'; }
+})();
+const gatewayBuildSha = String(process.env.MCP_GATEWAY_BUILD_SHA || '').trim() || (() => {
+  try { return String(execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: packageRoot, encoding: 'utf8', windowsHide: true })).trim(); }
+  catch { return ''; }
+})();
+const gatewayServerVersion = String(process.env.MCP_GATEWAY_SERVER_VERSION || '').trim() || [gatewayPackageVersion, gatewayBuildSha].filter(Boolean).join(' · ');
 const runtimeDirectory = path.resolve(process.env.MCP_RUNTIME_DIR || path.join(packageRoot, '.runtime'));
 const repoRoot = process.env.REPO_ROOT;
 const gatewayPort = Number(process.env.MCP_GATEWAY_PORT || '8101');
@@ -825,7 +836,8 @@ installDashboardRoutes(app, {
   deviceBroker,
   baseUrlFromRequest: requestBaseUrl,
   oauthClientLookup: clientId => oauthStateStore.getClient(clientId),
-  listTools: listMergedTools
+  listTools: listMergedTools,
+  serverVersion: gatewayServerVersion
 });
 const provider = new AccountAuthProvider({
   stateStore: oauthStateStore,
