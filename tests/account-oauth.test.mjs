@@ -108,7 +108,8 @@ test('OAuth authenticated session shows account confirmation and preserves valid
       codeChallenge: 'validated-challenge',
       scopes: ['mcp:tools', 'offline_access'],
       state: 'validated-state',
-      resource: 'https://example.com/mcp'
+      resource: 'https://example.com/mcp',
+      issuer: 'https://device.hcu-lab.me/'
     };
     const gate = fakeResponse(req);
     await f.provider.authorize(f.client, params, gate);
@@ -131,6 +132,7 @@ test('OAuth authenticated session shows account confirmation and preserves valid
     const target = new URL(continued.redirectTarget);
     assert.equal(target.origin + target.pathname, 'https://chat.openai.com/callback');
     assert.equal(target.searchParams.get('state'), 'validated-state');
+    assert.equal(target.searchParams.get('iss'), 'https://device.hcu-lab.me/');
     const code = target.searchParams.get('code');
     const stored = f.provider.codes.get(code);
     assert.equal(stored.accountId, f.user.accountId);

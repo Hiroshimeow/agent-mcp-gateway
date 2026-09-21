@@ -154,6 +154,7 @@ export class AccountAuthProvider {
 
     const searchParams = new URLSearchParams({ code });
     if (params.state !== undefined) searchParams.set('state', params.state);
+    if (params.issuer) searchParams.set('iss', String(params.issuer));
     const targetUrl = new URL(String(params.redirectUri).trim());
     targetUrl.search = searchParams.toString();
     res.redirect(targetUrl.toString());
