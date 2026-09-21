@@ -1,6 +1,6 @@
 {
   "name": "agent-mcp-gateway",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Cross-platform local MCP gateway for coding agents.",
   "license": "MIT",
   "scripts": {
@@ -29,10 +29,12 @@
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/express": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@modelcontextprotocol/server-legacy": "^2.0.0",
+    "cors": "^2.8.6",
     "express": "5.1.0",
+    "express-rate-limit": "^8.7.0",
     "smol-toml": "^1.4.2",
     "ws": "^8.21.3",
     "yaml": "^2.9.1"

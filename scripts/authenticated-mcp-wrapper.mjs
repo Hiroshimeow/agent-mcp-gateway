@@ -4,9 +4,9 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, requireBearerAuth } from "@modelcontextprotocol/server-legacy/auth";
+import { requireBearerAuth } from '@modelcontextprotocol/express';
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
-import { createMcpHandler, isInitializeRequest, isLegacyRequest, Server } from '@modelcontextprotocol/server';
+import { createMcpHandler, getOAuthProtectedResourceMetadataUrl, isInitializeRequest, isLegacyRequest, Server } from '@modelcontextprotocol/server';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
@@ -30,6 +30,7 @@ import {
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
+import { createOAuthAuthorizationServerRouter } from './oauth-authorization-server.mjs';
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
@@ -920,7 +921,7 @@ function getAuthRouterForBaseUrl(baseUrl) {
   }
 
   const { issuerUrl, resourceServerUrl } = buildAuthUrls(normalizedBaseUrl);
-  const router = mcpAuthRouter({
+  const router = createOAuthAuthorizationServerRouter({
     provider,
     issuerUrl,
     resourceServerUrl,
@@ -965,11 +966,9 @@ function getOAuthAuthMiddlewareForBaseUrl(baseUrl) {
   }
 
   const { resourceServerUrl } = buildAuthUrls(normalizedBaseUrl);
-  /* @mcp-codemod-error requireBearerAuth: resource-server auth helpers routed to the frozen @modelcontextprotocol/server-legacy/auth copy. The maintained v2 home is @modelcontextprotocol/express — when re-pointing, verifiers must throw the v2 OAuthError (the express middleware does not recognize the legacy error classes). See the migration guide's server auth split section. */
   const middleware = requireBearerAuth({
     verifier: provider,
     requiredScopes: [],
-    /* @mcp-codemod-error getOAuthProtectedResourceMetadataUrl: resource-server auth helpers routed to the frozen @modelcontextprotocol/server-legacy/auth copy. The maintained v2 home is @modelcontextprotocol/express — when re-pointing, verifiers must throw the v2 OAuthError (the express middleware does not recognize the legacy error classes). See the migration guide's server auth split section. */
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl)
   });
   oauthAuthMiddlewares.set(normalizedBaseUrl, middleware);

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { OAuthError, OAuthErrorCode } from '@modelcontextprotocol/server';
 import { publicGatePage } from './account-http.mjs';
 import { escapeHtml } from './enduser-ui.mjs';
 
@@ -216,15 +217,28 @@ export class AccountAuthProvider {
 
   async challengeForAuthorizationCode(_client, authorizationCode) {
     const codeData = this.codes.get(authorizationCode);
-    if (!codeData) throw new Error('Invalid authorization code');
+    if (!codeData) {
+      throw new OAuthError(OAuthErrorCode.InvalidGrant, 'Invalid authorization code');
+    }
     return codeData.params.codeChallenge;
   }
 
   async exchangeAuthorizationCode(client, authorizationCode) {
     const codeData = this.codes.get(authorizationCode);
-    if (!codeData) throw new Error('Invalid authorization code');
-    if (codeData.client.client_id !== client.client_id) throw new Error('Authorization code was not issued to this client');
-    activeAccount(this.accountStore, codeData.accountId);
+    if (!codeData) {
+      throw new OAuthError(OAuthErrorCode.InvalidGrant, 'Invalid authorization code');
+    }
+    if (codeData.client.client_id !== client.client_id) {
+      throw new OAuthError(
+        OAuthErrorCode.InvalidGrant,
+        'Authorization code was not issued to this client'
+      );
+    }
+    try {
+      activeAccount(this.accountStore, codeData.accountId);
+    } catch {
+      throw new OAuthError(OAuthErrorCode.InvalidGrant, 'OAuth account is missing or revoked');
+    }
 
     this.codes.delete(authorizationCode);
     const token = crypto.randomUUID();
@@ -270,9 +284,20 @@ export class AccountAuthProvider {
 
   async exchangeRefreshToken(client, refreshToken) {
     const refreshTokenData = this.refreshTokens.get(refreshToken) || this.stateStore?.getRefreshToken(refreshToken);
-    if (!refreshTokenData || refreshTokenData.expiresAt < Date.now()) throw new Error('Invalid or expired refresh token');
-    if (client?.client_id && refreshTokenData.clientId !== client.client_id) throw new Error('Refresh token was not issued to this client');
-    activeAccount(this.accountStore, refreshTokenData.accountId);
+    if (!refreshTokenData || refreshTokenData.expiresAt < Date.now()) {
+      throw new OAuthError(OAuthErrorCode.InvalidGrant, 'Invalid or expired refresh token');
+    }
+    if (client?.client_id && refreshTokenData.clientId !== client.client_id) {
+      throw new OAuthError(
+        OAuthErrorCode.InvalidGrant,
+        'Refresh token was not issued to this client'
+      );
+    }
+    try {
+      activeAccount(this.accountStore, refreshTokenData.accountId);
+    } catch {
+      throw new OAuthError(OAuthErrorCode.InvalidGrant, 'OAuth account is missing or revoked');
+    }
     const activitySessionId = this.ensureActivitySession(refreshTokenData, { refreshToken });
 
     this.refreshTokens.delete(refreshToken);
@@ -314,8 +339,14 @@ export class AccountAuthProvider {
 
   async verifyAccessToken(token) {
     const tokenData = this.tokens.get(token) || this.stateStore?.getToken(token);
-    if (!tokenData || tokenData.expiresAt < Date.now()) throw new Error('Invalid or expired token');
-    activeAccount(this.accountStore, tokenData.accountId);
+    if (!tokenData || tokenData.expiresAt < Date.now()) {
+      throw new OAuthError(OAuthErrorCode.InvalidToken, 'Invalid or expired token');
+    }
+    try {
+      activeAccount(this.accountStore, tokenData.accountId);
+    } catch {
+      throw new OAuthError(OAuthErrorCode.InvalidToken, 'OAuth account is missing or revoked');
+    }
     const activitySessionId = this.ensureActivitySession(tokenData, { token });
     return {
       token,
