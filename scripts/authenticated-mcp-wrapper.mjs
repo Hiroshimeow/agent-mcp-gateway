@@ -60,7 +60,7 @@ const gatewayPackageVersion = (() => {
   catch { return 'unknown'; }
 })();
 const gatewayBuildSha = String(process.env.MCP_GATEWAY_BUILD_SHA || '').trim() || (() => {
-  try { return String(execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: packageRoot, encoding: 'utf8', windowsHide: true })).trim(); }
+  try { return String(execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: packageRoot, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })).trim(); }
   catch { return ''; }
 })();
 const gatewayServerVersion = String(process.env.MCP_GATEWAY_SERVER_VERSION || '').trim() || [gatewayPackageVersion, gatewayBuildSha].filter(Boolean).join(' · ');
