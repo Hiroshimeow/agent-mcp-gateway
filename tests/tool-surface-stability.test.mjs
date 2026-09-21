@@ -34,7 +34,7 @@ test('stableToolDefinition removes dynamic root metadata without changing schema
 test('stable local collision names include project tools and all execution primitives', () => {
   for (const name of [
     'read_text_file', 'write_file', 'edit_file', 'shell_execute',
-    'image_preview', 'get_skill', 'project_list', 'project_inspect',
+    'image_preview', 'load_skill', 'project_list', 'project_inspect',
     'external_tool_search', 'external_tool_call_read', 'external_tool_call_write', 'list_devices',
     'start_process', 'read_process_output', 'interact_with_process', 'terminate_process'
   ]) {

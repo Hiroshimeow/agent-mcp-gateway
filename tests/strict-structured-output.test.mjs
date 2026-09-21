@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-
+import { InMemoryTransport, Server } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
 import { ok } from '../scripts/custom-tools/response-utils.mjs';
 import { normalizeRemoteFilesystemResult } from '../scripts/remote-tool-result.mjs';
 
@@ -57,8 +53,8 @@ async function fixture() {
     { name: 'malformed', description: 'malformed control', inputSchema: { type: 'object' }, outputSchema: filesystemOutputSchema }
   ];
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-  server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.setRequestHandler('tools/list', async () => ({ tools }));
+  server.setRequestHandler('tools/call', async request => {
     if (request.params.name === 'filesystem') {
       return normalizeRemoteFilesystemResult({ content: [{ type: 'text', text: 'hello' }] });
     }

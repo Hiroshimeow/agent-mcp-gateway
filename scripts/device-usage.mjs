@@ -405,7 +405,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       inputBytes, outputBytes, metric.truncated ? 1 : 0, metric.spill ? 1 : 0,
       boundedText(metric.callerCategory, 32), boundedText(metric.upstream, 128)
     );
-    const skillName = tool === 'get_skill' ? boundedText(metric.skillName, 128) : null;
+    const skillName = tool === 'load_skill' ? boundedText(metric.skillName, 128) : null;
     if (skillName) {
       insertSkillLoad.run(
         eventAt, accountId, activitySessionId, skillName, success ? 'success' : 'error', errorCode,

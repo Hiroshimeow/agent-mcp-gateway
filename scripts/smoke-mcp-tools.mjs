@@ -142,10 +142,8 @@ async function initialize(baseUrl) {
   });
   assert.equal(response.result.serverInfo.title, 'Local Coding Gateway');
   assert.match(response.result.serverInfo.description || '', /Local coding workspace/i);
-  assert.match(response.result.instructions || '', /get_skill\(name\)/i);
-  assert.match(response.result.instructions || '', /project_list.*project_inspect/i);
-  assert.match(response.result.instructions || '', /read_text_file/i);
-  assert.doesNotMatch(response.result.instructions || '', /Routing policy:/i);
+  assert.match(response.result.instructions || '', /skill_catalog.*load_skill/i);
+  assert.doesNotMatch(response.result.instructions || '', /routing policy|bootstrap/i);
   return response;
 }
 
@@ -184,24 +182,25 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
     'external_tool_call_read',
     'external_tool_call_write',
     'external_tool_search',
-    'get_skill',
     'image_preview',
     'interact_with_process',
     'list_devices',
+    'load_skill',
     'project_inspect',
     'project_list',
     'read_process_output',
     'read_text_file',
     'shell_execute',
+    'skill_catalog',
     'start_process',
     'terminate_process',
     'write_file'
   ]);
-  for (const name of ['edit_file', 'shell_execute', 'write_file']) {
-    assert.match(tools.find(tool => tool.name === name)?.description || '', /get_skill\(name\)/i);
+  for (const name of ['skill_catalog', 'load_skill']) {
+    const tool = tools.find(item => item.name === name);
+    assert.equal(tool?.outputSchema?.type, 'object');
+    assert.deepEqual(tool?.annotations, { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false });
   }
-  assert.doesNotMatch(tools.find(tool => tool.name === 'read_text_file')?.description || '', /get_skill\(name\)/i);
-  assert.equal(tools.find(tool => tool.name === 'get_skill')?.outputSchema?.type, 'object');
   const deviceList = await callTool(baseUrl, 38, 'list_devices', {});
   const deviceListPayload = JSON.parse(deviceList.result.content[0].text);
   assert.deepEqual(deviceListPayload.devices, []);
@@ -302,20 +301,21 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
   assert.match(JSON.stringify(absentDeviceRead), /device|offline|connected|available|found/i);
   assert.equal(fs.readFileSync(target, 'utf8'), 'must-not-be-read-by-gateway-host');
 
-  const invalidSkill = await callTool(baseUrl, 18, 'get_skill', { name: 'missing-smoke-skill' });
-  assert.match(invalidSkill.error?.message || '', /Unknown skill/i);
+  const invalidSkill = await callTool(baseUrl, 18, 'load_skill', { name: 'missing-smoke-skill' });
+  assert.match(invalidSkill.error?.message || JSON.stringify(invalidSkill), /Unknown skill/i);
 
-  const bootstrap = await callTool(baseUrl, 9, 'get_skill', { name: 'local_coding' });
-  assert.notEqual(bootstrap.result.isError, true);
-  const bootstrapPayload = JSON.parse(bootstrap.result.content[0].text);
-  assert.equal(bootstrapPayload.data.name, 'local_coding');
-  assert.equal(bootstrapPayload.data.skillCatalog, undefined);
-  assert.deepEqual(bootstrap.result.structuredContent, bootstrapPayload);
+  const loaded = await callTool(baseUrl, 9, 'load_skill', { name: 'ponytail' });
+  assert.notEqual(loaded.result.isError, true);
+  const loadedPayload = JSON.parse(loaded.result.content[0].text);
+  assert.equal(loadedPayload.data.name, 'ponytail');
+  assert.equal(loadedPayload.data.skills, undefined);
+  assert.deepEqual(loaded.result.structuredContent, loadedPayload);
 
-  const discovery = await callTool(baseUrl, 13, 'get_skill', {});
+  const discovery = await callTool(baseUrl, 13, 'skill_catalog', {});
   const discoveryPayload = JSON.parse(discovery.result.content[0].text);
-  assert.equal(discoveryPayload.data.mode, 'discovery');
-  assert.equal(discoveryPayload.data.body, undefined);
+  assert.equal(discoveryPayload.data.changed, true);
+  assert.equal(discoveryPayload.data.skills.some(skill => skill.name === 'ponytail'), true);
+  assert.equal(discoveryPayload.data.skills.some(skill => skill.body !== undefined), false);
   assert.deepEqual(discovery.result.structuredContent, discoveryPayload);
 
   const usageDb = new DatabaseSync(path.join(runtimeDirectory, 'gateway.sqlite'));
@@ -349,7 +349,7 @@ await withServer('yolo', async ({ baseUrl, workspace, runtimeDirectory }) => {
 await withServer('safe', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['external_tool_call_read', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file']);
+  assert.deepEqual(names(tools), ['external_tool_call_read', 'external_tool_search', 'image_preview', 'list_devices', 'load_skill', 'project_inspect', 'project_list', 'read_text_file', 'skill_catalog']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_RUNTIME_PROFILE=safe/);
   observedProfiles.safe = names(tools);
@@ -359,7 +359,7 @@ await withServer('safe', async ({ baseUrl }) => {
 await withServer('assisted', async ({ baseUrl }) => {
   await initialize(baseUrl);
   const tools = await listTools(baseUrl);
-  assert.deepEqual(names(tools), ['edit_file', 'external_tool_call_read', 'external_tool_call_write', 'external_tool_search', 'get_skill', 'image_preview', 'list_devices', 'project_inspect', 'project_list', 'read_text_file', 'write_file']);
+  assert.deepEqual(names(tools), ['edit_file', 'external_tool_call_read', 'external_tool_call_write', 'external_tool_search', 'image_preview', 'list_devices', 'load_skill', 'project_inspect', 'project_list', 'read_text_file', 'skill_catalog', 'write_file']);
   const blocked = await callTool(baseUrl, 3, 'shell_execute', { command: 'echo blocked' });
   assert.match(blocked.error?.message || '', /disabled by MCP_RUNTIME_PROFILE=assisted/);
   observedProfiles.assisted = names(tools);
@@ -368,7 +368,7 @@ await withServer('assisted', async ({ baseUrl }) => {
 
 console.log(JSON.stringify({
   ok: true,
-  checked: 'exact core catalog, progressive skill advisory, profile filtering, explicit device routing, and no gateway-host execution fallback',
+  checked: 'exact core catalog, two-tool skill fallback, profile filtering, explicit device routing, and no gateway-host execution fallback',
   observedProfiles,
   observedCatalogBytes,
   observedToolBytes

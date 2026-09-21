@@ -62,7 +62,7 @@ export function createWorkspaceRegistry(options = {}) {
         name: rawConfig.server?.name || 'agent-mcp-gateway',
         title: rawConfig.server?.title || 'Local Coding Gateway',
         description: rawConfig.server?.description || 'Local coding workspace for filesystem, shell, image inspection, and optional skills.',
-        instructions: rawConfig.server?.instructions || 'Use filesystem tools for content, shell_execute for terminal workflows, image_preview for local images, and get_skill for reusable coding guidance.'
+        instructions: rawConfig.server?.instructions || 'Use filesystem tools for content, shell_execute for terminal workflows, and image_preview for local images.'
       },
       loadedAt: new Date().toISOString(),
       lastError: null

@@ -1,10 +1,10 @@
 # MCP Harness Efficiency Design
 
-Status: **living architecture baseline**  
+Status: **historical — superseded for skill architecture on 2026-09-21**
 Owner surface: `agent-mcp-gateway`  
 Established: 2026-09-09
 
-This document is the durable design source for future MCP gateway efficiency work. Agents should read this before adding core tools, changing model-facing schemas, changing skill loading, or introducing deferred external tools.
+This document records the pre-2026-09-21 harness-efficiency architecture. Its legacy skill-loader, bootstrap, prompt/resource-mirroring, and fixed core-catalog statements are historical only. Current skill behavior is defined by `AGENTS.md`, `README.md`, and `scripts/skills/README.md`; do not use this document as authority for skill architecture.
 
 ## 1. Goal
 

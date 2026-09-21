@@ -44,7 +44,7 @@ async function fixture() {
     durationMs: 12, success: true, inputBytes: 100, outputBytes: 200, callerCategory: 'oauth'
   });
   usageStore.recordToolCall({
-    accountId: alice.accountId, activitySessionId: 'alice-activity', tool: 'get_skill', skillName: 'mcp_builder',
+    accountId: alice.accountId, activitySessionId: 'alice-activity', tool: 'load_skill', skillName: 'mcp-builder',
     durationMs: 2, success: false, errorCode: 'UNKNOWN_SKILL', inputBytes: 20, outputBytes: 401, callerCategory: 'oauth'
   });
   usageStore.recordToolCall({
@@ -196,7 +196,7 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /section\{overflow-x:auto\}/);
     assert.match(html, /table\{min-width:760px\}/);
     assert.match(html, /shell_execute/);
-    assert.match(html, /mcp_builder/);
+    assert.match(html, /mcp-builder/);
     assert.match(html, /UNKNOWN_SKILL/);
     assert.match(html, /OAuth client sessions/i);
     assert.match(html, /ChatGPT/);

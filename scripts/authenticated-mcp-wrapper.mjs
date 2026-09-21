@@ -4,27 +4,17 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
-import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
-import {
-  CallToolRequestSchema,
-  GetPromptRequestSchema,
-  isInitializeRequest,
-  ListPromptsRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema
-} from '@modelcontextprotocol/sdk/types.js';
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, requireBearerAuth } from "@modelcontextprotocol/server-legacy/auth";
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
+import { createMcpHandler, isInitializeRequest, isLegacyRequest, Server } from '@modelcontextprotocol/server';
 import { getRuntimeProfile } from './runtime-profile.mjs';
 import { applyToolRisk, assertToolAllowedForProfile, shouldExposeToolForProfile } from './tool-risk.mjs';
 import { listRepoResources, listRepoResourceTemplates, readRepoResource } from './resources/index.mjs';
 import { getRepoPrompt, listRepoPrompts } from './prompts/index.mjs';
 import { loadSurfaceConfig } from './surface-config.mjs';
 import { LOCAL_COLLISION_TOOL_NAMES, stableToolDefinition, workspaceCatalogChanges } from './tool-surface-stability.mjs';
-import { SKILL_AGENT_INSTRUCTIONS, watchSkillCatalog } from './skills/index.mjs';
+import { createSkillRegistry } from './skills/index.mjs';
+import { registerSkillsExtension } from './skills/mcp-adapter.mjs';
 import { createExternalToolBroker } from './external-tool-broker.mjs';
 import { createExternalMcpManager } from './upstreams/manager.mjs';
 import { normalizeExternalMcpConfig } from './upstreams/config.mjs';
@@ -40,7 +30,6 @@ import {
   shouldCreateTransportForRequest,
   shouldUseStatefulSessionTransport
 } from './auth-session.mjs';
-import { buildSkillCallerKey, createSkillBootstrapGate, decorateSkillBootstrapDescription } from './skill-bootstrap-gate.mjs';
 import { buildToolMetric, createToolMetricsRecorder } from './tool-metrics.mjs';
 import { createRemoteProcessSessionRegistry } from './remote-process-sessions.mjs';
 import { normalizeRemoteFilesystemResult } from './remote-tool-result.mjs';
@@ -93,9 +82,6 @@ const slowToolThresholdMs = normalizeDurationMs(process.env.MCP_SLOW_TOOL_MS, 50
 const toolMetrics = createToolMetricsRecorder({
   metricsPath: path.resolve(process.env.MCP_METRICS_PATH || path.join(runtimeDirectory, 'mcp-calls.ndjson')),
   enabled: envFlag(process.env.MCP_METRICS_ENABLED, false)
-});
-const skillBootstrapGate = createSkillBootstrapGate({
-  ttlMs: normalizeDurationMs(process.env.MCP_SKILL_BOOTSTRAP_TTL_MS, 4 * 60 * 60 * 1000)
 });
 const FILESYSTEM_TOOL_NAMES = new Set(['read_text_file', 'write_file', 'edit_file']);
 const PROCESS_TOOL_NAMES = new Set(['start_process', 'read_process_output', 'interact_with_process', 'terminate_process']);
@@ -155,6 +141,8 @@ const deviceAudit = createDeviceAuditRecorder({
   enabled: envFlag(process.env.MCP_DEVICE_AUDIT_ENABLED, false)
 });
 
+const skillRegistry = createSkillRegistry({ directory: path.join(packageRoot, 'scripts', 'skills') });
+
 async function broadcastCatalogChanges(changes = {}) {
   const tasks = [];
   for (const server of activeProxyServers) {
@@ -164,14 +152,6 @@ async function broadcastCatalogChanges(changes = {}) {
   }
   await Promise.all(tasks);
 }
-
-const stopSkillCatalogWatcher = watchSkillCatalog(async () => {
-  const surfaceConfig = currentSurfaceConfig();
-  await broadcastCatalogChanges({
-    resourcesChanged: surfaceConfig.enumerateSkillResources,
-    promptsChanged: surfaceConfig.exposePrompts
-  });
-});
 
 function localToolNamesForCollisionCheck() {
   return [...LOCAL_COLLISION_TOOL_NAMES];
@@ -312,6 +292,7 @@ function customToolContext(callerContext = {}) {
       return await callRemoteDevice({ context: callerContext, deviceId, tool, arguments: toolArguments });
     },
     externalToolBroker,
+    skillRegistry,
     runtimeProfile,
     packageRoot,
     env: process.env
@@ -381,7 +362,7 @@ function filesystemToolMeta(tool) {
     ...tool,
     inputSchema: withRequiredDeviceId(tool.inputSchema),
     name: tool.name,
-    description: decorateSkillBootstrapDescription(tool.name, tool.description)
+    description: tool.description
   }));
 }
 
@@ -444,14 +425,6 @@ function boundedShellToolText(value) {
   throw new Error(`shell_execute response exceeds ${SHELL_RESPONSE_BUDGET_BYTES} byte budget`);
 }
 
-function appendSkillAdvisory(result, advisory) {
-  if (!advisory || result?.isError) return result;
-  return {
-    ...result,
-    content: [...(result?.content || []), { type: 'text', text: advisory }]
-  };
-}
-
 function splitDeviceArguments(args = {}) {
   const { device_id: deviceId, ...toolArguments } = args;
   return { deviceId: String(deviceId || '').trim(), toolArguments };
@@ -477,7 +450,7 @@ function metricDeviceId(toolName, args = {}, context = {}) {
 }
 
 function metricSkillName(toolName, args = {}) {
-  if (toolName !== 'get_skill') return null;
+  if (toolName !== 'load_skill') return null;
   return String(args.name || '').trim() || null;
 }
 
@@ -600,16 +573,13 @@ async function routeToolCall(request, context = {}) {
   if (FILESYSTEM_TOOL_NAMES.has(toolName)) {
     const { deviceId, toolArguments } = requireDeviceId(request.params.arguments || {});
     const result = await callRemoteDevice({ context, deviceId, tool: toolName, arguments: toolArguments });
-    const rendered = result && Array.isArray(result.content)
+    return result && Array.isArray(result.content)
       ? normalizeRemoteFilesystemResult(result)
       : structuredToolText(result, { includeStructured: true });
-    return appendSkillAdvisory(rendered, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
   }
 
   if (isLocalCustomTool(toolName)) {
-    const result = await callCustomTool(toolName, request.params.arguments || {}, customToolContext(context));
-    if (toolName === 'get_skill') skillBootstrapGate.markSkillLoaded(callerKey);
-    return appendSkillAdvisory(result, skillBootstrapGate.takeReadAdvisory(callerKey, toolName));
+    return await callCustomTool(toolName, request.params.arguments || {}, customToolContext(context));
   }
 
   if (externalMcpManager.isEagerToolName(toolName)) {
@@ -698,11 +668,12 @@ function currentResourceContext(callerContext = {}) {
     },
     packageRoot,
     env: process.env,
+    skillRegistry,
     listTools: listMergedTools
   };
 }
 
-function createProxyServer({ accountId, activitySessionId, callerKey, callerCategory, callerSubject }) {
+function createProxyServer({ era = 'legacy', accountId, activitySessionId, callerKey, callerCategory, callerSubject }) {
   const metadata = workspaceSnapshot().server;
   const server = new Server(
     {
@@ -712,7 +683,7 @@ function createProxyServer({ accountId, activitySessionId, callerKey, callerCate
       description: metadata.description
     },
     {
-      instructions: [metadata.instructions, SKILL_AGENT_INSTRUCTIONS].filter(Boolean).join(' '),
+      instructions: [metadata.instructions, 'Native Skills clients use the MCP Skills extension. Other clients may discover and load reusable skills with skill_catalog and load_skill.'].filter(Boolean).join(' '),
       capabilities: {
         tools: { listChanged: true },
         resources: { subscribe: false, listChanged: true },
@@ -721,7 +692,7 @@ function createProxyServer({ accountId, activitySessionId, callerKey, callerCate
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler('tools/list', async () => {
     const tools = await listMergedTools();
     const { toolSchemaBytes, estimatedTokens, estimationMethod } = persistSchemaSnapshot(tools);
     deviceUsageStore.recordCatalogList({
@@ -734,30 +705,31 @@ function createProxyServer({ accountId, activitySessionId, callerKey, callerCate
     });
     return { tools };
   });
-  server.setRequestHandler(CallToolRequestSchema, request => routeObservedToolCall(request, { accountId, activitySessionId, callerKey, callerCategory, callerSubject }));
+  server.setRequestHandler('tools/call', request => routeObservedToolCall(request, { accountId, activitySessionId, callerKey, callerCategory, callerSubject }));
   const callerContext = { accountId, activitySessionId, callerKey, callerCategory, callerSubject };
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler('resources/list', async () => {
     const context = currentResourceContext(callerContext);
     return { resources: [...listRepoResources(context), ...await externalMcpManager.listResources()] };
   });
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  server.setRequestHandler('resources/templates/list', async () => {
     const context = currentResourceContext(callerContext);
     return { resourceTemplates: [...listRepoResourceTemplates(context), ...await externalMcpManager.listResourceTemplates()] };
   });
-  server.setRequestHandler(ReadResourceRequestSchema, async request => {
+  server.setRequestHandler('resources/read', async request => {
     if (isExternalResourceUri(request.params.uri)) return await externalMcpManager.readResource(request.params.uri);
     return await readRepoResource(request.params.uri, currentResourceContext(callerContext));
   });
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  server.setRequestHandler('prompts/list', async () => ({
     prompts: [...listRepoPrompts({ runtimeProfile }), ...await externalMcpManager.listPrompts()]
   }));
-  server.setRequestHandler(GetPromptRequestSchema, async request => {
+  server.setRequestHandler('prompts/get', async request => {
     if (externalMcpManager.isExternalPromptName(request.params.name)) {
       return await externalMcpManager.getPrompt(request.params.name, request.params.arguments || {});
     }
     return getRepoPrompt(request.params.name, request.params.arguments || {}, { runtimeProfile });
   });
-  activeProxyServers.add(server);
+  if (era === 'legacy') activeProxyServers.add(server);
+  if (era === 'modern') registerSkillsExtension(server, skillRegistry);
   return server;
 }
 
@@ -791,8 +763,17 @@ function fingerprint(value) {
   return `${text.length}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`;
 }
 
-function skillCallerKeyFromRequest(req) {
-  return buildSkillCallerKey({
+function callerKeyFromParts({ accountId = '', oauthClientId = '', staticBearer = false, sessionId = '' } = {}) {
+  const identity = accountId ? `account:${accountId}` : oauthClientId ? `oauth:${oauthClientId}` : staticBearer ? 'static-bearer' : 'anonymous';
+  const digest = createHash('sha256')
+    .update(sessionId ? `${identity}\nsession:${sessionId}` : identity)
+    .digest('hex')
+    .slice(0, 24);
+  return `caller:${digest}`;
+}
+
+function callerKeyFromRequest(req) {
+  return callerKeyFromParts({
     accountId: req.auth?.accountId || '',
     oauthClientId: req.auth?.clientId || '',
     staticBearer: isStaticBearerAuthorization(req.headers.authorization, staticBearerToken),
@@ -984,9 +965,11 @@ function getOAuthAuthMiddlewareForBaseUrl(baseUrl) {
   }
 
   const { resourceServerUrl } = buildAuthUrls(normalizedBaseUrl);
+  /* @mcp-codemod-error requireBearerAuth: resource-server auth helpers routed to the frozen @modelcontextprotocol/server-legacy/auth copy. The maintained v2 home is @modelcontextprotocol/express — when re-pointing, verifiers must throw the v2 OAuthError (the express middleware does not recognize the legacy error classes). See the migration guide's server auth split section. */
   const middleware = requireBearerAuth({
     verifier: provider,
     requiredScopes: [],
+    /* @mcp-codemod-error getOAuthProtectedResourceMetadataUrl: resource-server auth helpers routed to the frozen @modelcontextprotocol/server-legacy/auth copy. The maintained v2 home is @modelcontextprotocol/express — when re-pointing, verifiers must throw the v2 OAuthError (the express middleware does not recognize the legacy error classes). See the migration guide's server auth split section. */
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl)
   });
   oauthAuthMiddlewares.set(normalizedBaseUrl, middleware);
@@ -1011,6 +994,35 @@ function mcpAuthMiddleware(req, res, next) {
   getOAuthAuthMiddlewareForBaseUrl(requestBaseUrl(req))(req, res, next);
 }
 
+function modernCallerContext(ctx = {}) {
+  const authorization = ctx.requestInfo?.headers?.get?.('authorization') || '';
+  const staticBearer = isStaticBearerAuthorization(authorization, staticBearerToken);
+  const accountId = ctx.authInfo?.accountId || null;
+  const oauthClientId = ctx.authInfo?.clientId || '';
+  const callerCategory = staticBearer ? 'static-bearer' : oauthClientId ? 'oauth' : 'anonymous';
+  const callerSubject = staticBearer ? 'static-bearer' : accountId ? `account:${accountId}` : 'anonymous';
+  return {
+    era: ctx.era,
+    accountId,
+    activitySessionId: ctx.authInfo?.activitySessionId || null,
+    callerKey: callerKeyFromParts({ accountId: accountId || '', oauthClientId, staticBearer }),
+    callerCategory,
+    callerSubject
+  };
+}
+
+const modernMcpHandler = createMcpHandler(
+  ctx => createProxyServer(modernCallerContext(ctx)),
+  {
+    legacy: useStatefulMcpSessions ? 'reject' : 'stateless',
+    responseMode: 'auto',
+    onerror: error => console.error('[mcp-v2]', error)
+  }
+);
+const modernNodeHandler = toNodeHandler(modernMcpHandler, {
+  onerror: error => console.error('[mcp-v2-node]', error)
+});
+
 const transports = {};
 
 async function createTransport(req) {
@@ -1018,19 +1030,19 @@ async function createTransport(req) {
   const server = createProxyServer({
     accountId: req.auth?.accountId || null,
     activitySessionId: req.auth?.activitySessionId || null,
-    callerKey: skillCallerKeyFromRequest(req),
+    callerKey: callerKeyFromRequest(req),
     callerCategory: callerCategoryFromRequest(req),
     callerSubject: callerSubjectFromRequest(req)
   });
 
   if (!useStatefulMcpSessions) {
-    transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     transport.onclose = () => activeProxyServers.delete(server);
     await server.connect(transport);
     return transport;
   }
 
-  transport = new StreamableHTTPServerTransport({
+  transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: id => {
       transports[id] = transport;
@@ -1115,12 +1127,43 @@ const mcpDeleteHandler = async (req, res) => {
 };
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, enableFilesystem, enableShell });
+  const skills = skillRegistry.health();
+  res.json({
+    ok: skills.status === 'healthy',
+    enableFilesystem,
+    enableShell,
+    skills
+  });
 });
 
-app.post('/mcp', mcpAuthMiddleware, mcpPostHandler);
-app.get('/mcp', mcpAuthMiddleware, mcpGetHandler);
-app.delete('/mcp', mcpAuthMiddleware, mcpDeleteHandler);
+async function unifiedMcpHandler(req, res) {
+  if (!useStatefulMcpSessions) {
+    await modernNodeHandler(req, res, req.body);
+    return;
+  }
+
+  const probe = await toWebRequest(req, req.body);
+  if (!(await isLegacyRequest(probe))) {
+    await modernNodeHandler(req, res, req.body);
+    return;
+  }
+
+  if (req.method === 'POST') {
+    await mcpPostHandler(req, res);
+    return;
+  }
+  if (req.method === 'GET') {
+    await mcpGetHandler(req, res);
+    return;
+  }
+  if (req.method === 'DELETE') {
+    await mcpDeleteHandler(req, res);
+    return;
+  }
+  res.status(405).end();
+}
+
+app.all('/mcp', mcpAuthMiddleware, unifiedMcpHandler);
 
 const serverInstance = app.listen(gatewayPort, gatewayHost, () => {
   const { issuerUrl, resourceServerUrl } = buildAuthUrls(normalizeBaseUrl(advertisedUrl) || fallbackBaseUrl);
@@ -1151,7 +1194,6 @@ console.log(`Operator dashboard listening on http://127.0.0.1:${operatorDashboar
 async function shutdown() {
   operatorDashboardServer.close();
   serverInstance.close();
-  stopSkillCatalogWatcher();
   workspaceRegistry.close();
   toolMetrics.close();
   deviceAudit.close();

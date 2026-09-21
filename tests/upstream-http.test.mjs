@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { Server } from "@modelcontextprotocol/server";
 import { createHttpUpstreamClient } from '../scripts/upstreams/http-client.mjs';
 
 const successSchema = {
@@ -18,14 +17,14 @@ function createFixtureServer() {
     { name: 'http-upstream-regression-fixture', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: [
       { name: 'structured_error', inputSchema: { type: 'object' }, outputSchema: successSchema },
       { name: 'structured_success', inputSchema: { type: 'object' }, outputSchema: successSchema },
       { name: 'invalid_success', inputSchema: { type: 'object' }, outputSchema: successSchema }
     ]
   }));
-  server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.setRequestHandler('tools/call', async request => {
     if (request.params.name === 'structured_error') {
       return {
         isError: true,
@@ -54,7 +53,7 @@ async function startFixture() {
   app.use(express.json());
   app.post('/mcp', async (req, res) => {
     const server = createFixtureServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   });

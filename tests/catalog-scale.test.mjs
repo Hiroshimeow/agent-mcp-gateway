@@ -114,19 +114,18 @@ test('hybrid external eager schemas stay within the configured serialized-byte b
   assert.ok(selection.diagnostics.eager.bytes <= budgetBytes);
 });
 
-test('agent exposes no templates, native exposes exactly six fixed templates, legacy preserves three', () => {
+test('agent exposes no templates, native exposes exactly five fixed non-skill templates, legacy preserves three', () => {
   const context = syntheticContext(1000, 1000, 1000);
   assert.deepEqual(listRepoResourceTemplates(context, mode('agent')), []);
 
   const nativeTemplates = listRepoResourceTemplates(context, mode('native'));
-  assert.equal(nativeTemplates.length, 6);
+  assert.equal(nativeTemplates.length, 5);
   assert.deepEqual(nativeTemplates.map(item => item.uriTemplate), [
     'repo://device/{device_id}/project/{project_id}/summary',
     'repo://device/{device_id}/project/{project_id}/tree{?depth}',
     'repo://device/{device_id}/project/{project_id}/git/status',
     'repo://device/{device_id}/project/{project_id}/git/diff{?staged}',
-    'repo://device/{device_id}/project/{project_id}/file/{path}',
-    'skill://skills/{skillName}/SKILL.md'
+    'repo://device/{device_id}/project/{project_id}/file/{path}'
   ]);
   assert.equal(listRepoResourceTemplates(context, mode('legacy')).length, 3);
 });

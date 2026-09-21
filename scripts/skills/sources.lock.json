@@ -5,40 +5,20 @@
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail.git",
       "ref": "main",
-      "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
+      "commit": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
       "license": "MIT",
       "skills": [
         {
           "target": "ponytail",
-          "path": "skills/ponytail",
-          "overrides": {
-            "aliases": [
-              "lazy",
-              "lazy_mode",
-              "yagni"
-            ],
-            "uri": "skill://ponytail/ponytail/SKILL.md"
-          }
+          "path": "skills/ponytail"
         },
         {
           "target": "ponytail-audit",
-          "path": "skills/ponytail-audit",
-          "overrides": {
-            "aliases": [
-              "audit_over_engineering"
-            ],
-            "uri": "skill://ponytail/ponytail-audit/SKILL.md"
-          }
+          "path": "skills/ponytail-audit"
         },
         {
           "target": "ponytail-debt",
-          "path": "skills/ponytail-debt",
-          "overrides": {
-            "aliases": [
-              "debt_ledger"
-            ],
-            "uri": "skill://ponytail/ponytail-debt/SKILL.md"
-          }
+          "path": "skills/ponytail-debt"
         },
         {
           "target": "ponytail-gain",
@@ -46,23 +26,11 @@
         },
         {
           "target": "ponytail-help",
-          "path": "skills/ponytail-help",
-          "overrides": {
-            "aliases": [
-              "ponytail_commands"
-            ],
-            "uri": "skill://ponytail/ponytail-help/SKILL.md"
-          }
+          "path": "skills/ponytail-help"
         },
         {
           "target": "ponytail-review",
-          "path": "skills/ponytail-review",
-          "overrides": {
-            "aliases": [
-              "review_for_over_engineering"
-            ],
-            "uri": "skill://ponytail/ponytail-review/SKILL.md"
-          }
+          "path": "skills/ponytail-review"
         }
       ]
     },
@@ -70,7 +38,7 @@
       "id": "superpowers",
       "repository": "https://github.com/obra/superpowers.git",
       "ref": "main",
-      "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "commit": "5bf4e78011075bcfc0dc295f0724994cd123ee71",
       "license": "MIT",
       "skills": [
         {
@@ -83,7 +51,21 @@
         },
         {
           "target": "executing-plans",
-          "path": "skills/executing-plans"
+          "path": "skills/executing-plans",
+          "compatibility": {
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "replace": "- Your harness has no subagent tool. Never fabricate a dispatch; run the plan here.",
+                "searchParts": [
+                  "- Your harness has no subagent tool (see the per-platform references in\n  `../",
+                  "using-",
+                  "superpowers",
+                  "/references/`). Never fabricate a dispatch; run\n  the plan here."
+                ]
+              }
+            ]
+          }
         },
         {
           "target": "finishing-a-development-branch",
@@ -123,34 +105,6 @@
           "path": "skills/using-git-worktrees"
         },
         {
-          "target": "using-superpowers",
-          "path": "skills/using-superpowers",
-          "overrides": {
-            "aliases": [
-              "superpower",
-              "superpowers",
-              "use_superpowers",
-              "skill_bootstrap",
-              "mcp_skill_bootstrap"
-            ],
-            "uri": "skill://superpowers/using-superpowers/SKILL.md"
-          },
-          "compatibility": {
-            "replacements": [
-              {
-                "path": "SKILL.md",
-                "search": "description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions",
-                "replace": "description: Use when starting work - establishes how to find and use task-relevant skills without making skill loading a prerequisite for unrelated actions"
-              },
-              {
-                "path": "SKILL.md",
-                "search": "**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.",
-                "replace": "**Invoke relevant or requested skills before the work they govern.** If no skill materially applies, proceed directly. If a skill does apply, load it before performing that governed work."
-              }
-            ]
-          }
-        },
-        {
           "target": "verification-before-completion",
           "path": "skills/verification-before-completion"
         },
@@ -160,7 +114,24 @@
         },
         {
           "target": "writing-skills",
-          "path": "skills/writing-skills"
+          "path": "skills/writing-skills",
+          "compatibility": {
+            "replacements": [
+              {
+                "path": "SKILL.md",
+                "replace": "**Personal skills live in your runtime's configured skills directory.** For cross-runtime project-local skills, prefer `.agents/skills/` when the harness supports it.",
+                "searchParts": [
+                  "**Personal skills live in your runtime's skills directory** (`~/.claude/skills/` on Claude Code) — see [codex-tools.md](../",
+                  "using-",
+                  "superpowers",
+                  "/references/codex-tools.md) or [gemini-tools.md](../",
+                  "using-",
+                  "superpowers",
+                  "/references/gemini-tools.md) for the path on those runtimes. Codex, Copilot CLI, and Gemini CLI all also recognize `~/.agents/skills/` as a cross-runtime alias."
+                ]
+              }
+            ]
+          }
         }
       ]
     },
@@ -168,7 +139,7 @@
       "id": "anthropic",
       "repository": "https://github.com/anthropics/skills.git",
       "ref": "main",
-      "commit": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+      "commit": "34040c9c568585f6929bedeaad110ad08f079624",
       "license": "Apache-2.0 per included skill",
       "skills": [
         {
@@ -181,13 +152,26 @@
         },
         {
           "target": "claude-api",
-          "path": "skills/claude-api"
+          "path": "skills/claude-api",
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when implementing, debugging, or answering questions about the Claude API or Anthropic SDK, including Claude model selection, parameters, streaming, tool use, MCP, agents, caching, token counting, or migration. Use when Claude or Anthropic is the target provider; do not use for other named LLM providers."
+            },
+            "cleanup": [
+              {
+                "path": "shared/platform-availability.md",
+                "trimTrailingBlankLines": true
+              }
+            ]
+          }
         },
         {
           "target": "frontend-design",
           "path": "skills/frontend-design",
-          "overrides": {
-            "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+            }
           }
         },
         {
@@ -209,15 +193,19 @@
         {
           "target": "theme-factory",
           "path": "skills/theme-factory",
-          "overrides": {
-            "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
+            }
           }
         },
         {
           "target": "web-artifacts-builder",
           "path": "skills/web-artifacts-builder",
-          "overrides": {
-            "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
+            }
           }
         },
         {
@@ -230,18 +218,17 @@
       "id": "stitch-design",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
-      "commit": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
+      "commit": "0337446dadde6f8c94210444e2aa9d546126480f",
       "license": "Apache-2.0",
       "skills": [
         {
           "target": "extract-design-md",
           "path": "plugins/stitch-design/skills/extract-design-md",
-          "overrides": {
-            "aliases": [
-              "extract_design_system",
-              "design_extraction"
-            ],
-            "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface."
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface.",
+              "name": "extract-design-md"
+            }
           }
         }
       ]
@@ -250,18 +237,22 @@
       "id": "stitch-utilities",
       "repository": "https://github.com/google-labs-code/stitch-skills.git",
       "ref": "main",
-      "commit": "535b0889a46868c9b08f8a7f7084db3c1958a2b6",
+      "commit": "0337446dadde6f8c94210444e2aa9d546126480f",
       "license": "Apache-2.0",
       "skills": [
         {
           "target": "enhance-prompt",
           "path": "plugins/stitch-utilities/skills/enhance-prompt",
-          "overrides": {
-            "aliases": [
-              "design_prompt",
-              "stitch_prompt"
-            ],
-            "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+          "compatibility": {
+            "frontmatter": {
+              "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+            },
+            "cleanup": [
+              {
+                "path": "SKILL.md",
+                "trimTrailingWhitespace": true
+              }
+            ]
           }
         }
       ]
@@ -270,19 +261,12 @@
       "id": "hallmark",
       "repository": "https://github.com/nutlope/hallmark.git",
       "ref": "main",
-      "commit": "aeb42fb354ff4efa36ab475773a082315a3af2ce",
+      "commit": "13ac0ec7e148655948100b6396439e481361d690",
       "license": "MIT",
       "skills": [
         {
           "target": "hallmark",
           "path": "skills/hallmark",
-          "overrides": {
-            "aliases": [
-              "anti_ai_slop",
-              "hallmark_audit"
-            ],
-            "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
-          },
           "compatibility": {
             "files": [
               {
@@ -413,6 +397,15 @@
                 "path": "references/upstream/study-examples.md",
                 "search": "](study.md)",
                 "replace": "](../study.md)"
+              }
+            ],
+            "frontmatter": {
+              "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
+            },
+            "cleanup": [
+              {
+                "path": "references/component-cookbook.md",
+                "trimTrailingBlankLines": true
               }
             ]
           }

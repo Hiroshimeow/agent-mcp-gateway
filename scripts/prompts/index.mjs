@@ -1,5 +1,3 @@
-import { buildSkillPrompt, getSkillDefinition, listSkillPromptDefinitions } from '../skills/index.mjs';
-
 const PROMPTS = new Map([
   ['explore_project', { description: 'Explore the project structure and understand the codebase layout.', args: ['device_id', 'project_id', 'focus', 'depth'] }],
   ['quality_check', { description: 'Review project structure, documentation, and general code quality standards.', args: ['device_id', 'project_id', 'depth'] }],
@@ -20,17 +18,11 @@ function promptArguments(names) {
 }
 
 export function listRepoPrompts(_context = {}) {
-  const repoPrompts = [...PROMPTS.entries()].map(([name, prompt]) => ({
+  return [...PROMPTS.entries()].map(([name, prompt]) => ({
     name,
     description: prompt.description,
     arguments: promptArguments(prompt.args)
   }));
-  const skillPrompts = listSkillPromptDefinitions().map(prompt => ({
-    name: prompt.name,
-    description: prompt.description,
-    arguments: promptArguments(prompt.args)
-  }));
-  return [...repoPrompts, ...skillPrompts];
 }
 
 function textMessage(text) {
@@ -38,9 +30,6 @@ function textMessage(text) {
 }
 
 export function getRepoPrompt(name, args = {}, context = {}) {
-  const skill = getSkillDefinition(name);
-  if (skill) return { description: skill.description, messages: [textMessage(buildSkillPrompt(name, args))] };
-
   const prompt = PROMPTS.get(name);
   if (!prompt) throw new Error(`Unknown prompt: ${name}`);
   const deviceId = String(args.device_id || '').trim();

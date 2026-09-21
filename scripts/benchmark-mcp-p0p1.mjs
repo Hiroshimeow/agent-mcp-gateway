@@ -151,16 +151,12 @@ let nextId = 1;
 try {
   await waitForHealth(baseUrl, child);
 
-  // Prime the stable static-bearer caller once so shell_execute is unblocked for all measured calls.
-  const bootstrap = await mcpRequest(baseUrl, nextId++, 'tools/call', { name: 'get_skill', arguments: { name: 'local_coding' } });
-  assert.ok(bootstrap.parsed?.result && !bootstrap.parsed.result.isError);
-
   const measurements = {};
   for (const [label, fn] of [
     ['initialize', () => mcpRequest(baseUrl, nextId++, 'initialize', initializeParams())],
     ['toolsList', () => mcpRequest(baseUrl, nextId++, 'tools/list', {})],
-    ['getSkillDiscovery', () => mcpRequest(baseUrl, nextId++, 'tools/call', { name: 'get_skill', arguments: {} })],
-    ['getSkillNamed', () => mcpRequest(baseUrl, nextId++, 'tools/call', { name: 'get_skill', arguments: { name: 'local_coding' } })]
+    ['skillCatalog', () => mcpRequest(baseUrl, nextId++, 'tools/call', { name: 'skill_catalog', arguments: {} })],
+    ['loadSkill', () => mcpRequest(baseUrl, nextId++, 'tools/call', { name: 'load_skill', arguments: { name: 'ponytail' } })]
   ]) {
     const [, summary] = await bench(label, fn);
     measurements[label] = summary;
@@ -208,7 +204,7 @@ try {
   };
   await workflow('initialize', initializeParams());
   await workflow('tools/list', {});
-  await workflow('tools/call', { name: 'get_skill', arguments: { name: 'local_coding' } });
+  await workflow('tools/call', { name: 'load_skill', arguments: { name: 'ponytail' } });
   await workflow('tools/call', { name: 'shell_execute', arguments: { command: buildNodeOutputCommand(1024), working_directory: workspace } });
 
   const result = {

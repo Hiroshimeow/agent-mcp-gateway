@@ -43,18 +43,18 @@ test('tool metrics keep only bounded metadata and never payload bodies', () => {
 
 test('tool metrics capture bounded error code and skill name without payload bodies', () => {
   const metric = buildToolMetric({
-    toolName: 'get_skill',
-    args: { name: 'mcp_builder', hidden: 'SECRET_INPUT' },
+    toolName: 'load_skill',
+    args: { name: 'mcp-builder', hidden: 'SECRET_INPUT' },
     durationMs: 3,
     callerCategory: 'oauth',
     accountId: 'alice',
     activitySessionId: 'activity-a',
-    skillName: 'mcp_builder',
+    skillName: 'mcp-builder',
     error: Object.assign(new Error('SECRET_ERROR_BODY'), { code: 'UNKNOWN_SKILL' })
   });
   assert.equal(metric.success, false);
   assert.equal(metric.errorCode, 'UNKNOWN_SKILL');
-  assert.equal(metric.skillName, 'mcp_builder');
+  assert.equal(metric.skillName, 'mcp-builder');
   assert.doesNotMatch(JSON.stringify(metric), /SECRET_INPUT|SECRET_ERROR_BODY/);
 });
 
@@ -63,14 +63,14 @@ test('tool metrics recorder appends one NDJSON object per call', () => {
   const metricsPath = path.join(directory, 'calls.ndjson');
   const recorder = createToolMetricsRecorder({ metricsPath });
   try {
-    recorder.record({ timestamp: new Date(0).toISOString(), tool: 'get_skill', durationMs: 1, success: true });
+    recorder.record({ timestamp: new Date(0).toISOString(), tool: 'load_skill', durationMs: 1, success: true });
     recorder.record({ timestamp: new Date(1).toISOString(), tool: 'read_text_file', durationMs: 2, success: false });
   } finally {
     recorder.close();
   }
   const lines = fs.readFileSync(metricsPath, 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(lines.length, 2);
-  assert.equal(lines[0].tool, 'get_skill');
+  assert.equal(lines[0].tool, 'load_skill');
   assert.equal(lines[1].success, false);
   fs.rmSync(directory, { recursive: true, force: true });
 });

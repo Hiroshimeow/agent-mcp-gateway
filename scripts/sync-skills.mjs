@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from 'yaml';
 
 import { assertSafeRelativePath, resolveSafeFile } from './skill-source-safety.mjs';
 import { createSkillRegistry } from './skills/index.mjs';
@@ -71,7 +73,39 @@ function assertSafeTree(root) {
   }
 }
 
+function applyFrontmatterPatch(targetDirectory, patch, sourceId, folder) {
+  if (!patch || !Object.keys(patch).length) return;
+  const skillFile = path.join(targetDirectory, 'SKILL.md');
+  const raw = fs.readFileSync(skillFile, 'utf8');
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) throw new Error(`Missing YAML frontmatter for ${sourceId}/${folder}`);
+  const document = parseDocument(match[1]);
+  if (document.errors.length || !document.contents) {
+    throw new Error(`Invalid YAML frontmatter for ${sourceId}/${folder}`);
+  }
+  for (const [key, value] of Object.entries(patch)) document.set(key, value);
+  const frontmatter = document.toString({ lineWidth: 0 }).trimEnd();
+  const next = `---\n${frontmatter}\n---\n${raw.slice(match[0].length)}`;
+  fs.writeFileSync(skillFile, next);
+}
+
 function applyCompatibility(cloneDirectory, targetDirectory, compatibility, sourceId, folder) {
+  applyFrontmatterPatch(targetDirectory, compatibility.frontmatter, sourceId, folder);
+
+  for (const cleanup of compatibility.cleanup || []) {
+    const targetFile = resolveSafeFile(targetDirectory, cleanup.path, `compatibility cleanup file for ${sourceId}/${folder}`, {
+      maxFileBytes,
+      forbiddenExtensions
+    });
+    let text = fs.readFileSync(targetFile, 'utf8');
+    if (cleanup.trimTrailingWhitespace) text = text.replace(/[ \t]+(?=\r?$)/gm, '');
+    if (cleanup.trimTrailingBlankLines) text = text.replace(/(?:\r?\n)+$/, '\n');
+    if (!cleanup.trimTrailingWhitespace && !cleanup.trimTrailingBlankLines) {
+      throw new Error(`Compatibility cleanup requires an operation for ${sourceId}/${folder}`);
+    }
+    fs.writeFileSync(targetFile, text);
+  }
+
   for (const file of compatibility.files || []) {
     const sourceFile = resolveSafeFile(cloneDirectory, file.path, `compatibility file for ${sourceId}/${folder}`, {
       maxFileBytes,
@@ -88,14 +122,19 @@ function applyCompatibility(cloneDirectory, targetDirectory, compatibility, sour
       maxFileBytes,
       forbiddenExtensions
     });
-    if (typeof replacement.search !== 'string' || !replacement.search) {
-      throw new Error(`Compatibility replacement search is required for ${sourceId}/${folder}`);
+    const search = typeof replacement.search === 'string'
+      ? replacement.search
+      : Array.isArray(replacement.searchParts) && replacement.searchParts.every(part => typeof part === 'string')
+        ? replacement.searchParts.join('')
+        : '';
+    if (!search) {
+      throw new Error(`Compatibility replacement search or searchParts is required for ${sourceId}/${folder}`);
     }
     if (typeof replacement.replace !== 'string') {
       throw new Error(`Compatibility replacement value is required for ${sourceId}/${folder}`);
     }
     const text = fs.readFileSync(targetFile, 'utf8');
-    const occurrences = text.split(replacement.search).length - 1;
+    const occurrences = text.split(search).length - 1;
     const expectedOccurrences = replacement.count ?? 1;
     if (!Number.isInteger(expectedOccurrences) || expectedOccurrences < 1) {
       throw new Error(`Compatibility replacement count must be a positive integer for ${sourceId}/${folder}`);
@@ -103,22 +142,68 @@ function applyCompatibility(cloneDirectory, targetDirectory, compatibility, sour
     if (occurrences !== expectedOccurrences) {
       throw new Error(`Expected ${expectedOccurrences} compatibility replacement matches in ${targetFile}, found ${occurrences}`);
     }
-    fs.writeFileSync(targetFile, text.replaceAll(replacement.search, replacement.replace));
+    fs.writeFileSync(targetFile, text.replaceAll(search, replacement.replace));
   }
 
   assertSafeTree(targetDirectory);
 }
 
+function renameWithRetry(source, target) {
+  let lastError;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      fs.renameSync(source, target);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt === 7) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+function directoryFingerprint(root) {
+  const hash = createHash('sha256');
+
+  function visit(directory, relative = '') {
+    const entries = fs.readdirSync(directory, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink()) throw new Error(`Symlink is not allowed while fingerprinting: ${absolute}`);
+      if (stat.isDirectory()) {
+        hash.update(`d\0${childRelative}\0`);
+        visit(absolute, childRelative);
+        continue;
+      }
+      if (!stat.isFile()) throw new Error(`Only regular files are allowed while fingerprinting: ${absolute}`);
+      hash.update(`f\0${childRelative}\0${stat.size}\0`);
+      hash.update(fs.readFileSync(absolute));
+    }
+  }
+
+  visit(root);
+  return hash.digest('hex');
+}
+
 function replaceDirectory(target, staged) {
+  if (fs.existsSync(target) && directoryFingerprint(target) === directoryFingerprint(staged)) {
+    fs.rmSync(staged, { recursive: true, force: true });
+    return;
+  }
+
   const backup = path.join(path.dirname(target), `.skill-backup-${process.pid}-${path.basename(target)}`);
   fs.rmSync(backup, { recursive: true, force: true });
-  if (fs.existsSync(target)) fs.renameSync(target, backup);
+  if (fs.existsSync(target)) renameWithRetry(target, backup);
   try {
-    fs.renameSync(staged, target);
+    renameWithRetry(staged, target);
     fs.rmSync(backup, { recursive: true, force: true });
   } catch (error) {
     fs.rmSync(target, { recursive: true, force: true });
-    if (fs.existsSync(backup)) fs.renameSync(backup, target);
+    if (fs.existsSync(backup)) renameWithRetry(backup, target);
     throw error;
   }
 }
@@ -193,25 +278,13 @@ try {
 
       const targetDirectory = path.join(preparedSkills, folder);
       fs.cpSync(sourceDirectory, targetDirectory, { recursive: true, errorOnExist: true, force: false });
-      const overrides = source.overrides?.[folder] || {};
       const compatibility = source.compatibility?.[folder] || {};
       if (Object.keys(compatibility).length) {
         applyCompatibility(cloneDirectory, targetDirectory, compatibility, source.id, folder);
       }
-      writeJsonAtomic(path.join(targetDirectory, '.skill-source.json'), {
-        source: source.id,
-        repository: source.repository,
-        ref: source.ref,
-        commit,
-        path: `${source.skillRoot}/${folder}`,
-        license: source.license,
-        overrides,
-        ...(Object.keys(compatibility).length ? { compatibility } : {})
-      });
       installed.push({
         target: folder,
         path: `${source.skillRoot}/${folder}`,
-        ...(Object.keys(overrides).length ? { overrides } : {}),
         ...(Object.keys(compatibility).length ? { compatibility } : {})
       });
     }
@@ -236,8 +309,8 @@ try {
   }
 
   const expectedCount = sourceLocks.reduce((total, source) => total + source.skills.length, 0);
-  const registry = createSkillRegistry({ directory: preparedSkills, builtins: new Map() });
-  const discovered = registry.listSkills();
+  const registry = createSkillRegistry({ directory: preparedSkills });
+  const discovered = registry.list();
   if (discovered.length !== expectedCount) {
     throw new Error(`Prepared catalog validation failed: expected ${expectedCount}, discovered ${discovered.length}`);
   }

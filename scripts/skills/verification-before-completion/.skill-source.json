@@ -1,9 +1,0 @@
-{
-  "source": "superpowers",
-  "repository": "https://github.com/obra/superpowers.git",
-  "ref": "main",
-  "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
-  "path": "skills/verification-before-completion",
-  "license": "MIT",
-  "overrides": {}
-}

@@ -1,14 +1,7 @@
 ---
-name: stitch::extract-design-md
+name: extract-design-md
 description: >-
-  Extract a comprehensive design system (DESIGN.md) directly from frontend source
-  code — React, Vue, Svelte, Angular, plain HTML/CSS, or any web framework. Analyzes
-  component files, stylesheets, Tailwind configs, theme definitions, and design tokens
-  to produce a rich, Stitch-compatible design system document. Use this skill whenever
-  the user wants to reverse-engineer a design system from an existing codebase, audit
-  the visual language of a project, extract design tokens from source files, or
-  understand the styling patterns in a frontend repo — even if they just say "what
-  does this app look like?" or "pull out the design from this code."
+  Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface.
 allowed-tools:
   - "stitch*:*"
   - "Bash"

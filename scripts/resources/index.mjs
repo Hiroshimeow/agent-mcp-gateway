@@ -1,7 +1,6 @@
 import { buildRuntimeProfileStatus, getRuntimeProfile } from '../runtime-profile.mjs';
 import { inspectProject, listProjects, readProjectResourceFile, resolveProjectRoute } from '../project-inspection.mjs';
 import { applyToolRisk, buildToolRiskManifest } from '../tool-risk.mjs';
-import { listSkillResources, readSkillResource } from '../skills/index.mjs';
 
 const GATEWAY_RESOURCES = Object.freeze([
   {
@@ -29,8 +28,7 @@ const NATIVE_RESOURCE_TEMPLATES = Object.freeze([
   { uriTemplate: 'repo://device/{device_id}/project/{project_id}/tree{?depth}', name: 'Project tree', mimeType: 'application/json' },
   { uriTemplate: 'repo://device/{device_id}/project/{project_id}/git/status', name: 'Git status', mimeType: 'application/json' },
   { uriTemplate: 'repo://device/{device_id}/project/{project_id}/git/diff{?staged}', name: 'Git diff', mimeType: 'text/plain' },
-  { uriTemplate: 'repo://device/{device_id}/project/{project_id}/file/{path}', name: 'Project file', mimeType: 'text/plain' },
-  { uriTemplate: 'skill://skills/{skillName}/SKILL.md', name: 'Skill definition', mimeType: 'text/markdown' }
+  { uriTemplate: 'repo://device/{device_id}/project/{project_id}/file/{path}', name: 'Project file', mimeType: 'text/plain' }
 ]);
 
 function jsonContent(uri, data) {
@@ -45,10 +43,6 @@ function surfaceMode(surfaceConfig) {
   return surfaceConfig?.mode || 'legacy';
 }
 
-function currentSkillResources(context) {
-  return typeof context.listSkillResources === 'function' ? context.listSkillResources() : listSkillResources();
-}
-
 export function listRepoResources(context = {}, surfaceConfig = context.surfaceConfig) {
   const mode = surfaceMode(surfaceConfig);
   if (mode === 'agent' || mode === 'native') return GATEWAY_RESOURCES.map(resource => ({ ...resource }));
@@ -59,10 +53,7 @@ export function listRepoResources(context = {}, surfaceConfig = context.surfaceC
   const visibleDeviceIds = new Set(visibleDevices.map(device => String(device.deviceId || '').trim()).filter(Boolean));
   const projects = [...(context.projectRegistry?.projectRoutes?.values() || [])]
     .filter(project => visibleDeviceIds.has(project.deviceId));
-  const resources = [
-    ...GATEWAY_RESOURCES.map(resource => ({ ...resource })),
-    ...currentSkillResources(context)
-  ];
+  const resources = GATEWAY_RESOURCES.map(resource => ({ ...resource }));
   for (const deviceId of [...visibleDeviceIds].sort()) {
     resources.push({
       uri: `repo://device/${encodeURIComponent(deviceId)}/projects`,
@@ -103,7 +94,20 @@ async function readToolManifest(uri, context) {
 
 export async function readRepoResource(uri, context = {}) {
   const parsed = new URL(uri);
-  if (parsed.protocol === 'skill:') return readSkillResource(uri);
+  if (parsed.protocol === 'skill:') {
+    if (!context.skillRegistry) throw new Error('Skill registry is unavailable.');
+    const resource = context.skillRegistry.readResource(uri);
+    if (!resource) throw new Error(`Unknown skill resource URI: ${uri}`);
+    return {
+      contents: [{
+        uri: resource.uri,
+        mimeType: resource.mimeType,
+        ...(resource.text !== undefined ? { text: resource.text } : { blob: resource.blob })
+      }],
+      ttlMs: 30000,
+      cacheScope: 'public'
+    };
+  }
   if (parsed.protocol !== 'repo:') throw new Error(`Unsupported resource URI: ${uri}`);
   if (uri === 'repo://gateway/runtime-profile') return await readRuntimeProfile(uri, context);
   if (uri === 'repo://gateway/tool-manifest') return await readToolManifest(uri, context);

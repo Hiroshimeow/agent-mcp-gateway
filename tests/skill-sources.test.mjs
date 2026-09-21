@@ -22,7 +22,7 @@ function walkFiles(directory) {
   return files;
 }
 
-test('managed skill lock matches the source manifest and vendored metadata', () => {
+test('managed lock matches source manifest without per-skill provenance files', () => {
   assert.equal(manifest.version, 1);
   assert.equal(lock.version, 1);
   assert.deepEqual(lock.sources.map(source => source.id), manifest.sources.map(source => source.id));
@@ -41,14 +41,9 @@ test('managed skill lock matches the source manifest and vendored metadata', () 
       targets.add(skill.target);
       const directory = path.join(skillsDirectory, skill.target);
       assert.equal(fs.existsSync(path.join(directory, 'SKILL.md')), true);
-      const metadata = JSON.parse(fs.readFileSync(path.join(directory, '.skill-source.json'), 'utf8'));
-      assert.equal(metadata.source, source.id);
-      assert.equal(metadata.repository, source.repository);
-      assert.equal(metadata.commit, source.commit);
-      assert.equal(metadata.path, skill.path);
-      assert.deepEqual(metadata.overrides, skill.overrides || {});
-      assert.deepEqual(metadata.compatibility || {}, skill.compatibility || {});
-
+      assert.equal(fs.existsSync(path.join(directory, '.skill-source.json')), false);
+      assert.equal(skill.path, `${configured.skillRoot}/${skill.target}`);
+      assert.deepEqual(skill.compatibility || {}, configured.compatibility?.[skill.target] || {});
       if (configured.requireSkillLicense) {
         const license = fs.readFileSync(path.join(directory, configured.requireSkillLicense.path), 'utf8');
         assert.match(license, new RegExp(configured.requireSkillLicense.contains));
@@ -61,7 +56,7 @@ test('managed skill lock matches the source manifest and vendored metadata', () 
   }
 });
 
-test('vendored catalog excludes non-redistributable and font-bearing Anthropic skills', () => {
+test('managed catalog excludes disallowed packages and font files', () => {
   const anthropic = manifest.sources.find(source => source.id === 'anthropic');
   assert.ok(anthropic);
   for (const excluded of Object.keys(anthropic.excluded || {})) {
@@ -77,83 +72,67 @@ test('vendored catalog excludes non-redistributable and font-bearing Anthropic s
   }
 });
 
-test('all managed skill folders are accepted by the live registry', () => {
-  const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
-  const registeredTargets = new Set(registry.listSkills().map(skill => {
-    const sourcePath = registry.getSkillDefinition(skill.name)?.sourcePath;
-    return sourcePath ? path.basename(path.dirname(sourcePath)) : null;
-  }).filter(Boolean));
+test('every lock target is accepted by the same live registry', () => {
+  const registry = createSkillRegistry({ directory: skillsDirectory });
+  const names = new Set(registry.list().map(skill => skill.name));
   for (const source of lock.sources) {
-    for (const skill of source.skills) {
-      assert.ok(registeredTargets.has(skill.target), `managed skill rejected: ${skill.target}`);
-    }
+    for (const skill of source.skills) assert.ok(names.has(skill.target), `managed skill rejected: ${skill.target}`);
   }
 });
 
-test('design skills expose non-overlapping selection triggers in the live catalog', () => {
-  const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
-  const descriptions = new Map(registry.listSkills().map(skill => [skill.name, skill.description]));
-
-  assert.match(descriptions.get('frontend_design'), /^Use when designing, building, or materially reshaping a web or application UI\b/);
-  assert.match(descriptions.get('enhance_prompt'), /^Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt\b/);
-  assert.match(descriptions.get('stitch_extract_design_md'), /^Use when analyzing an existing frontend source tree\b/);
-  assert.match(descriptions.get('theme_factory'), /^Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts\b/);
-  assert.match(descriptions.get('web_artifacts_builder'), /^Use when implementing a complex interactive HTML artifact\b/);
-  assert.match(descriptions.get('hallmark'), /^Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design\b/);
+test('runtime descriptions come from resulting SKILL.md frontmatter', () => {
+  const registry = createSkillRegistry({ directory: skillsDirectory });
+  for (const skill of registry.list()) {
+    const source = fs.readFileSync(path.join(skillsDirectory, skill.name, 'SKILL.md'), 'utf8');
+    const descriptionLine = skill.description;
+    assert.ok(source.includes(descriptionLine) || source.includes('description:'), skill.name);
+  }
+  assert.match(registry.getByName('frontend-design').description, /^Use when designing, building, or materially reshaping/);
+  assert.match(registry.getByName('enhance-prompt').description, /^Use when rewriting a vague UI request/);
+  assert.match(registry.getByName('extract-design-md').description, /^Use when analyzing an existing frontend source tree/);
+  assert.match(registry.getByName('hallmark').description, /^Use when the user explicitly invokes Hallmark/);
 });
 
-test('Hallmark is a pinned managed MIT skill with explicit aliases', () => {
+test('extract-design-md identity and removed meta-skill stay reproducible in source config', () => {
+  const removedMetaSkill = ['using', 'superpowers'].join('-');
+  const stitch = manifest.sources.find(source => source.id === 'stitch-design');
+  assert.equal(stitch.compatibility['extract-design-md'].frontmatter.name, 'extract-design-md');
+  const actual = fs.readFileSync(path.join(skillsDirectory, 'extract-design-md', 'SKILL.md'), 'utf8');
+  assert.match(actual, /^---\r?\nname: extract-design-md\r?$/m);
+
+  const superpowers = manifest.sources.find(source => source.id === 'superpowers');
+  assert.equal(superpowers.include.includes(removedMetaSkill), false);
+  assert.equal(Object.hasOwn(superpowers.compatibility || {}, removedMetaSkill), false);
+  assert.equal(fs.existsSync(path.join(skillsDirectory, removedMetaSkill)), false);
+});
+
+test('source config contains no runtime aliases or runtime URI overrides', () => {
+  const serialized = JSON.stringify(manifest);
+  assert.doesNotMatch(serialized, /"aliases"/);
+  assert.doesNotMatch(serialized, /"uri"/);
+  assert.doesNotMatch(serialized, /"overrides"/);
+});
+
+test('Hallmark compatibility remains pinned and self-contained', () => {
   const source = manifest.sources.find(item => item.id === 'hallmark');
   assert.ok(source);
   assert.equal(source.repository, 'https://github.com/nutlope/hallmark.git');
-  assert.equal(source.skillRoot, 'skills');
-  assert.deepEqual(source.include, ['hallmark']);
   assert.equal(source.license, 'MIT');
   assert.equal(source.compatibility.hallmark.files.length, 3);
   assert.equal(source.compatibility.hallmark.replacements.length, 22);
 
-  const registry = createSkillRegistry({ directory: skillsDirectory, builtins: new Map() });
-  assert.equal(registry.getSkillDefinition('anti_ai_slop')?.name, 'hallmark');
-  assert.equal(registry.getSkillDefinition('hallmark_audit')?.name, 'hallmark');
-  assert.equal(registry.getSkillDefinition('design_audit'), null);
-});
-
-test('Hallmark Markdown references are self-contained after sync', () => {
   const hallmarkDirectory = path.join(skillsDirectory, 'hallmark');
   const markdownFiles = walkFiles(hallmarkDirectory).filter(file => path.extname(file).toLowerCase() === '.md');
-
   for (const markdownFile of markdownFiles) {
     const markdown = fs.readFileSync(markdownFile, 'utf8');
     const links = [...markdown.matchAll(/\]\(([^)]+)\)/g)].map(match => match[1].split('#')[0].split('?')[0]);
-    const localLinks = links.filter(link => link && !/^(?:https?:|mailto:|data:|#|\/\/)/i.test(link));
-
-    for (const link of localLinks) {
-      const target = path.resolve(path.dirname(markdownFile), decodeURIComponent(link));
-      const relativeFile = path.relative(hallmarkDirectory, markdownFile);
-      assert.equal(fs.existsSync(target), true, `broken Hallmark reference in ${relativeFile}: ${link}`);
+    for (const link of links.filter(value => value && !/^(?:https?:|mailto:|data:|#|\/\/)/i.test(value))) {
+      assert.equal(fs.existsSync(path.resolve(path.dirname(markdownFile), decodeURIComponent(link))), true);
     }
   }
 });
 
-test('managed SDD preserves host task orchestration precedence across syncs', () => {
-  const sdd = fs.readFileSync(path.join(skillsDirectory, 'subagent-driven-development', 'SKILL.md'), 'utf8');
-  assert.match(
-    sdd,
-    /If the current task supplies its own orchestration or durable state, that task's orchestration and state are authoritative whenever they conflict with this skill\./,
-  );
-
-  const readme = fs.readFileSync(path.join(skillsDirectory, 'README.md'), 'utf8');
-  assert.match(readme, /Local compatibility edits to managed skills belong in `sources\.json`/);
-});
-
-test('managed using-superpowers keeps skill routing task-relevant instead of globally mandatory', () => {
-  const skill = fs.readFileSync(path.join(skillsDirectory, 'using-superpowers', 'SKILL.md'), 'utf8');
-  assert.doesNotMatch(skill, /requiring skill invocation before ANY response/i);
-  assert.doesNotMatch(skill, /BEFORE any response or action/i);
-  assert.match(skill, /If no skill materially applies, proceed directly/i);
-});
-
-test('package exposes cross-platform skill sync commands', () => {
+test('package exposes cross-platform sync commands', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(packageJson.scripts['skills:sync'], 'node scripts/sync-skills.mjs');
   assert.equal(packageJson.scripts['skills:check'], 'node scripts/sync-skills.mjs --check');

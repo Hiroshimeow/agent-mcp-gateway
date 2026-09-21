@@ -1,7 +1,7 @@
 import { fail, ok } from './response-utils.mjs';
-import { getSkillTool } from '../skills/index.mjs';
 import { inspectProject, listProjects, PROJECT_INSPECTION_VIEWS } from '../project-inspection.mjs';
 import { applyToolRisk } from '../tool-risk.mjs';
+import { skillResourceUri } from '../skills/index.mjs';
 
 function schema(properties = {}, required = []) {
   return { type: 'object', properties, required, additionalProperties: false };
@@ -26,21 +26,82 @@ function requireExternalToolBroker(context = {}) {
   return context.externalToolBroker;
 }
 
+function requireSkillRegistry(context = {}) {
+  if (!context.skillRegistry) throw new Error('Skill registry is unavailable.');
+  return context.skillRegistry;
+}
+
+function skillCatalog(args = {}, context = {}) {
+  const snapshot = requireSkillRegistry(context).snapshot();
+  const version = snapshot.catalogVersion;
+  if (String(args.known_version || '') === version) return { changed: false, version };
+  return {
+    changed: true,
+    version,
+    skills: snapshot.skills.map(skill => ({
+      name: skill.name,
+      description: skill.description,
+      uri: skill.uri,
+      revision: skill.skillRevision
+    }))
+  };
+}
+
+function loadSkill(args = {}, context = {}) {
+  const registry = requireSkillRegistry(context);
+  const skill = registry.getByName(String(args.name || ''));
+  if (!skill) throw new Error(`Unknown skill: ${args.name}`);
+  const resource = String(args.resource || '').trim();
+  if (!resource) {
+    return {
+      name: skill.name,
+      description: skill.description,
+      uri: skill.uri,
+      revision: skill.skillRevision,
+      body: skill.body,
+      resources: skill.resources
+    };
+  }
+  if (resource.startsWith('/') || resource.includes('\\') || resource.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+    throw new Error('Invalid skill resource path.');
+  }
+  const requestedUri = skillResourceUri(skill.name, resource);
+  const entry = skill.resources.find(item => item.uri === requestedUri);
+  if (!entry) throw new Error(`Unknown resource for ${skill.name}: ${resource}`);
+  const loaded = registry.readResource(entry.uri);
+  if (!loaded) throw new Error(`Unknown resource for ${skill.name}: ${resource}`);
+  return {
+    name: skill.name,
+    uri: loaded.uri,
+    revision: skill.skillRevision,
+    mimeType: loaded.mimeType,
+    digest: loaded.digest,
+    size: loaded.size,
+    ...(loaded.text !== undefined ? { text: loaded.text } : { blob: loaded.blob })
+  };
+}
+
 const TOOL_DEFINITIONS = [
   {
-    name: 'get_skill',
-    description: 'Load a known skill directly by name or alias. Omit name only when discovery is needed; discovery returns the compact live routing catalog without a skill body.',
+    name: 'skill_catalog',
+    description: 'Discover the current reusable skill catalog for clients that do not natively implement the MCP Skills extension. Returns compact metadata only; use load_skill for content.',
     inputSchema: schema({
-      name: {
-        type: 'string',
-        description: 'Registered skill name or alias. Omit only to discover the compact live skill catalog.'
-      },
-      cursor: { type: 'string', description: 'Opaque cursor returned by get_skill discovery.' },
-      limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
+      known_version: { type: 'string', description: 'Previously observed catalog version; matching versions return changed:false.' }
     }),
     outputSchema: structuredOutputSchema(),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
-    handler: args => ok('get_skill', 'Loaded skill definition', getSkillTool(args))
+    handler: (args, context) => ok('skill_catalog', 'Read skill catalog', skillCatalog(args, context))
+  },
+  {
+    name: 'load_skill',
+    description: 'Load one reusable skill, or one explicitly listed supporting resource, for clients that do not natively implement the MCP Skills extension.',
+    inputSchema: schema({
+      name: { type: 'string', minLength: 1, description: 'Canonical skill name from skill_catalog.' },
+      resource: { type: 'string', description: 'Optional relative resource path from the selected skill manifest.' }
+    }, ['name']),
+    outputSchema: structuredOutputSchema(),
+    annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
+    handler: (args, context) => ok('load_skill', 'Loaded skill content', loadSkill(args, context))
   },
   {
     name: 'image_preview',

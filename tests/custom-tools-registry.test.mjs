@@ -1,126 +1,102 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { LOCAL_TOOL_NAMES, callCustomTool, isLocalCustomTool, listCustomTools } from '../scripts/custom-tools/index.mjs';
-import { parseToolResult } from '../scripts/custom-tools/response-utils.mjs';
-import { buildTrustedRootsProjectRegistry } from '../scripts/projects/trusted-roots-projects.mjs';
+import { createSkillRegistry } from '../scripts/skills/index.mjs';
 
-const EXPECTED = ['get_skill', 'image_preview', 'project_list', 'project_inspect', 'external_tool_search', 'external_tool_call_read', 'external_tool_call_write'];
+function parse(result) {
+  return result.structuredContent || JSON.parse(result.content[0].text);
+}
 
-test('local registry exposes stable project tools without path metadata', () => {
-  const tools = listCustomTools({ resolvedRepoRoots: ['C:/repo'], resolvedRepoRoot: 'C:/repo' });
-  assert.deepEqual(tools.map(tool => tool.name), EXPECTED);
-  assert.deepEqual(LOCAL_TOOL_NAMES, EXPECTED);
-  for (const tool of tools) {
-    assert.equal(tool.inputSchema.type, 'object');
-    if (tool.name === 'external_tool_call_write') {
-      assert.equal(tool.annotations.readOnlyHint, false);
-      assert.equal(tool.annotations.destructiveHint, true);
-    } else {
-      assert.equal(tool.annotations.readOnlyHint, true);
-      assert.equal(tool.annotations.idempotentHint, true);
-    }
-    assert.equal(tool.annotations.openWorldHint, false);
-    assert.equal(tool._meta?.trusted_roots, undefined);
-    assert.equal(tool._meta?.root_repo, undefined);
-    assert.equal(tool._meta?.repo_root, undefined);
+function fixtureRegistry() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fallback-skills-'));
+  const dir = path.join(root, 'systematic-debugging');
+  fs.mkdirSync(path.join(dir, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: systematic-debugging\ndescription: Use when debugging a failing behavior.\n---\n\n# Debug\n\nReproduce and isolate.\n');
+  fs.writeFileSync(path.join(dir, 'references', 'checklist.md'), '# Checklist\n');
+  return { root, registry: createSkillRegistry({ directory: root }) };
+}
+
+test('local custom registry has exactly the two intended skill fallback tools', () => {
+  const retiredSkillTool = ['get', 'skill'].join('_');
+  const names = listCustomTools().map(tool => tool.name);
+  assert.ok(names.includes('skill_catalog'));
+  assert.ok(names.includes('load_skill'));
+  assert.equal(names.includes(retiredSkillTool), false);
+  assert.equal(LOCAL_TOOL_NAMES.filter(name => name.includes('skill')).length, 2);
+  assert.equal(isLocalCustomTool('skill_catalog'), true);
+  assert.equal(isLocalCustomTool('load_skill'), true);
+  assert.equal(isLocalCustomTool(retiredSkillTool), false);
+
+  for (const name of ['skill_catalog', 'load_skill']) {
+    const tool = listCustomTools().find(item => item.name === name);
+    assert.deepEqual(tool.annotations, {
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
+      openWorldHint: false
+    });
   }
-  assert.equal(tools.find(tool => tool.name === 'get_skill').outputSchema.type, 'object');
 });
 
-test('isLocalCustomTool accepts only canonical retained names', () => {
-  assert.equal(isLocalCustomTool('get_skill'), true);
-  assert.equal(isLocalCustomTool('image_preview'), true);
-  assert.equal(isLocalCustomTool('project_list'), true);
-  assert.equal(isLocalCustomTool('project_inspect'), true);
-  assert.equal(isLocalCustomTool('external_tool_search'), true);
-  assert.equal(isLocalCustomTool('external_tool_call_read'), true);
-  assert.equal(isLocalCustomTool('external_tool_call_write'), true);
-  assert.equal(isLocalCustomTool('custom_get_skill'), false);
-  assert.equal(isLocalCustomTool('custom_image_preview'), false);
-  assert.equal(isLocalCustomTool('grep'), false);
-  assert.equal(isLocalCustomTool('custom_git_status'), false);
+test('skill_catalog supports changed true, current false, and stale true', async () => {
+  const { root, registry } = fixtureRegistry();
+  const context = { skillRegistry: registry };
+
+  const first = parse(await callCustomTool('skill_catalog', {}, context));
+  assert.equal(first.ok, true);
+  assert.equal(first.data.changed, true);
+  assert.equal(first.data.skills.length, 1);
+  assert.equal(first.data.skills[0].name, 'systematic-debugging');
+  assert.equal(first.data.skills[0].body, undefined);
+
+  const current = parse(await callCustomTool('skill_catalog', { known_version: first.data.version }, context));
+  assert.deepEqual(current.data, { changed: false, version: first.data.version });
+
+  fs.appendFileSync(path.join(root, 'systematic-debugging', 'SKILL.md'), '\nChanged.\n');
+  const stale = parse(await callCustomTool('skill_catalog', { known_version: first.data.version }, context));
+  assert.equal(stale.data.changed, true);
+  assert.notEqual(stale.data.version, first.data.version);
+  assert.notEqual(stale.data.skills[0].revision, first.data.skills[0].revision);
 });
 
-test('project tools route through bounded project inspection service', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-project-tools-'));
-  await fs.writeFile(path.join(root, 'README.md'), '# Project tool fixture\n');
-  const projectRegistry = buildTrustedRootsProjectRegistry([`${root} | fixture | Fixture | device-a`], { defaultProjectId: 'fixture' });
-  const context = {
-    projectRegistry,
-    env: { MCP_RUNTIME_PROFILE: 'safe' },
-    listVisibleDevices: () => [{ deviceId: 'device-a', online: true, revoked: false, platform: 'linux', pathStyle: 'posix' }],
-    callDeviceTool: async (tool, args) => {
-      assert.equal(tool, 'project_inspect');
-      assert.equal(args.device_id, 'device-a');
-      assert.equal(args.path, root);
-      return { defaultRootName: path.basename(root), hasReadme: true, hasPackageJson: false };
-    }
-  };
+test('load_skill returns body and manifest, and can lazily read exact listed resources', async () => {
+  const { registry } = fixtureRegistry();
+  const context = { skillRegistry: registry };
 
-  const listResult = parseToolResult(await callCustomTool('project_list', { device_id: 'device-a', limit: 10 }, context));
-  assert.equal(listResult.ok, true);
-  assert.deepEqual(listResult.data.items.map(item => item.project_id), ['fixture']);
+  const loaded = parse(await callCustomTool('load_skill', { name: 'systematic-debugging' }, context));
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.data.name, 'systematic-debugging');
+  assert.match(loaded.data.body, /Reproduce and isolate/);
+  assert.ok(loaded.data.resources.some(resource => resource.uri.endsWith('/references/checklist.md')));
 
-  const inspectResult = parseToolResult(await callCustomTool('project_inspect', { device_id: 'device-a', project_id: 'fixture', view: 'summary' }, context));
-  assert.equal(inspectResult.ok, true);
-  assert.equal(inspectResult.data.project_id, 'fixture');
-  assert.equal(inspectResult.data.hasReadme, true);
+  const resource = parse(await callCustomTool('load_skill', {
+    name: 'systematic-debugging',
+    resource: 'references/checklist.md'
+  }, context));
+  assert.equal(resource.ok, true);
+  assert.equal(resource.data.text, '# Checklist\n');
+  assert.equal(resource.data.mimeType, 'text/markdown');
 });
 
-test('project_inspect schema constrains view to the stable enum', () => {
-  const tool = listCustomTools().find(item => item.name === 'project_inspect');
-  assert.deepEqual(tool.inputSchema.properties.view.enum, ['summary', 'tree', 'git_status', 'git_diff', 'readme', 'package']);
-});
+test('load_skill rejects unknown names, traversal, and unlisted resources', async () => {
+  const { registry } = fixtureRegistry();
+  const context = { skillRegistry: registry };
 
-test('external broker tools delegate search and risk-separated calls through context', async () => {
-  const calls = [];
-  const context = {
-    runtimeProfile: { name: 'yolo' },
-    externalToolBroker: {
-      search(args, profile) {
-        calls.push({ kind: 'search', args, profile });
-        return { items: [], nextCursor: null };
-      },
-      async call(lane, args, profile) {
-        calls.push({ kind: 'call', lane, args, profile });
-        return { content: [{ type: 'text', text: `${lane}:${args.name}` }] };
-      }
-    }
-  };
-
-  const search = parseToolResult(await callCustomTool('external_tool_search', { query: 'issue' }, context));
-  assert.equal(search.ok, true);
-  assert.deepEqual(search.data, { items: [], nextCursor: null });
-
-  const read = await callCustomTool('external_tool_call_read', { name: 'github_get_issue', arguments: {} }, context);
-  const write = await callCustomTool('external_tool_call_write', { name: 'github_create_issue', arguments: {} }, context);
-  assert.match(read.content[0].text, /read:github_get_issue/);
-  assert.match(write.content[0].text, /write:github_create_issue/);
-  assert.deepEqual(calls.map(item => item.kind === 'call' ? `${item.kind}:${item.lane}` : item.kind), ['search', 'call:read', 'call:write']);
-});
-
-test('get_skill returns a structured named skill without repeating the catalog', async () => {
-const result = await callCustomTool('get_skill', { name: 'ponytail-review' }, {});
-const payload = parseToolResult(result);
-assert.deepEqual(result.structuredContent, payload);
-assert.equal(payload.ok, true);
-assert.equal(payload.data.name, 'ponytail_review');
-assert.equal(payload.data.mcpSurfaces.tool, 'get_skill');
-  assert.match(payload.data.body, /unnecessary complexity|net: -<N> lines/i);
-  assert.equal(payload.data.skillCatalog, undefined);
-});
-
-test('get_skill discovery is structured and catalog-only', async () => {
-const result = await callCustomTool('get_skill', {}, {});
-const payload = parseToolResult(result);
-assert.deepEqual(result.structuredContent, payload);
-assert.equal(payload.ok, true);
-  assert.equal(payload.data.mode, 'discovery');
-  assert.equal(payload.data.body, undefined);
-  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'local_coding'));
-  assert.ok(payload.data.skillCatalog.some(skill => skill.name === 'systematic_debugging'));
+  await assert.rejects(() => callCustomTool('load_skill', { name: 'missing' }, context), /Unknown skill/);
+  await assert.rejects(() => callCustomTool('load_skill', {
+    name: 'systematic-debugging',
+    resource: '../secret.txt'
+  }, context), /Invalid skill resource path/);
+  await assert.rejects(() => callCustomTool('load_skill', {
+    name: 'systematic-debugging',
+    resource: 'references/missing.md'
+  }, context), /Unknown resource/);
+  await assert.rejects(() => callCustomTool('load_skill', {
+    name: 'systematic-debugging',
+    resource: 'checklist.md'
+  }, context), /Unknown resource/);
 });

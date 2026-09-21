@@ -20,28 +20,26 @@ Quick start card trên web cố ý lấy gateway origin và các link Dashboard/
 
 ## Catalog core
 
-Catalog local chỉ có đúng sáu tool:
+Gateway expose các tool filesystem, shell/process, device/project và external MCP theo runtime profile. Hai tool skill fallback duy nhất là:
 
-- `read_text_file`
-- `write_file`
-- `edit_file`
-- `shell_execute`
-- `image_preview`
-- `get_skill`
+- `skill_catalog`
+- `load_skill`
 
-Dùng official filesystem cho nội dung file. Dùng `shell_execute` cho `rg`, Git, test, build, lint, package manager, archive và process. Các wrapper MCP chuyên biệt cho Git/search/review/release đã bị xóa thật, không chỉ ẩn bằng surface mode khác.
+`skill_catalog` chỉ trả metadata gọn và version; `load_skill` tải body của một skill hoặc một resource đã nằm trong manifest. Không có router/classifier phía server và không có tool riêng cho từng skill.
+
+Dùng `shell_execute` cho `rg`, Git, test, build, lint, package manager, archive và process. Các wrapper MCP chuyên biệt cho Git/search/review/release đã bị xóa thật, không chỉ ẩn bằng surface mode khác.
 
 ## Skills live
 
-Copy một folder chuẩn `<name>/SKILL.md` vào `scripts/skills/`. Gateway tự nhận add/edit/remove mà không restart, phát prompt/resource list-changed notification, và trả catalog hiện tại gồm name, alias, description trong `get_skill()` qua field `skillCatalog`.
+`scripts/skills/` là global/team skill source duy nhất. Copy một folder chuẩn `<name>/SKILL.md` vào đó; gateway tự nhận add/edit/remove ở lần đọc kế tiếp mà không cần restart.
 
-Lần gọi `read_text_file` hoặc `image_preview` đầu tiên của một caller đã xác thực sẽ nhận một advisory ngắn. Các thao tác local `write_file`, `edit_file` và `shell_execute` không yêu cầu load skill; chỉ gọi `get_skill(name)` khi skill đó thay đổi đáng kể workflow. Load thành công sẽ ẩn advisory tiếp theo trong mặc định bốn giờ (`MCP_SKILL_BOOTSTRAP_TTL_MS`).
+Client MCP hiện đại dùng extension chuẩn `io.modelcontextprotocol/skills` trên protocol `2026-07-28` với `skills/list`, `skills/get` và `resources/read`. Client generic dùng đúng hai fallback tool `skill_catalog` và `load_skill`. Cả hai đường đều đọc cùng một SkillRegistry, cùng manifest, digest và revision.
 
-`SKILL.md` cần YAML frontmatter có `name` và `description` đủ rõ để agent chọn. `user-invocable: false` sẽ ẩn skill khỏi MCP prompts; `disable-model-invocation: true` vẫn cho load rõ ràng nhưng loại khỏi auto-selection. Thay đổi lỗi sẽ giữ catalog hợp lệ gần nhất.
+`SKILL.md` cần YAML frontmatter dạng mapping, `name` phải khớp tên folder theo dạng kebab-case, `description` không rỗng và body không rỗng. Metadata runtime luôn lấy từ file `SKILL.md` thực tế; không có alias runtime, prompt mirror, bootstrap advisory hay builtin fallback.
 
-Ponytail, Superpowers và các Anthropic skill được phép phân phối được quản lý qua `scripts/skills/sources.json`; commit chính xác nằm trong `sources.lock.json`. Dùng `npm run skills:check` để phát hiện upstream đã đổi và `npm run skills:sync` để tải, validate rồi áp dụng manifest hiện tại. Sync giữ nguyên skill local không được quản lý và kiểm tra license, symlink, dung lượng file và font file. Các Anthropic document skill proprietary được loại trừ có chủ đích.
+Ponytail, Superpowers và các Anthropic skill được phép phân phối được quản lý qua `scripts/skills/sources.json`; commit chính xác và compatibility patch nằm trong `sources.lock.json`. Dùng `npm run skills:check` để kiểm tra upstream và `npm run skills:sync` để fetch, kiểm tra license, áp dụng patch rồi validate catalog. Provenance không nằm trong package skill được serve.
 
-Loader và updater chỉ dùng Node filesystem/path APIs cùng path tương đối theo repo nên cùng layout chạy trên Linux và Windows. Chỉ cần restart gateway khi code loader thay đổi; add/edit/remove hoặc sync skill sau đó không cần restart. Xem `scripts/skills/README.md` để biết workflow update và chính sách license.
+Repo-local instructions/skills vẫn tách riêng ở `AGENTS.md` và `.agents/skills/`; chúng không được nhập vào global registry. Chỉ cần restart gateway khi code server thay đổi; add/edit/remove hoặc sync skill sau đó không cần restart. Xem `scripts/skills/README.md` để biết workflow update và chính sách license.
 
 ## Workspace roots live
 
@@ -64,15 +62,15 @@ Sửa TOML hợp lệ bằng tay sẽ hot-reload. TOML lỗi giữ nguyên runti
 
 Context7, DeepWiki, Exa và ESLint mặc định `enabled = false`. Khi bật, gateway stage client và catalog ứng viên, rồi mới atomic commit và phát list-changed notification. Disable hoặc thay cấu hình server cũng là transaction: nếu startup hoặc catalog discovery của ứng viên lỗi, client, route, status và generation cũ vẫn hoạt động.
 
-Codegraph và ripgrep là CLI workflow, không phải MCP upstream. Skill `local_coding` chỉ dùng Codegraph khi có executable và index `.codegraph` sẵn; nếu không sẽ fallback sang `rg` và `read_text_file`.
+Codegraph và ripgrep là CLI workflow, không phải MCP upstream. Gateway không có skill đặc biệt cho các công cụ này; dùng `shell_execute`, `rg` và `read_text_file` khi phù hợp.
 
 ## Kết quả shell
 
 `shell_execute` giữ model-facing result gọn: working directory thực tế, exit code, stdout, stderr, phân loại stderr, duration, timeout, trạng thái truncation và spill path. Original byte count chỉ xuất hiện cho stream bị truncate để agent biết kích thước dữ liệu cần recover; command echo, requested cwd, fixed encoding và các head/tail/returned-byte counter không còn lặp lại trong mỗi response. Full output quá lớn vẫn được spill ra file và có thể đọc lại. Với `rg`, exit code `1` nghĩa là không có match, không phải gateway failure.
 
-Runtime profile vẫn là `safe`, `assisted`, `yolo`. `safe` ẩn file mutation và shell; `assisted` cho phép file write nhưng ẩn shell; `yolo` expose đủ sáu core tool.
+Runtime profile vẫn là `safe`, `assisted`, `yolo`. `safe` ẩn file mutation và shell; `assisted` cho phép file write nhưng ẩn shell; `yolo` expose đầy đủ các tool execution được cấu hình. Hai fallback skill tool là read-only và không thay đổi theo profile.
 
-Nguyên tắc và roadmap tối ưu harness được khóa tại `docs/mcp-harness-efficiency-design.md` và `docs/superpowers/plans/2026-09-09-mcp-harness-efficiency.md`; agent sau phải kiểm tra task ledger ở đó trước khi triển khai để tránh làm trùng.
+Tài liệu tối ưu harness ngày 2026-09-09 được giữ làm lịch sử. Với skill architecture hiện tại, dùng `AGENTS.md`, README này và `scripts/skills/README.md` làm nguồn vận hành; không khôi phục loader/bootstrap cũ từ các plan lịch sử.
 
 ## Phát triển
 

@@ -1,11 +1,5 @@
 import assert from 'node:assert/strict';
-import {
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema
-} from '@modelcontextprotocol/sdk/types.js';
+import { GetPromptRequestSchema, ListPromptsRequestSchema, ListResourceTemplatesRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/core";
 import { listRepoPrompts, getRepoPrompt } from './prompts/index.mjs';
 import { listRepoResources, listRepoResourceTemplates } from './resources/index.mjs';
 import { buildTrustedRootsProjectRegistry } from './projects/trusted-roots-projects.mjs';

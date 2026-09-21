@@ -19,40 +19,6 @@
         "ponytail-help",
         "ponytail-review"
       ],
-      "overrides": {
-        "ponytail": {
-          "aliases": [
-            "lazy",
-            "lazy_mode",
-            "yagni"
-          ],
-          "uri": "skill://ponytail/ponytail/SKILL.md"
-        },
-        "ponytail-audit": {
-          "aliases": [
-            "audit_over_engineering"
-          ],
-          "uri": "skill://ponytail/ponytail-audit/SKILL.md"
-        },
-        "ponytail-debt": {
-          "aliases": [
-            "debt_ledger"
-          ],
-          "uri": "skill://ponytail/ponytail-debt/SKILL.md"
-        },
-        "ponytail-help": {
-          "aliases": [
-            "ponytail_commands"
-          ],
-          "uri": "skill://ponytail/ponytail-help/SKILL.md"
-        },
-        "ponytail-review": {
-          "aliases": [
-            "review_for_over_engineering"
-          ],
-          "uri": "skill://ponytail/ponytail-review/SKILL.md"
-        }
-      },
       "rootFiles": [
         {
           "path": "LICENSE",
@@ -81,23 +47,10 @@
         "systematic-debugging",
         "test-driven-development",
         "using-git-worktrees",
-        "using-superpowers",
         "verification-before-completion",
         "writing-plans",
         "writing-skills"
       ],
-      "overrides": {
-        "using-superpowers": {
-          "aliases": [
-            "superpower",
-            "superpowers",
-            "use_superpowers",
-            "skill_bootstrap",
-            "mcp_skill_bootstrap"
-          ],
-          "uri": "skill://superpowers/using-superpowers/SKILL.md"
-        }
-      },
       "compatibility": {
         "subagent-driven-development": {
           "replacements": [
@@ -108,17 +61,34 @@
             }
           ]
         },
-        "using-superpowers": {
+        "executing-plans": {
           "replacements": [
             {
               "path": "SKILL.md",
-              "search": "description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions",
-              "replace": "description: Use when starting work - establishes how to find and use task-relevant skills without making skill loading a prerequisite for unrelated actions"
-            },
+              "replace": "- Your harness has no subagent tool. Never fabricate a dispatch; run the plan here.",
+              "searchParts": [
+                "- Your harness has no subagent tool (see the per-platform references in\n  `../",
+                "using-",
+                "superpowers",
+                "/references/`). Never fabricate a dispatch; run\n  the plan here."
+              ]
+            }
+          ]
+        },
+        "writing-skills": {
+          "replacements": [
             {
               "path": "SKILL.md",
-              "search": "**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.",
-              "replace": "**Invoke relevant or requested skills before the work they govern.** If no skill materially applies, proceed directly. If a skill does apply, load it before performing that governed work."
+              "replace": "**Personal skills live in your runtime's configured skills directory.** For cross-runtime project-local skills, prefer `.agents/skills/` when the harness supports it.",
+              "searchParts": [
+                "**Personal skills live in your runtime's skills directory** (`~/.claude/skills/` on Claude Code) — see [codex-tools.md](../",
+                "using-",
+                "superpowers",
+                "/references/codex-tools.md) or [gemini-tools.md](../",
+                "using-",
+                "superpowers",
+                "/references/gemini-tools.md) for the path on those runtimes. Codex, Copilot CLI, and Gemini CLI all also recognize `~/.agents/skills/` as a cross-runtime alias."
+              ]
             }
           ]
         }
@@ -149,17 +119,6 @@
         "web-artifacts-builder",
         "webapp-testing"
       ],
-      "overrides": {
-        "frontend-design": {
-          "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
-        },
-        "theme-factory": {
-          "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
-        },
-        "web-artifacts-builder": {
-          "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
-        }
-      },
       "requireSkillLicense": {
         "path": "LICENSE.txt",
         "contains": "Apache License"
@@ -177,6 +136,34 @@
         "pdf": "Anthropic source-available proprietary license prohibits redistribution.",
         "pptx": "Anthropic source-available proprietary license prohibits redistribution.",
         "xlsx": "Anthropic source-available proprietary license prohibits redistribution."
+      },
+      "compatibility": {
+        "claude-api": {
+          "frontmatter": {
+            "description": "Use when implementing, debugging, or answering questions about the Claude API or Anthropic SDK, including Claude model selection, parameters, streaming, tool use, MCP, agents, caching, token counting, or migration. Use when Claude or Anthropic is the target provider; do not use for other named LLM providers."
+          },
+          "cleanup": [
+            {
+              "path": "shared/platform-availability.md",
+              "trimTrailingBlankLines": true
+            }
+          ]
+        },
+        "frontend-design": {
+          "frontmatter": {
+            "description": "Use when designing, building, or materially reshaping a web or application UI that needs visual direction, typography, layout, responsive behavior, interaction design, or implementation-level aesthetic decisions."
+          }
+        },
+        "theme-factory": {
+          "frontmatter": {
+            "description": "Use when applying or generating a coherent visual theme for slides, documents, reports, or standalone artifacts whose content and structure already exist."
+          }
+        },
+        "web-artifacts-builder": {
+          "frontmatter": {
+            "description": "Use when implementing a complex interactive HTML artifact with React, Tailwind CSS, shadcn/ui, routing, or state management after its requirements and visual direction are established."
+          }
+        }
       }
     },
     {
@@ -192,15 +179,6 @@
       "include": [
         "extract-design-md"
       ],
-      "overrides": {
-        "extract-design-md": {
-          "aliases": [
-            "extract_design_system",
-            "design_extraction"
-          ],
-          "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface."
-        }
-      },
       "rootFiles": [
         {
           "path": "LICENSE",
@@ -213,6 +191,14 @@
         "generate-design": "Requires the Stitch MCP server, which is not configured in this launcher.",
         "manage-design-system": "Requires the Stitch MCP server, which is not configured in this launcher.",
         "upload-to-stitch": "Requires Stitch credentials and the Stitch MCP workflow."
+      },
+      "compatibility": {
+        "extract-design-md": {
+          "frontmatter": {
+            "description": "Use when analyzing an existing frontend source tree to extract design tokens, component conventions, and visual language into DESIGN.md without rendering or redesigning the interface.",
+            "name": "extract-design-md"
+          }
+        }
       }
     },
     {
@@ -228,19 +214,23 @@
       "include": [
         "enhance-prompt"
       ],
-      "overrides": {
-        "enhance-prompt": {
-          "aliases": [
-            "design_prompt",
-            "stitch_prompt"
-          ],
-          "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
-        }
-      },
       "excluded": {
         "design-md": "Requires an existing Stitch project and Stitch MCP server; extract-design-md covers local source analysis.",
         "stitch-loop": "Requires Stitch and Chrome MCP servers and adds an autonomous workflow outside the requested design scope.",
         "taste-design": "Overlaps frontend-design but is less context-sensitive and imposes brittle universal rules such as mandatory perpetual motion and blanket font/layout bans."
+      },
+      "compatibility": {
+        "enhance-prompt": {
+          "frontmatter": {
+            "description": "Use when rewriting a vague UI request into a precise Google Stitch generation or editing prompt before UI generation, especially when layout, components, interactions, responsive behavior, or design-system constraints are underspecified."
+          },
+          "cleanup": [
+            {
+              "path": "SKILL.md",
+              "trimTrailingWhitespace": true
+            }
+          ]
+        }
       }
     },
     {
@@ -256,15 +246,6 @@
       "include": [
         "hallmark"
       ],
-      "overrides": {
-        "hallmark": {
-          "aliases": [
-            "anti_ai_slop",
-            "hallmark_audit"
-          ],
-          "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
-        }
-      },
       "compatibility": {
         "hallmark": {
           "files": [
@@ -396,6 +377,15 @@
               "path": "references/upstream/study-examples.md",
               "search": "](study.md)",
               "replace": "](../study.md)"
+            }
+          ],
+          "frontmatter": {
+            "description": "Use when the user explicitly invokes Hallmark, requests anti-AI-slop UI design, or asks for a Hallmark audit, redesign, or study of a page, screenshot, or URL."
+          },
+          "cleanup": [
+            {
+              "path": "references/component-cookbook.md",
+              "trimTrailingBlankLines": true
             }
           ]
         }

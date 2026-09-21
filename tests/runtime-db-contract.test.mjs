@@ -19,7 +19,7 @@ test('runtime uses gateway.sqlite as the single authoritative state database', (
 });
 
 test('wrapper preserves account and activity session through MCP caller context and project/device routing', () => {
-  assert.match(wrapper, /function createProxyServer\(\{ accountId, activitySessionId, callerKey, callerCategory, callerSubject \}\)/);
+  assert.match(wrapper, /function createProxyServer\(\{ era = 'legacy', accountId, activitySessionId, callerKey, callerCategory, callerSubject \}\)/);
   assert.match(wrapper, /routeObservedToolCall\(request, \{ accountId, activitySessionId, callerKey, callerCategory, callerSubject \}\)/);
   assert.match(wrapper, /activitySessionId: req\.auth\?\.activitySessionId \|\| null/);
   assert.match(wrapper, /customToolContext\(context\)/);

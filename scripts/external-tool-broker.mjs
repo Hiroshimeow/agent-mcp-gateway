@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/server/validators/ajv";
 import { classifyExternalToolLane } from './catalog-budget.mjs';
 
 const DEFAULT_LIMIT = 20;

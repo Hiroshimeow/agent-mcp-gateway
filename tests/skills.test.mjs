@@ -1,194 +1,216 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { SKILL_AGENT_INSTRUCTIONS, SKILL_ROUTING_POLICY, buildSkillPrompt, createSkillRegistry, getSkillDefinition, getSkillTool, listSkillPromptDefinitions, listSkillResources, readSkillResource } from '../scripts/skills/index.mjs';
-import { getRepoPrompt, listRepoPrompts } from '../scripts/prompts/index.mjs';
+import { createSkillRegistry, SkillRegistryError } from '../scripts/skills/index.mjs';
 import { listRepoResources, readRepoResource } from '../scripts/resources/index.mjs';
 
-const ponytailUri = 'skill://ponytail/ponytail/SKILL.md';
-const superpowersUri = 'skill://superpowers/using-superpowers/SKILL.md';
+function tempRoot(prefix = 'skill-registry-') {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
 
-test('skills expose prompt definitions without requiring a custom tool', () => {
-  const prompts = listSkillPromptDefinitions();
-  const ponytail = prompts.find(prompt => prompt.name === 'ponytail');
-  const superpowers = prompts.find(prompt => prompt.name === 'using_superpowers');
-  assert.ok(ponytail);
-  assert.ok(prompts.some(prompt => prompt.name === 'ponytail_review'));
-  assert.ok(superpowers);
-  assert.match(ponytail.description, /coding|solution|YAGNI/i);
-  assert.match(superpowers.description, /skills|conversation/i);
+function writeSkill(root, name, {
+  description = 'Use when testing a reusable workflow.',
+  body = '# Test Skill\n\nFollow the tested workflow.',
+  frontmatter = '',
+  resources = {}
+} = {}) {
+  const dir = path.join(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n${frontmatter}---\n\n${body}\n`);
+  for (const [relative, value] of Object.entries(resources)) {
+    const file = path.join(dir, ...relative.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, value);
+  }
+  return dir;
+}
+
+function sha256(bytes) {
+  return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+test('registry scans valid skills and a valid empty root is healthy', () => {
+  const empty = tempRoot();
+  const emptyRegistry = createSkillRegistry({ directory: empty });
+  assert.deepEqual(emptyRegistry.list(), []);
+  assert.deepEqual(emptyRegistry.health().status, 'healthy');
+
+  writeSkill(empty, 'systematic-debugging');
+  const registry = createSkillRegistry({ directory: empty });
+  const skill = registry.getByName('systematic-debugging');
+  assert.equal(skill.name, 'systematic-debugging');
+  assert.match(skill.body, /tested workflow/);
+  assert.equal(registry.health().count, 1);
 });
 
-test('skill lookup accepts slash-style aliases and builds MCP prompt text', () => {
-  assert.equal(getSkillDefinition('/ponytail-review')?.name, 'ponytail_review');
-  assert.equal(getSkillDefinition('superpower')?.name, 'using_superpowers');
-  const text = buildSkillPrompt('ponytail', { mode: 'ultra' });
-  assert.match(text, /Read this definition once/);
-  assert.match(text, /Requested intensity: ultra/);
-  assert.match(text, /The ladder/i);
+test('missing skill root is degraded and never becomes an empty healthy catalog', () => {
+  const root = path.join(tempRoot(), 'missing');
+  const registry = createSkillRegistry({ directory: root });
+  assert.throws(() => registry.snapshot(), error => error instanceof SkillRegistryError && error.code === 'skill_root_unavailable');
+  assert.deepEqual(registry.health(), { status: 'degraded', error: 'skill_root_unavailable' });
 });
 
-test('repo prompts include skills and return MCP-shaped skill prompt messages', () => {
-  const prompts = listRepoPrompts();
-  assert.ok(prompts.some(prompt => prompt.name === 'ponytail'));
-  assert.ok(prompts.some(prompt => prompt.name === 'using_superpowers'));
-  const prompt = getRepoPrompt('ponytail_review');
-  assert.equal(prompt.messages[0].role, 'user');
-  assert.equal(prompt.messages[0].content.type, 'text');
-  assert.match(prompt.messages[0].content.text, /Ponytail Review/);
-  assert.match(prompt.messages[0].content.text, /do not load it again/i);
-});
-
-test('canonical native skill template resolves a skill by name even when its stored URI differs', () => {
-  const builtins = new Map([['custom', {
-    name: 'custom',
-    title: 'Custom',
-    description: 'Custom fixture skill.',
-    uri: 'skill://vendor/custom/SKILL.md',
-    body: '# Custom fixture\n'
-  }]]);
-  const customRegistry = createSkillRegistry({ directory: null, builtins });
-  const result = customRegistry.readSkillResource('skill://skills/custom/SKILL.md');
-  assert.equal(result.contents[0].uri, 'skill://skills/custom/SKILL.md');
-  assert.match(result.contents[0].text, /Custom fixture/);
-});
-
-test('skill resources are listed and readable through repo resources', async () => {
-  assert.ok(listSkillResources().some(resource => resource.uri === ponytailUri));
-  assert.ok(listSkillResources().some(resource => resource.uri === superpowersUri));
-  assert.match(readSkillResource(ponytailUri).contents[0].text, /The ladder/i);
-  assert.match(readSkillResource(superpowersUri).contents[0].text, /invoke.*skills|skill.*priority/is);
-  assert.ok(listRepoResources().some(resource => resource.uri === ponytailUri));
-  const resource = await readRepoResource(ponytailUri);
-  assert.equal(resource.contents[0].mimeType, 'text/markdown');
-  assert.match(resource.contents[0].text, /lazy senior developer/i);
-});
-
-test('get_skill discovery returns compact routing metadata without a skill body', () => {
-  const payload = getSkillTool();
-  const ponytail = payload.skillCatalog.find(skill => skill.name === 'ponytail');
-  assert.equal(payload.mode, 'discovery');
-  assert.equal(payload.body, undefined);
-  assert.equal(payload.availableSkills, undefined);
-  assert.ok(ponytail?.description);
-  assert.ok(payload.skillCatalog.every(skill => skill.description.length <= 96));
-  assert.ok(payload.skillCatalog.every(skill => skill.aliases === undefined));
-  assert.deepEqual(payload.routingPolicy, SKILL_ROUTING_POLICY);
-  assert.ok(payload.routingPolicy.some(rule => /general UI(?: audit| redesign| study)?.*frontend_design/i.test(rule)));
-  assert.ok(payload.routingPolicy.some(rule => /explicit Hallmark or anti-AI-slop.*hallmark/i.test(rule)));
-  assert.doesNotMatch(payload.routingPolicy.join(' '), /Hallmark, audit, redesign, or study -> hallmark/i);
-
-  const referencedSkills = [...SKILL_ROUTING_POLICY.join(' ').matchAll(/->\s*([a-z][a-z0-9_]*)/g)].map(match => match[1]);
-  const names = payload.skillCatalog.map(skill => skill.name);
-  for (const referencedSkill of referencedSkills) {
-    assert.ok(names.includes(referencedSkill), `routing policy references missing skill: ${referencedSkill}`);
+test('registry rejects malformed and incomplete SKILL.md frontmatter', () => {
+  const cases = [
+    ['malformed', '---\nname: [\n---\n\nBody\n'],
+    ['scalar-frontmatter', '---\nhello\n---\n\nBody\n'],
+    ['missing-name', '---\ndescription: okay\n---\n\nBody\n'],
+    ['missing-description', '---\nname: missing-description\n---\n\nBody\n'],
+    ['empty-body', '---\nname: empty-body\ndescription: okay\n---\n']
+  ];
+  for (const [name, contents] of cases) {
+    const root = tempRoot();
+    const dir = path.join(root, name);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), contents);
+    const registry = createSkillRegistry({ directory: root });
+    assert.throws(() => registry.list(), SkillRegistryError, name);
+    assert.equal(registry.health().status, 'degraded');
   }
 });
 
-test('get_skill named load returns only the requested skill with optional workflow guidance', () => {
-  const payload = getSkillTool({ name: 'local-coding' });
-  assert.equal(payload.mode, 'skill');
-  assert.equal(payload.name, 'local_coding');
-  assert.equal(payload.mcpSurfaces.tool, 'get_skill');
-  assert.match(payload.body, /six core tools/i);
-  assert.equal(payload.skillCatalog, undefined);
-  assert.equal(payload.routingPolicy, undefined);
-  assert.equal(payload.availableSkills, undefined);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /get_skill\(name\)/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /project_list.*project_inspect/i);
-  assert.match(SKILL_AGENT_INSTRUCTIONS, /read_text_file/i);
-  assert.doesNotMatch(SKILL_AGENT_INSTRUCTIONS, /Routing policy:/i);
+test('registry enforces portable canonical names and directory/name equality', () => {
+  const badNames = ['Uppercase', 'has_underscore', 'two--hyphens'];
+  for (const name of badNames) {
+    const root = tempRoot();
+    const dir = path.join(root, 'fixture');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: fixture\n---\n\nBody\n`);
+    assert.throws(() => createSkillRegistry({ directory: root }).list(), SkillRegistryError);
+  }
+
+  const root = tempRoot();
+  const dir = path.join(root, 'directory-name');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: other-name\ndescription: fixture\n---\n\nBody\n');
+  assert.throws(() => createSkillRegistry({ directory: root }).list(), /must equal directory basename/);
 });
 
-function writeSkill(directory, folder, { description = 'Use for dynamic debugging work.', body = '# Dynamic Debugging\n\nInspect before changing.', extra = '' } = {}) {
-  const skillDirectory = path.join(directory, folder);
-  fs.mkdirSync(skillDirectory, { recursive: true });
-  fs.writeFileSync(path.join(skillDirectory, 'SKILL.md'), `---\nname: ${folder}\ndescription: ${description}\n${extra}---\n\n${body}\n`);
-}
-
-test('disk skills hot reload on add, edit, and remove without recreating the registry', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-skills-'));
-  const registry = createSkillRegistry({ directory, builtins: new Map() });
-  assert.deepEqual(registry.listSkills(), []);
-
-  writeSkill(directory, 'systematic-debugging');
-  assert.equal(registry.getSkillDefinition('systematic-debugging').name, 'systematic_debugging');
-  assert.match(registry.getSkillDefinition('systematic_debugging').body, /Inspect before changing/);
-
-  writeSkill(directory, 'systematic-debugging', {
-    description: 'Use when a bug needs root-cause analysis.',
-    body: '# Systematic Debugging\n\nReproduce, isolate, verify.'
+test('full YAML frontmatter is preserved verbatim by meaning', () => {
+  const root = tempRoot();
+  writeSkill(root, 'yaml-skill', {
+    frontmatter: 'license: MIT\ncompatibility: Requires git\nmetadata:\n  owner: platform\n  flags:\n    - one\n    - two\nallowed-tools: Bash(git:*)\n'
   });
-  assert.match(registry.getSkillDefinition('systematic-debugging').description, /root-cause analysis/);
-  assert.match(registry.getSkillDefinition('systematic-debugging').body, /Reproduce, isolate, verify/);
-
-  fs.rmSync(path.join(directory, 'systematic-debugging'), { recursive: true });
-  assert.equal(registry.getSkillDefinition('systematic-debugging'), null);
+  const skill = createSkillRegistry({ directory: root }).getByName('yaml-skill');
+  assert.deepEqual(skill.frontmatter.metadata, { owner: 'platform', flags: ['one', 'two'] });
+  assert.equal(skill.frontmatter.license, 'MIT');
+  assert.equal(skill.frontmatter['allowed-tools'], 'Bash(git:*)');
 });
 
-test('skill-prefixed names remain canonical while skill: lookup syntax still works', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-skill-prefix-'));
-  writeSkill(directory, 'skill-doctor', { description: 'Diagnose installed skill quality.' });
-  const registry = createSkillRegistry({ directory, builtins: new Map() });
-  assert.equal(registry.getSkillDefinition('skill-doctor').name, 'skill_doctor');
-  assert.equal(registry.getSkillDefinition('skill:skill-doctor').name, 'skill_doctor');
-});
-
-test('disk skill metadata controls prompt and model discovery', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-skill-metadata-'));
-  writeSkill(directory, 'manual-only', {
-    description: 'Only load when explicitly requested.',
-    extra: 'aliases:\n  - manual\n  - explicit\nuser-invocable: false\ndisable-model-invocation: true\n'
+test('manifest covers text and binary resources, hashes raw bytes, and excludes provenance', () => {
+  const root = tempRoot();
+  const dir = writeSkill(root, 'manifest-skill', {
+    resources: {
+      'references/notes.md': Buffer.from('line1\r\nline2\r\n', 'utf8'),
+      'assets/pixel.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]),
+      '.skill-source.json': Buffer.from('{"source":"ignored"}')
+    }
   });
-  const registry = createSkillRegistry({ directory, builtins: new Map() });
-  const skill = registry.getSkillDefinition('manual');
-  assert.equal(skill.name, 'manual_only');
-  assert.equal(skill.userInvocable, false);
-  assert.equal(skill.modelInvocable, false);
-});
-
-test('invalid disk skill keeps the last valid catalog and loads after repair', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-skill-invalid-'));
-  const skillDirectory = path.join(directory, 'broken');
-  fs.mkdirSync(skillDirectory, { recursive: true });
-  fs.writeFileSync(path.join(skillDirectory, 'SKILL.md'), '---\nname: broken\n---\n');
-
-  const registry = createSkillRegistry({ directory, builtins: new Map() });
-  assert.deepEqual(registry.listSkills(), []);
-
-  writeSkill(directory, 'broken', { description: 'Use after the file becomes valid.' });
-  assert.equal(registry.getSkillDefinition('broken').name, 'broken');
-});
-
-test('skill watcher emits after a valid disk catalog change', async t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-skill-watch-'));
-  const registry = createSkillRegistry({ directory, builtins: new Map() });
-  let resolveChange;
-  const changed = new Promise(resolve => { resolveChange = resolve; });
-  const stop = registry.watch(resolveChange, { intervalMs: 10 });
-  t.after(stop);
-
-  writeSkill(directory, 'verification');
-  const catalog = await Promise.race([
-    changed,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('skill watcher timed out')), 1000))
+  const skill = createSkillRegistry({ directory: root }).getByName('manifest-skill');
+  assert.deepEqual(skill.resources.map(item => item.uri), [
+    'skill://skills/manifest-skill/assets/pixel.png',
+    'skill://skills/manifest-skill/references/notes.md',
+    'skill://skills/manifest-skill/SKILL.md'
   ]);
-  assert.ok(catalog.some(skill => skill.name === 'verification'));
+  for (const item of skill.resources) {
+    const relative = decodeURIComponent(item.uri.split('/').slice(4).join('/'));
+    const bytes = fs.readFileSync(path.join(dir, ...relative.split('/')));
+    assert.equal(item.digest, sha256(bytes));
+    assert.equal(item.size, bytes.length);
+  }
+  assert.equal(skill.resources.some(item => item.uri.includes('.skill-source.json')), false);
+
+  const registry = createSkillRegistry({ directory: root });
+  const text = registry.readResource('skill://skills/manifest-skill/references/notes.md');
+  assert.equal(text.text, 'line1\r\nline2\r\n');
+  const binary = registry.readResource('skill://skills/manifest-skill/assets/pixel.png');
+  assert.equal(binary.mimeType, 'image/png');
+  assert.equal(binary.blob, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]).toString('base64'));
 });
 
+test('symlinks inside served packages are rejected where the platform permits creating them', t => {
+  const root = tempRoot();
+  const dir = writeSkill(root, 'symlink-skill');
+  const target = path.join(dir, 'target.txt');
+  fs.writeFileSync(target, 'target');
+  try {
+    fs.symlinkSync(target, path.join(dir, 'link.txt'), 'file');
+  } catch (error) {
+    if (['EPERM', 'EACCES'].includes(error.code)) {
+      t.skip('platform does not permit symlink creation');
+      return;
+    }
+    throw error;
+  }
+  assert.throws(() => createSkillRegistry({ directory: root }).list(), /symlinks are not allowed/);
+});
 
-test('human_comms is discoverable and defines the concise human-facing contract', () => {
-  const payload = getSkillTool();
-  const skill = getSkillDefinition('human_comms');
-  assert.ok(skill, 'human_comms skill must exist');
-  assert.ok(payload.skillCatalog.some(item => item.name === 'human_comms'));
-  assert.match(skill.description, /^Use when .*repl|^Use when .*human-facing/i);
-  assert.match(skill.body, /human(?:'s)? intent.*not.*all available information/i);
-  assert.match(skill.body, /enough to act/i);
-  assert.match(skill.body, /numbers.*dates.*prices?.*scope/is);
-  assert.match(skill.body, /PLAN.*report/is);
-  assert.ok(skill.body.split(/\s+/).filter(Boolean).length < 220, 'frequently loaded skill should stay under 220 words');
+test('resource count and total-byte limits are enforced', () => {
+  const countRoot = tempRoot();
+  const dir = writeSkill(countRoot, 'count-limit');
+  for (let index = 0; index < 512; index += 1) fs.writeFileSync(path.join(dir, `r-${index}.txt`), 'x');
+  assert.throws(() => createSkillRegistry({ directory: countRoot }).list(), /resource count exceeds 512/);
+
+  const byteRoot = tempRoot();
+  writeSkill(byteRoot, 'byte-limit', { resources: { 'asset.bin': Buffer.alloc(16 * 1024 * 1024, 1) } });
+  assert.throws(() => createSkillRegistry({ directory: byteRoot }).list(), /served bytes exceed/);
+});
+
+test('hot add/edit/resource add-remove/delete changes snapshots without registry recreation', () => {
+  const root = tempRoot();
+  const registry = createSkillRegistry({ directory: root });
+  const emptyVersion = registry.snapshot().catalogVersion;
+
+  writeSkill(root, 'hot-skill', { description: 'Initial description.' });
+  const added = registry.getByName('hot-skill');
+  const addedVersion = registry.snapshot().catalogVersion;
+  assert.ok(added);
+  assert.notEqual(addedVersion, emptyVersion);
+
+  writeSkill(root, 'hot-skill', { description: 'Changed description.', body: '# Changed\n\nNew body.' });
+  const edited = registry.getByName('hot-skill');
+  assert.equal(edited.description, 'Changed description.');
+  assert.notEqual(edited.skillRevision, added.skillRevision);
+  assert.notEqual(registry.snapshot().catalogVersion, addedVersion);
+
+  fs.mkdirSync(path.join(root, 'hot-skill', 'references'));
+  fs.writeFileSync(path.join(root, 'hot-skill', 'references', 'note.md'), 'one');
+  const withReference = registry.getByName('hot-skill');
+  assert.notEqual(withReference.skillRevision, edited.skillRevision);
+  const referenceVersion = registry.snapshot().catalogVersion;
+
+  fs.writeFileSync(path.join(root, 'hot-skill', 'references', 'note.md'), 'two');
+  const changedReference = registry.getByName('hot-skill');
+  assert.notEqual(changedReference.skillRevision, withReference.skillRevision);
+  assert.notEqual(registry.snapshot().catalogVersion, referenceVersion);
+
+  fs.rmSync(path.join(root, 'hot-skill', 'references', 'note.md'));
+  const withoutReference = registry.getByName('hot-skill');
+  assert.equal(withoutReference.resources.some(item => item.uri.endsWith('/note.md')), false);
+
+  fs.rmSync(path.join(root, 'hot-skill'), { recursive: true });
+  assert.equal(registry.getByName('hot-skill'), null);
+});
+
+test('repo resources do not enumerate skills but resources/read resolves registry skill URIs', async () => {
+  const root = tempRoot();
+  writeSkill(root, 'resource-skill');
+  const skillRegistry = createSkillRegistry({ directory: root });
+  const resources = listRepoResources({ listVisibleDevices: () => [] });
+  assert.equal(resources.some(resource => resource.uri.startsWith('skill://')), false);
+  const result = await readRepoResource('skill://skills/resource-skill/SKILL.md', { skillRegistry });
+  assert.equal(result.contents[0].mimeType, 'text/markdown');
+  assert.match(result.contents[0].text, /name: resource-skill/);
+});
+
+test('human-comms remains a normal exact-name skill', () => {
+  const registry = createSkillRegistry();
+  const skill = registry.getByName('human-comms');
+  assert.ok(skill);
+  assert.equal(registry.getByName('human_comms'), null);
+  assert.match(skill.description, /Use when/i);
 });

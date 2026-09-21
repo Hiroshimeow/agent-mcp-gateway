@@ -1,15 +1,11 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema
-} from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { Server } from "@modelcontextprotocol/server";
 
 const server = new Server({ name: 'tool-only-upstream', version: '1.0.0' }, {
   capabilities: { tools: {} }
 });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
+server.setRequestHandler('tools/list', async () => ({
   tools: [{
     name: 'a',
     description: 'Tool-only upstream tool a',
@@ -17,7 +13,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   }]
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async request => ({
+server.setRequestHandler('tools/call', async request => ({
   content: [{ type: 'text', text: `tool-only:${request.params.name}` }]
 }));
 

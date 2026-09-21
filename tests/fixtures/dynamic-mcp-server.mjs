@@ -1,15 +1,6 @@
 import fs from 'node:fs';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema
-} from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { Server } from "@modelcontextprotocol/server";
 
 const statePath = process.argv[2] || process.env.DYNAMIC_MCP_STATE;
 const countPath = process.argv[3] || process.env.DYNAMIC_MCP_COUNT;
@@ -33,7 +24,7 @@ if (state.capabilities?.prompts !== false) capabilities.prompts = {};
 
 const server = new Server({ name: 'dynamic-upstream', version: '1.0.0' }, { capabilities });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+server.setRequestHandler('tools/list', async () => {
   bumpCount();
   const state = readState();
   if (state.failList || state.failToolsList) throw new Error('dynamic tools/list failure');
@@ -46,11 +37,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(CallToolRequestSchema, async request => ({
+server.setRequestHandler('tools/call', async request => ({
   content: [{ type: 'text', text: `dynamic:${request.params.name}` }]
 }));
 
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+server.setRequestHandler('resources/list', async () => {
   const state = readState();
   if (state.failResourcesList) throw new Error('dynamic resources/list failure');
   return {
@@ -62,7 +53,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+server.setRequestHandler('resources/templates/list', async () => {
   const state = readState();
   if (state.failResourceTemplatesList) throw new Error('dynamic resources/templates/list failure');
   return {
@@ -74,11 +65,11 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(ReadResourceRequestSchema, async request => ({
+server.setRequestHandler('resources/read', async request => ({
   contents: [{ uri: request.params.uri, mimeType: 'text/plain', text: `dynamic-resource:${request.params.uri}` }]
 }));
 
-server.setRequestHandler(ListPromptsRequestSchema, async () => {
+server.setRequestHandler('prompts/list', async () => {
   const state = readState();
   if (state.failPromptsList) throw new Error('dynamic prompts/list failure');
   return {
@@ -90,7 +81,7 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(GetPromptRequestSchema, async request => ({
+server.setRequestHandler('prompts/get', async request => ({
   messages: [{ role: 'user', content: { type: 'text', text: `dynamic-prompt:${request.params.name}:${request.params.arguments?.topic || ''}` } }]
 }));
 

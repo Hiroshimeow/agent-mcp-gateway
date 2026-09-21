@@ -41,7 +41,7 @@ test('SQLite usage store is authoritative for account-scoped tool, skill, catalo
     f.store.recordToolCall({
       timestamp: new Date(1_700_000_000_001).toISOString(),
       accountId: 'alice', activitySessionId: 'activity-a', deviceId: null,
-      tool: 'get_skill', skillName: 'mcp_builder', durationMs: 2, success: false,
+      tool: 'load_skill', skillName: 'mcp-builder', durationMs: 2, success: false,
       errorCode: 'UNKNOWN_SKILL', inputBytes: 20, outputBytes: 401,
       truncated: false, spill: false, callerCategory: 'oauth'
     });
@@ -66,11 +66,11 @@ test('SQLite usage store is authoritative for account-scoped tool, skill, catalo
     assert.deepEqual(alice.totals, {
       toolCalls: 2, succeeded: 1, failed: 1, inputBytes: 143, outputBytes: 857
     });
-    assert.equal(alice.topTools[0].tool, 'get_skill');
+    assert.equal(alice.topTools[0].tool, 'load_skill');
     assert.equal(alice.topTools[0].calls, 1);
     assert.equal(alice.topTools[1].tool, 'shell_execute');
     assert.equal(alice.recentErrors[0].errorCode, 'UNKNOWN_SKILL');
-    assert.equal(alice.skillLoads[0].skillName, 'mcp_builder');
+    assert.equal(alice.skillLoads[0].skillName, 'mcp-builder');
     assert.equal(alice.skillLoads[0].loads, 1);
     assert.equal(alice.skillLoads[0].failures, 1);
     assert.equal(alice.skillLoads[0].outputBytes, 401);
@@ -101,7 +101,7 @@ test('tool call events provide account-scoped per-device and per-tool attributio
       { accountId: 'alice', deviceId: 'device-a', tool: 'shell_execute', success: true, inputBytes: 40, outputBytes: 80 },
       { accountId: 'alice', deviceId: 'device-a', tool: 'shell_execute', success: false, errorCode: 'TOOL_ERROR', inputBytes: 20, outputBytes: 20 },
       { accountId: 'alice', deviceId: 'device-a', tool: 'read_text_file', success: true, inputBytes: 16, outputBytes: 24 },
-      { accountId: 'alice', deviceId: 'device-b', tool: 'get_skill', success: true, inputBytes: 8, outputBytes: 12 },
+      { accountId: 'alice', deviceId: 'device-b', tool: 'load_skill', success: true, inputBytes: 8, outputBytes: 12 },
       { accountId: 'alice', deviceId: null, tool: 'legacy_unattributed', success: true, inputBytes: 4, outputBytes: 8 },
       { accountId: 'bob', deviceId: 'bob-device', tool: 'secret_tool', success: true, inputBytes: 100, outputBytes: 100 }
     ];

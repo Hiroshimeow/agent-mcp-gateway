@@ -1,109 +1,70 @@
-# Hot-reload and managed skills
+# Canonical global/team skills
 
-The gateway loads skills from this directory on every catalog/read operation. Adding, editing, or removing a valid skill does not require an MCP server restart.
+`scripts/skills/` is the gateway's only runtime source for global/team skills. One `SkillRegistry` scans this directory and serves both the standard MCP Skills extension and the two generic fallback tools.
 
-## Add a local skill
+Repository-specific guidance stays outside this registry: use root `AGENTS.md` and `.agents/skills/<name>/SKILL.md` in the repository that owns the instructions.
 
-Use either layout:
+## Package format
 
-- `scripts/skills/<skill-name>/SKILL.md` (recommended; supports scripts and references beside the skill)
-- `scripts/skills/<skill-name>.md`
+A skill package is a directory:
 
-Minimal format:
+```text
+scripts/skills/<name>/
+  SKILL.md
+  references/...
+  scripts/...
+  assets/...
+```
 
-```markdown
+`SKILL.md` must be a regular file with YAML mapping frontmatter, a non-empty body, and these required fields:
+
+```yaml
 ---
 name: systematic-debugging
 description: Use when a bug needs root-cause analysis before changing code.
-aliases: [debug, root-cause]
-user-invocable: true
-disable-model-invocation: false
 ---
-
-# Systematic Debugging
-
-Reproduce, isolate, fix, and verify.
 ```
 
-Required metadata:
+The canonical name must match both `^[a-z0-9]+(?:-[a-z0-9]+)*$` and the directory basename. Runtime metadata is parsed from the actual resulting `SKILL.md`; source configuration never overrides it at runtime.
 
-- `name`: stable skill identifier; hyphens and spaces normalize to underscores internally.
-- `description`: selection criteria exposed to the agent in the live `skillCatalog`.
+Every regular served file becomes a `skill://skills/<name>/...` resource with an exact-byte SHA-256 digest and size. Symlinks and path traversal are rejected. A package may contain at most 512 served resources and 16 MiB of static served bytes.
 
-Optional metadata:
+Supply-chain metadata, registry metadata, upstream-license storage, and temporary sync files are not served as skill package contents.
 
-- `aliases`: comma-separated, inline-list, or YAML-list aliases.
-- `title`: display title; defaults to the first H1.
-- `prompt` / `promptName`: MCP prompt name.
-- `uri`: custom MCP resource URI.
-- `arguments` / `args`: prompt argument names.
-- `user-invocable: false`: omit the skill from MCP prompts.
-- `disable-model-invocation: true`: omit the skill from automatic agent selection while preserving explicit `get_skill(name)` loading.
+## Delivery paths
 
-If a new or edited file is invalid, the gateway logs the error and keeps the last valid catalog. The loader and updater use Node filesystem/path APIs, so the same layout works on Linux and Windows.
+Modern MCP `2026-07-28` clients use `io.modelcontextprotocol/skills`:
 
-## Progressive skill disclosure
+- `skills/list` for stable metadata entries and complete manifests.
+- `skills/get` for one current metadata entry by URI.
+- normal `resources/read` for exact skill content.
 
-Read-only context stays available before skill selection. The first `read_text_file` or `image_preview` result for an authenticated caller includes one short advisory. Local `write_file`, `edit_file`, and `shell_execute` remain available without a skill; load a matching skill only when it materially changes the workflow.
+Generic clients use only `skill_catalog` and `load_skill`. Both adapters read the same registry snapshot, revisions, and catalog version. There is no server-side skill classifier, priority system, bootstrap gate, prompt mirror, or background watcher.
 
-Any successful `get_skill(...)` call suppresses further advisory for the TTL. The default is four hours and can be changed with `MCP_SKILL_BOOTSTRAP_TTL_MS`. Stateless mode keys the state from a hash of the verified OAuth client ID, or a fixed non-secret identity for configured static bearer access; raw credentials are never stored. Changing access tokens or stale `mcp-session-id` headers do not reset the stateless disclosure state.
+Relevant entry points rescan/hash deterministically. Therefore add/edit/remove is visible on the next catalog/get/read call without restarting the server.
+
+## Health
+
+A valid empty directory is healthy. A missing, unreadable, or invalid root is degraded/error. The gateway never substitutes an embedded catalog when the configured root disappears. `/healthz` exposes only bounded skill status, count/version when healthy, or a stable error code when degraded.
 
 ## Managed upstream skills
 
-`sources.json` is the reviewable source manifest. It contains explicit repositories, branches, included skill folders, compatibility metadata, license requirements, and documented exclusions. `sources.lock.json` records the exact upstream commits currently vendored.
+`sources.json` is the reviewable source manifest. `sources.lock.json` records exact repositories, refs, commits, source paths, targets, compatibility patches, and license provenance. `sync-skills.mjs` fetches pinned upstream state, checks licenses and tree safety, copies selected skills, applies compatibility patches to the resulting package, validates the entire prepared catalog, replaces managed directories, removes stale managed skills, and writes the lock.
 
-Current managed sources:
+Current managed sources include Ponytail, ordinary Superpowers workflow skills, redistributable Anthropic skills, selected Stitch skills, and Hallmark. Non-redistributable packages remain excluded.
 
-- `DietrichGebert/ponytail` — MIT
-- `obra/superpowers` — MIT
-- redistributable Apache-2.0 skills from `anthropics/skills`
-- selected Apache-2.0 design skills from `google-labs-code/stitch-skills`
-- `nutlope/hallmark` — MIT
+Compatibility changes belong in `sources.json`, not as hand-edits to managed output. Semantic changes such as a corrected name or description must be applied to the resulting `SKILL.md` during sync.
 
-Anthropic's proprietary `docx`, `pdf`, `pptx`, and `xlsx` skills are not vendored because their license prohibits redistribution. `doc-coauthoring` is excluded because its folder does not declare a redistributable license. `canvas-design` is excluded because it includes bundled font files.
-
-From Stitch Skills, only `extract-design-md` and `enhance-prompt` are vendored. Stitch-MCP-dependent workflows are excluded until that server is configured. `taste-design` is excluded because it overlaps `frontend-design` while imposing brittle universal font, motion, and layout rules; the more context-sensitive `frontend-design` remains the default visual-design skill.
-
-Hallmark is vendored as an opt-in anti-AI-slop design workflow. Its local selection trigger is intentionally narrower than upstream so generic UI work continues to use `frontend-design`; Hallmark activates when named explicitly or for Hallmark `audit`, `redesign`, or `study` requests.
-
-Each managed skill contains `.skill-source.json` with its repository, upstream path, commit, license, and any local compatibility metadata. Upstream license and notice files are retained in `_upstream_licenses/` and, where supplied, inside each skill folder.
-
-## Check and apply updates
-
-Check whether any tracked branch has moved:
+Run:
 
 ```bash
 npm run skills:check
-```
-
-Exit code `0` means the lock is current. Exit code `1` means at least one upstream commit changed.
-
-Fetch, validate, and apply the current manifest:
-
-```bash
 npm run skills:sync
 npm test
 ```
 
-Then review before committing:
+After sync, review `git status --short`, `git diff --stat`, and `git diff`. Re-running sync against the same source commits must be idempotent.
 
-```bash
-git diff --stat
-git diff -- scripts/skills/sources.lock.json
-git diff -- scripts/skills/<changed-skill>
-```
+## Adding a team skill
 
-Local compatibility edits to managed skills belong in `sources.json`, not in vendored skill folders. If an upstream update makes an exact compatibility replacement stop matching, inspect the new upstream text, update only that manifest match, rerun `npm run skills:sync` and `npm test`, and review the generated skill diff before committing.
-
-The updater clones into a temporary directory, realpath-checks every upstream file it reads or copies, rejects path escapes, symlinks, large files, and font files, validates the complete prepared catalog, and only then swaps managed folders. It never deletes unmanaged local skills and refuses to overwrite an unmanaged folder with the same name.
-
-Updating skill files takes effect through hot reload. Restart the MCP server only when the loader or updater code itself changes.
-
-## Add or change a managed source
-
-1. Edit `sources.json`; never edit `sources.lock.json` manually.
-2. Use explicit `include` entries rather than importing an entire repository implicitly.
-3. Record license requirements and exclusions in the manifest.
-4. Add compatibility aliases/URIs under `overrides` only when an existing MCP contract must remain stable.
-5. Use per-skill `compatibility.files` and exact-count `compatibility.replacements` for intentional local managed adaptations or when upstream references escape the included skill folder; do not patch vendored managed files by hand.
-6. Run `npm run skills:sync`, `npm test`, and review the resulting diff.
+Add a valid `scripts/skills/<name>/SKILL.md` package. Do not add hard-coded runtime definitions, aliases, source-specific runtime URIs, or a second registry. The next relevant registry operation will discover it.

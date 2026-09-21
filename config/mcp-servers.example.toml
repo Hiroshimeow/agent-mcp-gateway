@@ -6,7 +6,7 @@
 name = "agent-mcp-gateway"
 title = "MCP Gateway"
 description = "Remote MCP gateway for filesystem, shell, device routing, optional skills, and external MCP upstreams."
-instructions = "Use filesystem tools for file content, shell/process tools for terminal workflows, list_devices for remote machines, and get_skill only when a reusable skill clearly matches the task."
+instructions = "Use filesystem tools for file content, shell/process tools for terminal workflows, and list_devices for remote machines. Native Skills clients use the MCP Skills extension; other clients may use skill_catalog and load_skill."
 
 [surface]
 mode = "agent"
