@@ -184,7 +184,7 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /<th>Device<\/th><th>Version<\/th><th>Last seen<\/th><th>OK \/ Fail<\/th><th>Input \/ Output<\/th><th>Estimated tokens<\/th>/);
     assert.match(html, /<code>1\.0\.5<\/code><small>latest 1\.0\.6<\/small>/);
     assert.match(html, /<code>1\.0\.4<\/code><small>latest 1\.0\.6<\/small>/);
-    assert.match(html, /Bootstrap 1\.0\.5 once/);
+    assert.match(html, /Bootstrap 1\.0\.6 manually/);
     assert.match(html, /<strong>0<\/strong> online[\s\S]*?<strong>3<\/strong> offline/i);
     assert.match(html, /100 B/);
     assert.match(html, /200 B/);

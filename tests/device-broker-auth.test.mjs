@@ -125,7 +125,7 @@ async function reconnect(ws, { deviceId, privateKey, packageVersion = null }) {
   return await okPromise;
 }
 
-async function createHarness(t, dbPath) {
+async function createHarness(t, dbPath, brokerOptions = {}) {
   const store = createDeviceStore({ dbPath });
   const server = http.createServer((_req, res) => res.end('ok'));
   const broker = createDeviceBroker({
@@ -133,7 +133,8 @@ async function createHarness(t, dbPath) {
     deviceStore: store,
     requestTimeoutMs: 1000,
     requireAccountOwnership: false,
-    innerTls: { cert: innerTlsCert, key: innerTlsKey }
+    innerTls: { cert: innerTlsCert, key: innerTlsKey },
+    ...brokerOptions
   });
   broker.attach(server);
   const port = await listen(server);
@@ -1046,26 +1047,26 @@ test('account owner can dispatch a fixed-version device update and completion fo
     publicKeyPem: keys.publicKeyPem,
     ownerAccountId: 'account-1',
     agentVersion: 'test-1',
-    packageVersion: '1.0.5'
+    packageVersion: '1.0.6'
   });
 
   const ws = await openSocket(port);
   t.after(() => ws.close());
-  await reconnect(ws, { deviceId: 'update-device', privateKey: keys.privateKey, packageVersion: '1.0.5' });
+  await reconnect(ws, { deviceId: 'update-device', privateKey: keys.privateKey, packageVersion: '1.0.6' });
 
   const updateMessagePromise = nextMessage(ws);
   const requested = broker.requestDeviceUpdate({
     accountId: 'account-1',
     deviceId: 'update-device',
-    targetVersion: '1.0.6'
+    targetVersion: '1.0.7'
   });
   assert.equal(requested.state, 'requested');
-  assert.equal(requested.targetVersion, '1.0.6');
+  assert.equal(requested.targetVersion, '1.0.7');
 
   const updateMessage = await updateMessagePromise;
   assert.equal(updateMessage.type, 'device_update');
   assert.equal(updateMessage.device_id, 'update-device');
-  assert.equal(updateMessage.payload.target_version, '1.0.6');
+  assert.equal(updateMessage.payload.target_version, '1.0.7');
 
   ws.send(JSON.stringify({
     protocol_version: 1,
@@ -1074,28 +1075,107 @@ test('account owner can dispatch a fixed-version device update and completion fo
     device_id: 'update-device',
     connection_epoch: updateMessage.connection_epoch,
     timestamp: Date.now(),
-    payload: { state: 'accepted', target_version: '1.0.6', package_version: '1.0.5' }
+    payload: { state: 'accepted', target_version: '1.0.7', package_version: '1.0.6' }
   }));
   await new Promise(resolve => setTimeout(resolve, 15));
   assert.equal(broker.listDevices({ accountId: 'account-1' })[0].update.state, 'accepted');
 
-  ws.send(JSON.stringify({
+  const replacement = await openSocket(port);
+  t.after(() => replacement.close());
+  const authOk = await reconnect(replacement, {
+    deviceId: 'update-device',
+    privateKey: keys.privateKey,
+    packageVersion: '1.0.7'
+  });
+  let visible = broker.listDevices({ accountId: 'account-1' })[0];
+  assert.equal(visible.packageVersion, '1.0.7');
+  assert.equal(visible.update.state, 'complete');
+
+  // A late status from the new runtime must never demote terminal completion.
+  replacement.send(JSON.stringify({
     protocol_version: 1,
     type: 'device_update_status',
     request_id: updateMessage.request_id,
     device_id: 'update-device',
-    connection_epoch: updateMessage.connection_epoch,
+    connection_epoch: authOk.connection_epoch,
     timestamp: Date.now(),
-    payload: { state: 'installed', target_version: '1.0.6', package_version: '1.0.5' }
+    payload: { state: 'installed', target_version: '1.0.7', package_version: '1.0.7' }
   }));
   await new Promise(resolve => setTimeout(resolve, 15));
-  assert.equal(broker.listDevices({ accountId: 'account-1' })[0].update.state, 'installed');
-
-  const replacement = await openSocket(port);
-  t.after(() => replacement.close());
-  await reconnect(replacement, { deviceId: 'update-device', privateKey: keys.privateKey, packageVersion: '1.0.6' });
-  const visible = broker.listDevices({ accountId: 'account-1' })[0];
-  assert.equal(visible.packageVersion, '1.0.6');
+  visible = broker.listDevices({ accountId: 'account-1' })[0];
   assert.equal(visible.update.state, 'complete');
+});
+
+test('MCP Device 1.0.5 requires one-time manual bootstrap to 1.0.6', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-bootstrap-floor-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'bootstrap-device',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.5'
+  });
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'bootstrap-device', privateKey: keys.privateKey, packageVersion: '1.0.5' });
+
+  assert.throws(
+    () => broker.requestDeviceUpdate({
+      accountId: 'account-1',
+      deviceId: 'bootstrap-device',
+      targetVersion: '1.0.6'
+    }),
+    error => error?.code === 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED' &&
+      /mcp-device stop/.test(String(error?.message || '')) &&
+      /1\.0\.6/.test(String(error?.message || ''))
+  );
+});
+
+test('stale in-progress device update expires and a new target can be requested', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-update-timeout-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath, { updateStaleMs: 25 });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'timeout-device',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.6'
+  });
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'timeout-device', privateKey: keys.privateKey, packageVersion: '1.0.6' });
+
+  const firstMessage = nextMessage(ws);
+  const first = broker.requestDeviceUpdate({
+    accountId: 'account-1',
+    deviceId: 'timeout-device',
+    targetVersion: '1.0.7'
+  });
+  assert.equal(first.state, 'requested');
+  await firstMessage;
+
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const timedOut = broker.listDevices({ accountId: 'account-1' })[0].update;
+  assert.equal(timedOut.state, 'failed');
+  assert.equal(timedOut.error.code, 'DEVICE_UPDATE_TIMEOUT');
+
+  const secondMessage = nextMessage(ws);
+  const second = broker.requestDeviceUpdate({
+    accountId: 'account-1',
+    deviceId: 'timeout-device',
+    targetVersion: '1.0.8'
+  });
+  assert.equal(second.state, 'requested');
+  assert.equal(second.targetVersion, '1.0.8');
+  await secondMessage;
 });
 

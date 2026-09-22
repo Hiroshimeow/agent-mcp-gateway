@@ -82,7 +82,7 @@ function renderDeviceRows(devices, csrf) {
     } else if (device.updateAvailable && device.selfUpdateSupported && device.online) {
       updateControl = `<form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/update">${csrfField(csrf)}<button type="submit">Update → ${escapeHtml(device.latestPackageVersion)}</button></form>`;
     } else if (device.updateAvailable && !device.selfUpdateSupported) {
-      updateControl = '<span class="muted">Bootstrap 1.0.5 once</span>';
+      updateControl = '<span class="muted">Bootstrap 1.0.6 manually: stop → npm install -g → install</span>';
     } else if (device.packageVersion && device.latestPackageVersion && !device.updateAvailable) {
       updateControl = '<span class="muted">Up to date</span>';
     }
@@ -332,7 +332,7 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
       .map(device => {
         const packageVersion = device.packageVersion || null;
         let selfUpdateSupported = false;
-        try { selfUpdateSupported = Boolean(packageVersion) && compareStableVersions(packageVersion, '1.0.5') >= 0; } catch {}
+        try { selfUpdateSupported = Boolean(packageVersion) && compareStableVersions(packageVersion, '1.0.6') >= 0; } catch {}
         const updateAvailable = Boolean(latestPackageVersion) && (!packageVersion || isNewerStableVersion(packageVersion, latestPackageVersion));
         return {
         ...device,

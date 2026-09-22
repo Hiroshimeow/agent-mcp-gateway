@@ -13,6 +13,7 @@ export const DEVICE_PROTOCOL_VERSION_V2 = 2;
 const DEVICE_AUTH_EXPORTER_LABEL = 'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+const DEFAULT_DEVICE_UPDATE_STALE_MS = 15 * 60 * 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -158,10 +159,30 @@ export function createDeviceBroker(options = {}) {
   let schemaSnapshot = normalizeSchemaSnapshot(options.schemaSnapshot);
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
+  const deviceUpdateStaleMs = options.updateStaleMs ?? DEFAULT_DEVICE_UPDATE_STALE_MS;
   const devices = new Map();
   const pending = new Map();
   const pendingByWireRequestId = new Map();
   const updateStates = new Map();
+
+  function currentUpdateState(deviceId, now = Date.now()) {
+    const current = updateStates.get(deviceId) || null;
+    if (!current || !['requested', 'accepted', 'installed'].includes(current.state)) return current;
+    const touchedAt = Number(current.updatedAt || current.requestedAt || 0);
+    if (!Number.isFinite(touchedAt) || touchedAt <= 0 || now - touchedAt <= deviceUpdateStaleMs) return current;
+    const failed = {
+      ...current,
+      state: 'failed',
+      updatedAt: now,
+      error: {
+        code: 'DEVICE_UPDATE_TIMEOUT',
+        message: 'Device update did not complete within the allowed update window.'
+      }
+    };
+    updateStates.set(deviceId, failed);
+    return failed;
+  }
+
   const sockets = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   let attachedServer = null;
@@ -186,7 +207,7 @@ export function createDeviceBroker(options = {}) {
     const stored = durableAuth ? deviceStore.get(device.deviceId) : null;
     const usage = usageStore ? usageStore.get(device.deviceId) : null;
     const status = publicDevice(device, { stored, usage, schema: schemaSnapshot });
-    return { ...status, update: updateStates.get(device.deviceId) || null };
+    return { ...status, update: currentUpdateState(device.deviceId) || null };
   }
 
   function recordDeviceStatus(device, status) {
@@ -630,10 +651,11 @@ export function createDeviceBroker(options = {}) {
       return;
     }
     if (message.type === 'device_update_status') {
-      const current = updateStates.get(device.deviceId);
+      const current = currentUpdateState(device.deviceId);
       const requestId = String(message.request_id || '').trim();
       const targetVersion = String(message.payload?.target_version || '').trim();
       if (!current || current.requestId !== requestId || current.targetVersion !== targetVersion) return;
+      if (['complete', 'failed'].includes(current.state)) return;
       const state = String(message.payload?.state || '').trim();
       if (!['accepted', 'installed', 'failed'].includes(state)) return;
       updateStates.set(device.deviceId, {
@@ -864,14 +886,22 @@ export function createDeviceBroker(options = {}) {
     const target = normalizeStableVersion(targetVersion);
     let current;
     try { current = normalizeStableVersion(device.packageVersion || stored.packageVersion); }
-    catch { throw deviceBrokerError('Device package version is unavailable; bootstrap MCP Device 1.0.5 once before dashboard updates.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'); }
-    if (compareStableVersions(current, '1.0.5') < 0) {
-      throw deviceBrokerError('Device must be bootstrapped to MCP Device 1.0.5 before dashboard self-update is available.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED');
+    catch {
+      throw deviceBrokerError(
+        'Device package version is unavailable; manually bootstrap MCP Device 1.0.6 with: mcp-device stop -> npm install -g @hcu-lab.me/mcp-device@1.0.6 -> mcp-device install.',
+        'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'
+      );
+    }
+    if (compareStableVersions(current, '1.0.6') < 0) {
+      throw deviceBrokerError(
+        'Device must be manually bootstrapped to MCP Device 1.0.6 before dashboard self-update is available: mcp-device stop -> npm install -g @hcu-lab.me/mcp-device@1.0.6 -> mcp-device install.',
+        'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'
+      );
     }
     if (compareStableVersions(target, current) <= 0) {
       throw deviceBrokerError(`Device is already on ${current} or newer.`, 'DEVICE_UPDATE_NOT_NEEDED');
     }
-    const existing = updateStates.get(device.deviceId);
+    const existing = currentUpdateState(device.deviceId);
     if (existing && ['requested', 'accepted', 'installed'].includes(existing.state)) {
       if (existing.targetVersion === target) return existing;
       throw deviceBrokerError('Another device update is already in progress.', 'DEVICE_UPDATE_IN_PROGRESS');
