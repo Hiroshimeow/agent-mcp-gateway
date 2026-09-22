@@ -310,3 +310,47 @@ test('device broker preserves bounded remote tool error codes', async t => {
     error => error.code === 'DEVICE_OUTPUT_TOO_LARGE' && error.message === 'too large'
   );
 });
+
+test('broker exposes lightweight in-flight activity for dashboard pulses', async t => {
+  const server = http.createServer((_req, res) => res.end('ok'));
+  const broker = createDeviceBroker({ enrollmentToken: 'dev-secret', requestTimeoutMs: 1000 });
+  broker.attach(server);
+  const port = await listen(server);
+  t.after(async () => {
+    await broker.shutdown();
+    await closeServer(server);
+  });
+
+  const ws = await connectDevice(port, 'dev-secret');
+  t.after(() => ws.close());
+  let request = null;
+  ws.on('message', raw => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === 'tool_call') request = message;
+  });
+  await waitUntil(() => broker.listDevices().length === 1);
+
+  const call = broker.callDevice({ deviceId: 'device-test', tool: 'ping', arguments: {} });
+  await waitUntil(() => request && broker.getActivitySnapshot()[0]?.inFlight === 1);
+  const active = broker.getActivitySnapshot()[0];
+  assert.equal(active.deviceId, 'device-test');
+  assert.equal(active.inFlight, 1);
+  assert.equal(active.tool, 'ping');
+  assert.equal(typeof active.lastSentAt, 'number');
+
+  ws.send(JSON.stringify({
+    protocol_version: 1,
+    type: 'tool_result',
+    request_id: request.request_id,
+    device_id: 'device-test',
+    connection_epoch: request.connection_epoch,
+    timestamp: Date.now(),
+    payload: { ok: true }
+  }));
+  assert.deepEqual(await call, { ok: true });
+  const finished = broker.getActivitySnapshot()[0];
+  assert.equal(finished.inFlight, 0);
+  assert.equal(finished.tool, 'ping');
+  assert.equal(finished.lastOutcome, 'success');
+  assert.equal(typeof finished.lastReceivedAt, 'number');
+});

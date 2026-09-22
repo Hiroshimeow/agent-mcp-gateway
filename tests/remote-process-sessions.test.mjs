@@ -36,3 +36,16 @@ test('removing a remote process session requires the owning caller', () => {
   assert.equal(registry.remove({ sessionId, ownerKey: 'a' }).deviceId, 'g8');
   assert.equal(registry.size(), 0);
 });
+
+test('forgetting a device drops every retained process session for that device', () => {
+  const registry = createRemoteProcessSessionRegistry();
+  const first = registry.register({ ownerKey: 'a', deviceId: 'g6', remoteSessionId: '1' });
+  const second = registry.register({ ownerKey: 'b', deviceId: 'g6', remoteSessionId: '2' });
+  const other = registry.register({ ownerKey: 'a', deviceId: 'g8', remoteSessionId: '3' });
+
+  assert.equal(registry.removeByDevice('g6'), 2);
+  assert.throws(() => registry.resolve({ sessionId: first, ownerKey: 'a' }), /Unknown or expired/);
+  assert.throws(() => registry.resolve({ sessionId: second, ownerKey: 'b' }), /Unknown or expired/);
+  assert.equal(registry.resolve({ sessionId: other, ownerKey: 'a' }).deviceId, 'g8');
+  assert.equal(registry.size(), 1);
+});

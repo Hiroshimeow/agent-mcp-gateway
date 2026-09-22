@@ -44,7 +44,6 @@ function inventorySignature(devices) {
     .update(JSON.stringify(devices.map(device => ({
       deviceId: device?.deviceId || '',
       online: Boolean(device?.online),
-      revoked: Boolean(device?.revoked),
       capabilities: Array.isArray(device?.capabilities) ? device.capabilities : []
     }))))
     .digest('hex')
@@ -72,7 +71,7 @@ function decodeCursor(cursor, signature) {
 export function listDevicesToolDefinition() {
   return {
     name: 'list_devices',
-    description: 'List registered device identities and bounded capability/status metadata. Adding or removing devices does not change the MCP tool schema.',
+    description: 'List currently paired device identities and bounded capability/status metadata. Forgotten devices are excluded; adding or removing devices does not change the MCP tool schema.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +93,7 @@ function toWireDevice(device = {}) {
     arch: device.arch || null,
     path_style: device.pathStyle || null,
     online: Boolean(device.online),
-    revoked: Boolean(device.revoked),
+    revoked: false,
     agent_version: device.agentVersion || 'unknown',
     capabilities: Array.isArray(device.capabilities) ? [...device.capabilities] : [],
     connection_epoch: Number(device.connectionEpoch || 0),
@@ -108,6 +107,7 @@ function toWireDevice(device = {}) {
 
 export function paginateDeviceInventory(devices, options = {}) {
   const sorted = [...(Array.isArray(devices) ? devices : [])]
+    .filter(device => !device?.revoked)
     .sort((left, right) => String(left?.deviceId || '').localeCompare(String(right?.deviceId || '')));
   const pathHint = String(options.path_hint || '').trim();
   const selectedDevice = pathHint ? selectDeviceForPathHint(sorted, pathHint) : null;

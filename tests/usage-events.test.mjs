@@ -188,3 +188,35 @@ test('device status changes are stored without payloads and scoped by owner acco
     assert.equal(JSON.stringify(alice).includes('device-b'), false);
   } finally { f.close(); }
 });
+test('usage queries honor a rolling since boundary and dashboard usage exposes only active OAuth sessions', () => {
+  const f = fixture();
+  try {
+    f.store.openActivitySession({ activitySessionId: 'active-session', accountId: 'alice', clientId: 'active-client' });
+    f.store.openActivitySession({ activitySessionId: 'ended-session', accountId: 'alice', clientId: 'ended-client' });
+    f.store.endActivitySession({ activitySessionId: 'ended-session', accountId: 'alice' });
+
+    f.store.recordToolCall({
+      timestamp: 1_700_000_000_000,
+      accountId: 'alice', activitySessionId: 'active-session', deviceId: 'device-a',
+      tool: 'old_tool', durationMs: 1, success: true, inputBytes: 10, outputBytes: 20
+    });
+    f.store.recordToolCall({
+      timestamp: 1_700_000_100_000,
+      accountId: 'alice', activitySessionId: 'active-session', deviceId: 'device-a',
+      tool: 'recent_tool', durationMs: 1, success: false, errorCode: 'RECENT_ERROR', inputBytes: 30, outputBytes: 40
+    });
+
+    const usage = f.store.getAccountUsage('alice', { since: 1_700_000_050_000 });
+    assert.deepEqual(usage.totals, { toolCalls: 1, succeeded: 0, failed: 1, inputBytes: 30, outputBytes: 40 });
+    assert.deepEqual(usage.topTools.map(item => item.tool), ['recent_tool']);
+    assert.deepEqual(usage.recentErrors.map(item => item.errorCode), ['RECENT_ERROR']);
+    assert.deepEqual(usage.activitySessions.map(item => item.activitySessionId), ['active-session']);
+
+    const devices = f.store.getDeviceUsageForAccount('alice', { since: 1_700_000_050_000 });
+    assert.equal(devices.length, 1);
+    assert.equal(devices[0].toolCalls, 1);
+    assert.equal(devices[0].inputBytes, 30);
+    assert.deepEqual(f.store.getDeviceToolUsage('alice', 'device-a', { since: 1_700_000_050_000 }).map(item => item.tool), ['recent_tool']);
+    assert.deepEqual(f.store.getDeviceRecentToolCalls('alice', 'device-a', { since: 1_700_000_050_000 }).map(item => item.tool), ['recent_tool']);
+  } finally { f.close(); }
+});

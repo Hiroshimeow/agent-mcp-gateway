@@ -12,7 +12,7 @@ function publicKeyPem() {
   return generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' });
 }
 
-test('device store persists enrolled identities across reopen and supports revoke', t => {
+test('device store persists enrolled identities across reopen and hard-forgets on revoke', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-'));
   const dbPath = path.join(dir, 'devices.sqlite');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -28,8 +28,11 @@ test('device store persists enrolled identities across reopen and supports revok
   const restored = second.get('device-1');
   assert.equal(restored.deviceId, 'device-1');
   assert.equal(restored.publicKeyPem, key);
-  second.revoke('device-1');
-  assert.ok(second.get('device-1').revokedAt);
+  const forgotten = second.revoke('device-1');
+  assert.equal(forgotten.deviceId, 'device-1');
+  assert.ok(forgotten.forgottenAt);
+  assert.equal(second.get('device-1'), null);
+  assert.equal(second.list().length, 0);
   second.close();
 });
 
@@ -176,8 +179,8 @@ test('authorization generations are monotonic and serialized authorization rejec
   assert.equal(store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 3 }, () => 'ok'), 'ok');
   assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 1 }, () => {}), /authorization changed|revoked|stale/i);
   store.revoke('generation-device');
-  assert.equal(store.get('generation-device').authorizationGeneration, 4);
-  assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 4 }, () => {}), /authorization changed|revoked|stale/i);
+  assert.equal(store.get('generation-device'), null);
+  assert.throws(() => store.withCurrentAuthorization({ deviceId: 'generation-device', publicKeyPem: a, authorizationGeneration: 3 }, () => {}), /authorization changed|revoked|stale/i);
 });
 
 test('legacy device registry migrates authorization generation idempotently', t => {
@@ -240,4 +243,26 @@ test('device store rejects stale expected key during rotation', t => {
     /current key changed/i
   );
   assert.equal(store.get('cas-device').publicKeyPem, secondKey);
+});
+
+test('enrollment-time guard rejects late metrics from a forgotten incarnation after re-pair', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-store-incarnation-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let now = '2026-09-21T10:00:00.000Z';
+  const store = createDeviceStore({ dbPath, now: () => now });
+  t.after(() => store.close());
+  const firstKey = publicKeyPem();
+  const secondKey = publicKeyPem();
+
+  store.enroll({ deviceId: 'same-id', publicKeyPem: firstKey });
+  const oldCallStartedAt = Date.parse('2026-09-21T10:00:01.000Z');
+  assert.equal(store.containsEnrollmentAt('same-id', oldCallStartedAt), true);
+  store.revoke('same-id');
+  assert.equal(store.containsEnrollmentAt('same-id', oldCallStartedAt), false);
+
+  now = '2026-09-21T10:00:05.000Z';
+  store.enroll({ deviceId: 'same-id', publicKeyPem: secondKey });
+  assert.equal(store.containsEnrollmentAt('same-id', oldCallStartedAt), false);
+  assert.equal(store.containsEnrollmentAt('same-id', Date.parse('2026-09-21T10:00:06.000Z')), true);
 });

@@ -42,10 +42,21 @@ export function createRemoteProcessSessionRegistry(options = {}) {
     return record;
   }
 
+  function removeByDevice(deviceId) {
+    const target = String(deviceId || '');
+    let removed = 0;
+    for (const [sessionId, record] of sessions) {
+      if (record.deviceId !== target) continue;
+      sessions.delete(sessionId);
+      removed += 1;
+    }
+    return removed;
+  }
+
   function size() {
     sweep();
     return sessions.size;
   }
 
-  return { register, resolve, remove, size };
+  return { register, resolve, remove, removeByDevice, size };
 }

@@ -543,9 +543,7 @@ test('external revocation invalidates a live session before dispatch', async t =
   );
   const result = await closed;
   assert.equal(result.code, 4004);
-  const [device] = broker.listDevices();
-  assert.equal(device.online, false);
-  assert.equal(device.revoked, true);
+  assert.equal(broker.listDevices().length, 0);
 });
 
 test('external rotation rejects a pending stale-session result without replay', async t => {
@@ -625,17 +623,19 @@ test('invalid signature cannot authenticate an enrolled identity', async t => {
 test('revocation disconnects an online device and blocks later reconnect', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-'));
   const dbPath = path.join(dir, 'devices.sqlite');
-  const { broker, port } = await createHarness(t, dbPath);
+  const { store, broker, port } = await createHarness(t, dbPath);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const keys = keyPair();
 
   const ws = await openSocket(port, 'dev-secret');
   await enroll(ws, { deviceId: 'revoked-device', ...keys });
   const closed = new Promise(resolve => ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
-  broker.revokeDevice('revoked-device');
+  const forgotten = broker.revokeDevice('revoked-device');
   const closeResult = await closed;
   assert.equal(closeResult.code, 4004);
-  assert.equal(broker.listDevices()[0].revoked, true);
+  assert.equal(forgotten.forgotten, true);
+  assert.equal(broker.listDevices().length, 0);
+  assert.equal(store.get('revoked-device'), null);
 
   const reconnecting = await openSocket(port);
   const reconnectClosed = new Promise(resolve => reconnecting.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));

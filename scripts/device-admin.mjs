@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createDeviceAuditRecorder } from './device-audit.mjs';
 import { createDeviceStore } from './device-store.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +20,7 @@ if (
 }
 
 const store = createDeviceStore({ dbPath });
+const audit = createDeviceAuditRecorder({ auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'), enabled: false });
 try {
   if (command === 'enroll' || command === 'rotate') {
     const firstKeyPem = fs.readFileSync(path.resolve(firstKeyPath), 'utf8');
@@ -32,8 +34,10 @@ try {
     console.log(JSON.stringify({ ok: true, deviceId: result.deviceId, enrolledAt: result.enrolledAt }));
   } else {
     const result = store.revoke(deviceId);
-    console.log(JSON.stringify({ ok: true, deviceId: result.deviceId, revokedAt: result.revokedAt }));
+    audit.recordEvent({ event: 'device_forgotten', callerCategory: 'admin_cli', deviceId: result.deviceId });
+    console.log(JSON.stringify({ ok: true, deviceId: result.deviceId, forgottenAt: result.forgottenAt }));
   }
 } finally {
+  audit.close();
   store.close();
 }

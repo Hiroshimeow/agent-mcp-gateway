@@ -152,6 +152,8 @@ export function createDeviceBroker(options = {}) {
   const deviceStore = options.deviceStore || null;
   const pairingStore = options.pairingStore || null;
   const usageStore = options.usageStore || null;
+  const auditRecorder = options.auditRecorder || null;
+  const onDeviceForgotten = typeof options.onDeviceForgotten === 'function' ? options.onDeviceForgotten : null;
   const innerTls = options.innerTls || null;
   const durableAuth = Boolean(deviceStore);
   const requireAccountOwnership = options.requireAccountOwnership !== false;
@@ -162,6 +164,7 @@ export function createDeviceBroker(options = {}) {
   const pending = new Map();
   const pendingByWireRequestId = new Map();
   const updateStates = new Map();
+  const activityStates = new Map();
   const sockets = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
   let attachedServer = null;
@@ -197,6 +200,55 @@ export function createDeviceBroker(options = {}) {
       status,
       connectionEpoch: device.connectionEpoch || 0,
       agentVersion: device.agentVersion || null
+    });
+  }
+
+  function noteActivitySent(deviceId, tool) {
+    const previous = activityStates.get(deviceId) || {};
+    activityStates.set(deviceId, {
+      ...previous,
+      lastTool: String(tool || previous.lastTool || ''),
+      lastSentAt: Date.now()
+    });
+  }
+
+  function noteActivityFinished(deviceId, tool, outcome = 'success') {
+    const previous = activityStates.get(deviceId) || {};
+    activityStates.set(deviceId, {
+      ...previous,
+      lastTool: String(tool || previous.lastTool || ''),
+      lastReceivedAt: Date.now(),
+      lastOutcome: String(outcome || 'success')
+    });
+  }
+
+  function getActivitySnapshot({ accountId = null } = {}) {
+    const owner = String(accountId || '').trim();
+    if (durableAuth && requireAccountOwnership && !owner) return [];
+    const pendingByDevice = new Map();
+    for (const entry of pending.values()) {
+      const current = pendingByDevice.get(entry.deviceId) || { count: 0, tool: null, startedAt: 0 };
+      current.count += 1;
+      if (Number(entry.startedAt || 0) >= current.startedAt) {
+        current.startedAt = Number(entry.startedAt || 0);
+        current.tool = entry.tool || current.tool;
+      }
+      pendingByDevice.set(entry.deviceId, current);
+    }
+    return [...devices.values()].flatMap(device => {
+      const stored = durableAuth ? deviceStore.get(device.deviceId) : null;
+      if (durableAuth && !stored) return [];
+      if (owner && stored?.ownerAccountId !== owner) return [];
+      const activity = activityStates.get(device.deviceId) || {};
+      const active = pendingByDevice.get(device.deviceId) || { count: 0, tool: null };
+      return [{
+        deviceId: device.deviceId,
+        inFlight: active.count,
+        tool: active.tool || activity.lastTool || null,
+        lastSentAt: activity.lastSentAt || null,
+        lastReceivedAt: activity.lastReceivedAt || null,
+        lastOutcome: activity.lastOutcome || null
+      }];
     });
   }
 
@@ -257,11 +309,21 @@ export function createDeviceBroker(options = {}) {
 
   if (durableAuth) {
     for (const stored of deviceStore.list()) {
+      if (stored.revokedAt) {
+        deviceStore.revoke(stored.deviceId);
+        auditRecorder?.recordEvent?.({
+          event: 'legacy_revoked_device_purged',
+          callerCategory: 'migration',
+          deviceId: stored.deviceId,
+          details: { deviceName: stored.deviceName || stored.deviceId }
+        });
+        continue;
+      }
       devices.set(stored.deviceId, {
         deviceId: stored.deviceId,
         socket: null,
         online: false,
-        revoked: Boolean(stored.revokedAt),
+        revoked: false,
         connectionEpoch: 0,
         agentVersion: stored.agentVersion || 'unknown',
         packageVersion: stored.packageVersion || null,
@@ -285,6 +347,7 @@ export function createDeviceBroker(options = {}) {
       if (pending.get(requestId) !== entry) continue;
       pending.delete(requestId);
       if (pendingByWireRequestId.get(entry.wireRequestId) === entry) pendingByWireRequestId.delete(entry.wireRequestId);
+      noteActivityFinished(entry.deviceId, entry.tool, 'disconnected');
       entry.reject(new Error(reason));
     }
   }
@@ -337,13 +400,28 @@ export function createDeviceBroker(options = {}) {
       connectionEpoch,
       `${reason} before the request result was known; the request was not replayed.`
     );
-    device.revoked = Boolean(revoked);
+    if (revoked) {
+      updateStates.delete(device.deviceId);
+      activityStates.delete(device.deviceId);
+      devices.delete(device.deviceId);
+      try { onDeviceForgotten?.({ deviceId: device.deviceId, accountId: null }); }
+      catch (error) { console.error(`[device-broker] device cleanup callback failed: ${error.message}`); }
+      auditRecorder?.recordEvent?.({
+        event: 'device_forget_observed',
+        callerCategory: 'broker',
+        deviceId: device.deviceId,
+        details: { reason: String(reason || 'authorization removed').slice(0, 160) }
+      });
+      if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
+      return;
+    }
+    device.revoked = false;
     device.online = false;
     device.socket = null;
     device.lastSeenAt = Date.now();
     device.authenticatedPublicKeyPem = null;
     device.authenticatedAuthorizationGeneration = null;
-    recordDeviceStatus(device, revoked ? 'revoked' : 'offline');
+    recordDeviceStatus(device, 'offline');
     if (socket?.readyState === WebSocket.OPEN) socket.close(closeCode, reason.slice(0, 120));
   }
 
@@ -657,6 +735,7 @@ export function createDeviceBroker(options = {}) {
       clearTimeout(entry.timer);
       pending.delete(entry.requestId);
       if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
+      noteActivityFinished(device.deviceId, entry.tool, message.type === 'tool_error' ? 'error' : 'success');
       if (message.type === 'tool_error') {
         const error = new Error(String(message.payload?.message || 'Remote device tool error.'));
         error.code = String(message.payload?.code || 'REMOTE_DEVICE_ERROR').slice(0, 64);
@@ -824,32 +903,47 @@ export function createDeviceBroker(options = {}) {
     return statusForDevice(current);
   }
 
-  function revokeDevice(deviceId) {
+  function revokeDevice(deviceId, { accountId = null, callerCategory = 'system' } = {}) {
     if (!durableAuth) throw new Error('Durable device store is required for revocation.');
     const normalized = normalizeDeviceId(deviceId);
-    const stored = deviceStore.revoke(normalized);
+    const stored = deviceStore.get(normalized);
+    if (!stored) throw new Error(`Unknown device ${normalized}.`);
     const current = devices.get(normalized) || { deviceId: normalized, connectionEpoch: 0, capabilities: [] };
+
+    deviceStore.revoke(normalized);
     if (current.socket) {
       rejectPendingForConnection(
         normalized,
         current.connectionEpoch,
-        'Device was revoked before the request result was known; the request was not replayed.'
+        'Device was forgotten before the request result was known; the request was not replayed.'
       );
     }
-    current.revoked = true;
-    current.online = false;
-    if (current.socket?.readyState === WebSocket.OPEN) current.socket.close(4004, 'device revoked');
-    current.socket = null;
-    current.authenticatedPublicKeyPem = null;
-    current.authenticatedAuthorizationGeneration = null;
-    devices.set(normalized, current);
-    recordDeviceStatus(current, 'revoked');
-    return statusForDevice(current);
+    updateStates.delete(normalized);
+    activityStates.delete(normalized);
+    devices.delete(normalized);
+    try {
+      onDeviceForgotten?.({ deviceId: normalized, accountId: stored.ownerAccountId || null });
+    } catch (error) {
+      console.error(`[device-broker] device cleanup callback failed: ${error.message}`);
+    }
+    if (current.socket?.readyState === WebSocket.OPEN) current.socket.close(4004, 'device forgotten');
+    auditRecorder?.recordEvent?.({
+      event: 'device_forgotten',
+      callerId: accountId || stored.ownerAccountId || '',
+      callerCategory,
+      deviceId: normalized,
+      details: {
+        deviceName: stored.deviceName || normalized,
+        hostname: stored.hostname || null,
+        packageVersion: stored.packageVersion || null
+      }
+    });
+    return { deviceId: normalized, deviceName: stored.deviceName || normalized, forgotten: true };
   }
 
   function revokeOwnedDevice({ accountId, deviceId }) {
     const stored = requireOwnedDevice(accountId, deviceId);
-    return revokeDevice(stored.deviceId);
+    return revokeDevice(stored.deviceId, { accountId, callerCategory: 'dashboard' });
   }
 
   function requestDeviceUpdate({ accountId, deviceId, targetVersion }) {
@@ -952,24 +1046,31 @@ export function createDeviceBroker(options = {}) {
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
-        entry = { requestId, wireRequestId, resolve, reject, timer: null, deviceId: device.deviceId, connectionEpoch: device.connectionEpoch };
+        entry = {
+          requestId, wireRequestId, resolve, reject, timer: null,
+          deviceId: device.deviceId, connectionEpoch: device.connectionEpoch,
+          tool, startedAt: Date.now()
+        };
         const timer = setTimeout(() => {
           if (pending.get(requestId) !== entry) return;
           pending.delete(requestId);
           if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
           usageStore?.recordToolFailed(device.deviceId, 0, 'DEVICE_REQUEST_TIMEOUT');
+          noteActivityFinished(device.deviceId, tool, 'timeout');
           entry.reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
         }, timeoutMs);
         entry.timer = timer;
         timer.unref?.();
         pending.set(requestId, entry);
         pendingByWireRequestId.set(wireRequestId, entry);
+        noteActivitySent(device.deviceId, tool);
         sendDeviceMessage(device.socket, wireMessage, error => {
           if (!error || pending.get(requestId) !== entry) return;
           clearTimeout(entry.timer);
           pending.delete(requestId);
           if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
           usageStore?.recordToolFailed(device.deviceId, 0, 'DEVICE_SEND_ERROR');
+          noteActivityFinished(device.deviceId, tool, 'send_error');
           entry.reject(error);
         });
       };
@@ -1024,5 +1125,5 @@ export function createDeviceBroker(options = {}) {
     return schemaSnapshot;
   }
 
-  return { attach, listDevices, renameOwnedDevice, revokeDevice, revokeOwnedDevice, requestDeviceUpdate, callDevice, setSchemaSnapshot, shutdown };
+  return { attach, listDevices, getActivitySnapshot, renameOwnedDevice, revokeDevice, revokeOwnedDevice, requestDeviceUpdate, callDevice, setSchemaSnapshot, shutdown };
 }

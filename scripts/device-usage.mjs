@@ -29,6 +29,11 @@ function duration(value) {
   return number;
 }
 
+function sinceMs(value) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
 function timestampMs(value, fallback) {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
   if (value) {
@@ -128,6 +133,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       upstream TEXT
     );
     CREATE INDEX IF NOT EXISTS tool_call_events_account_time_idx ON tool_call_events(account_id, event_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS tool_call_events_account_device_time_idx ON tool_call_events(account_id, device_id, event_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS tool_call_events_activity_idx ON tool_call_events(activity_session_id, event_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS tool_call_events_account_tool_idx ON tool_call_events(account_id, tool);
     CREATE TABLE IF NOT EXISTS skill_load_events (
@@ -187,6 +193,14 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
   if (!activityColumns.some(column => column.name === 'display_name')) {
     db.exec('ALTER TABLE activity_sessions ADD COLUMN display_name TEXT');
   }
+
+  const devicesTablePresent = Boolean(db.prepare(`
+    SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'devices'
+  `).get());
+  const activeDeviceStatement = devicesTablePresent
+    ? db.prepare('SELECT 1 AS present FROM devices WHERE device_id = ?')
+    : null;
+  const deviceIsActive = deviceId => !activeDeviceStatement || Boolean(activeDeviceStatement.get(normalizeDeviceId(deviceId)));
 
   const getStatement = db.prepare('SELECT * FROM device_usage WHERE device_id = ?');
   const connectionStatement = db.prepare(`
@@ -262,6 +276,10 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     SELECT * FROM activity_sessions WHERE account_id = ?
     ORDER BY started_at DESC, activity_session_id DESC LIMIT ?
   `);
+  const listActiveActivities = db.prepare(`
+    SELECT * FROM activity_sessions WHERE account_id = ? AND ended_at IS NULL
+    ORDER BY started_at DESC, activity_session_id DESC LIMIT ?
+  `);
   const insertCatalog = db.prepare(`
     INSERT INTO catalog_events (event_at, account_id, activity_session_id, tool_count, schema_bytes, estimated_tokens, estimation_method)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -288,14 +306,14 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failed,
       COALESCE(SUM(input_bytes),0) AS input_bytes,
       COALESCE(SUM(output_bytes),0) AS output_bytes
-    FROM tool_call_events WHERE account_id = ?
+    FROM tool_call_events WHERE account_id = ? AND event_at >= ?
   `);
   const topToolsForAccount = db.prepare(`
     SELECT tool, COUNT(*) AS calls,
       COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS failures,
       COALESCE(SUM(input_bytes),0) AS input_bytes,
       COALESCE(SUM(output_bytes),0) AS output_bytes
-    FROM tool_call_events WHERE account_id = ?
+    FROM tool_call_events WHERE account_id = ? AND event_at >= ?
     GROUP BY tool ORDER BY calls DESC, tool ASC LIMIT 10
   `);
   const deviceUsageForAccount = db.prepare(`
@@ -306,7 +324,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       COALESCE(SUM(input_bytes),0) AS input_bytes,
       COALESCE(SUM(output_bytes),0) AS output_bytes
     FROM tool_call_events
-    WHERE account_id = ? AND device_id IS NOT NULL
+    WHERE account_id = ? AND device_id IS NOT NULL AND event_at >= ?
     GROUP BY device_id ORDER BY device_id ASC
   `);
   const deviceToolUsageForAccount = db.prepare(`
@@ -315,12 +333,12 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       COALESCE(SUM(input_bytes),0) AS input_bytes,
       COALESCE(SUM(output_bytes),0) AS output_bytes
     FROM tool_call_events
-    WHERE account_id = ? AND device_id = ?
+    WHERE account_id = ? AND device_id = ? AND event_at >= ?
     GROUP BY tool ORDER BY calls DESC, tool ASC
   `);
   const recentErrorsForAccount = db.prepare(`
     SELECT event_at, device_id, tool, error_code
-    FROM tool_call_events WHERE account_id = ? AND status='error'
+    FROM tool_call_events WHERE account_id = ? AND status='error' AND event_at >= ?
     ORDER BY event_at DESC, id DESC LIMIT 20
   `);
   const activityDevicesForAccountSession = db.prepare(`
@@ -337,7 +355,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     FROM tool_call_events e
     LEFT JOIN activity_sessions a
       ON a.activity_session_id = e.activity_session_id AND a.account_id = e.account_id
-    WHERE e.account_id = ? AND e.device_id = ?
+    WHERE e.account_id = ? AND e.device_id = ? AND e.event_at >= ?
     ORDER BY e.event_at DESC, e.id DESC
     LIMIT ?
   `);
@@ -347,13 +365,13 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
       COALESCE(SUM(output_bytes),0) AS output_bytes,
       COALESCE(SUM(estimated_tokens),0) AS estimated_tokens,
       MAX(estimation_method) AS estimation_method
-    FROM skill_load_events WHERE account_id = ?
+    FROM skill_load_events WHERE account_id = ? AND event_at >= ?
     GROUP BY skill_name ORDER BY loads DESC, skill_name ASC LIMIT 20
   `);
-  const catalogCountForAccount = db.prepare('SELECT COUNT(*) AS calls FROM catalog_events WHERE account_id = ?');
+  const catalogCountForAccount = db.prepare('SELECT COUNT(*) AS calls FROM catalog_events WHERE account_id = ? AND event_at >= ?');
   const latestCatalogForAccount = db.prepare(`
     SELECT tool_count, schema_bytes, estimated_tokens, estimation_method, event_at
-    FROM catalog_events WHERE account_id = ? ORDER BY event_at DESC, id DESC LIMIT 1
+    FROM catalog_events WHERE account_id = ? AND event_at >= ? ORDER BY event_at DESC, id DESC LIMIT 1
   `);
   const deviceStatusForAccount = db.prepare(`
     SELECT event_at, device_id, status, connection_epoch, agent_version
@@ -365,27 +383,32 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
   }
 
   function recordConnection(deviceId, { reconnect = false } = {}) {
+    if (!deviceIsActive(deviceId)) return get(deviceId);
     connectionStatement.run(normalizeDeviceId(deviceId), reconnect ? 1 : 0, Number(now()));
     return get(deviceId);
   }
 
   function recordToolStarted(deviceId, requestBytes = 0) {
+    if (!deviceIsActive(deviceId)) return get(deviceId);
     startedStatement.run(normalizeDeviceId(deviceId), bytes(requestBytes), Number(now()));
     return get(deviceId);
   }
 
   function recordToolSucceeded(deviceId, responseBytes = 0) {
+    if (!deviceIsActive(deviceId)) return get(deviceId);
     succeededStatement.run(normalizeDeviceId(deviceId), bytes(responseBytes), Number(now()));
     return get(deviceId);
   }
 
   function recordToolFailed(deviceId, responseBytes = 0, errorCode = 'REMOTE_DEVICE_ERROR') {
+    if (!deviceIsActive(deviceId)) return get(deviceId);
     const code = String(errorCode || 'REMOTE_DEVICE_ERROR').slice(0, 64);
     failedStatement.run(normalizeDeviceId(deviceId), bytes(responseBytes), Number(now()), code);
     return get(deviceId);
   }
 
   function touch(deviceId) {
+    if (!deviceIsActive(deviceId)) return get(deviceId);
     touchStatement.run(normalizeDeviceId(deviceId), Number(now()));
     return get(deviceId);
   }
@@ -395,6 +418,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     const accountId = boundedText(metric.accountId, 128);
     const activitySessionId = boundedText(metric.activitySessionId, 128);
     const deviceId = metric.deviceId ? normalizeDeviceId(metric.deviceId) : null;
+    if (deviceId && !deviceIsActive(deviceId)) return false;
     const tool = boundedText(metric.tool, 128, { required: true });
     const success = metric.success === true;
     const errorCode = success ? null : boundedText(metric.errorCode || metric.error || 'TOOL_ERROR', 64);
@@ -412,6 +436,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
         outputBytes, Math.ceil(outputBytes / 4), TOKEN_ESTIMATION_METHOD
       );
     }
+    return true;
   }
 
   function openActivitySession({ activitySessionId, accountId, clientId = null } = {}) {
@@ -461,10 +486,11 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     return rowToActivity(getActivity.get(id));
   }
 
-  function listActivitySessions(accountId, { limit = 50 } = {}) {
+  function listActivitySessions(accountId, { limit = 50, activeOnly = false } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
     const boundedLimit = Math.max(1, Math.min(200, Number.isInteger(Number(limit)) ? Number(limit) : 50));
-    return listActivities.all(owner, boundedLimit).map(rowToActivity);
+    const statement = activeOnly ? listActiveActivities : listActivities;
+    return statement.all(owner, boundedLimit).map(rowToActivity);
   }
 
   function recordCatalogList({ accountId = null, activitySessionId = null, toolCount = 0, schemaBytes = 0, estimatedTokens, estimationMethod = TOKEN_ESTIMATION_METHOD } = {}) {
@@ -491,17 +517,20 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
   }
 
   function recordDeviceStatus(deviceId, { accountId = null, status, connectionEpoch = 0, agentVersion = null } = {}) {
+    if (!deviceIsActive(deviceId)) return false;
     const state = String(status || '').trim();
     if (!['online', 'offline', 'revoked'].includes(state)) throw new Error('Invalid device status event.');
     const epoch = Math.max(0, Math.floor(Number(connectionEpoch) || 0));
     insertDeviceStatus.run(
       Number(now()), boundedText(accountId, 128), normalizeDeviceId(deviceId), state, epoch, boundedText(agentVersion, 64)
     );
+    return true;
   }
 
-  function getDeviceUsageForAccount(accountId) {
+  function getDeviceUsageForAccount(accountId, { since = 0 } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
-    return deviceUsageForAccount.all(owner).map(row => {
+    const from = sinceMs(since);
+    return deviceUsageForAccount.all(owner, from).map(row => {
       const inputBytes = Number(row.input_bytes);
       const outputBytes = Number(row.output_bytes);
       return {
@@ -518,10 +547,11 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     });
   }
 
-  function getDeviceToolUsage(accountId, deviceId) {
+  function getDeviceToolUsage(accountId, deviceId, { since = 0 } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
     const normalizedDeviceId = normalizeDeviceId(deviceId);
-    return deviceToolUsageForAccount.all(owner, normalizedDeviceId).map(row => ({
+    const from = sinceMs(since);
+    return deviceToolUsageForAccount.all(owner, normalizedDeviceId, from).map(row => ({
       tool: row.tool,
       calls: Number(row.calls),
       failures: Number(row.failures),
@@ -537,11 +567,12 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     return activityDevicesForAccountSession.all(owner, sessionId, boundedLimit).map(row => row.device_id);
   }
 
-  function getDeviceRecentToolCalls(accountId, deviceId, { limit = 20 } = {}) {
+  function getDeviceRecentToolCalls(accountId, deviceId, { limit = 20, since = 0 } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     const boundedLimit = Math.max(1, Math.min(20, Number.isInteger(Number(limit)) ? Number(limit) : 20));
-    return recentDeviceCallsForAccount.all(owner, normalizedDeviceId, boundedLimit).map(row => ({
+    const from = sinceMs(since);
+    return recentDeviceCallsForAccount.all(owner, normalizedDeviceId, from, boundedLimit).map(row => ({
       eventAt: Number(row.event_at),
       activitySessionId: row.activity_session_id || null,
       clientId: row.client_id || null,
@@ -554,10 +585,11 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
     }));
   }
 
-  function getAccountUsage(accountId) {
+  function getAccountUsage(accountId, { since = 0 } = {}) {
     const owner = boundedText(accountId, 128, { required: true });
-    const totalsRow = totalsForAccount.get(owner);
-    const latestCatalog = latestCatalogForAccount.get(owner);
+    const from = sinceMs(since);
+    const totalsRow = totalsForAccount.get(owner, from);
+    const latestCatalog = latestCatalogForAccount.get(owner, from);
     return {
       totals: {
         toolCalls: Number(totalsRow.tool_calls),
@@ -566,19 +598,19 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
         inputBytes: Number(totalsRow.input_bytes),
         outputBytes: Number(totalsRow.output_bytes)
       },
-      topTools: topToolsForAccount.all(owner).map(row => ({
+      topTools: topToolsForAccount.all(owner, from).map(row => ({
         tool: row.tool, calls: Number(row.calls), failures: Number(row.failures),
         inputBytes: Number(row.input_bytes), outputBytes: Number(row.output_bytes)
       })),
-      recentErrors: recentErrorsForAccount.all(owner).map(row => ({
+      recentErrors: recentErrorsForAccount.all(owner, from).map(row => ({
         eventAt: Number(row.event_at), deviceId: row.device_id || null, tool: row.tool, errorCode: row.error_code || null
       })),
-      skillLoads: skillLoadsForAccount.all(owner).map(row => ({
+      skillLoads: skillLoadsForAccount.all(owner, from).map(row => ({
         skillName: row.skill_name, loads: Number(row.loads), failures: Number(row.failures),
         outputBytes: Number(row.output_bytes), estimatedTokens: Number(row.estimated_tokens), estimationMethod: row.estimation_method
       })),
       catalog: {
-        listCalls: Number(catalogCountForAccount.get(owner).calls),
+        listCalls: Number(catalogCountForAccount.get(owner, from).calls),
         lastToolCount: latestCatalog ? Number(latestCatalog.tool_count) : null,
         lastSchemaBytes: latestCatalog ? Number(latestCatalog.schema_bytes) : null,
         estimatedTokens: latestCatalog ? Number(latestCatalog.estimated_tokens) : null,
@@ -586,7 +618,7 @@ export function createDeviceUsageStore({ dbPath, now = () => Date.now() } = {}) 
         lastSeenAt: latestCatalog ? Number(latestCatalog.event_at) : null
       },
       schema: getSchemaSnapshot(),
-      activitySessions: listActivitySessions(owner),
+      activitySessions: listActivitySessions(owner, { activeOnly: true }),
       deviceStatusEvents: deviceStatusForAccount.all(owner).map(row => ({
         eventAt: Number(row.event_at), deviceId: row.device_id, status: row.status,
         connectionEpoch: Number(row.connection_epoch), agentVersion: row.agent_version || null

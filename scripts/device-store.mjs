@@ -103,10 +103,8 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
     SET public_key_pem = ?, authorization_generation = authorization_generation + 1
     WHERE device_id = ? AND public_key_pem = ? AND revoked_at IS NULL
   `);
-  const revokeStatement = db.prepare(`
-    UPDATE devices
-    SET revoked_at = ?, authorization_generation = authorization_generation + 1
-    WHERE device_id = ? AND revoked_at IS NULL
+  const tableExistsStatement = db.prepare(`
+    SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?
   `);
   const metadataStatement = db.prepare(`
     UPDATE devices
@@ -130,6 +128,14 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function list() {
     return listStatement.all().map(rowToDevice);
+  }
+
+  function containsEnrollmentAt(deviceId, startedAt) {
+    const current = get(deviceId);
+    if (!current) return false;
+    const enrolledAt = Date.parse(String(current.enrolledAt || ''));
+    const started = Number(startedAt);
+    return Number.isFinite(enrolledAt) && Number.isFinite(started) && enrolledAt <= started;
   }
 
   function enroll({ deviceId, publicKeyPem, deviceName = null, ownerAccountId = null, accountLabel = null, hostname = null, platform = null, arch = null, pathStyle = null, agentVersion = null, packageVersion = null, minProtocol = 1 }) {
@@ -224,13 +230,30 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function revoke(deviceId) {
     const normalizedId = normalizeDeviceId(deviceId);
-    const result = revokeStatement.run(now(), normalizedId);
-    if (Number(result.changes) === 0) {
-      const existing = get(normalizedId);
-      if (!existing) throw new Error(`Unknown device ${normalizedId}.`);
-      return existing;
+    const existing = get(normalizedId);
+    if (!existing) throw new Error(`Unknown device ${normalizedId}.`);
+
+    const deletes = [
+      ['device_pairings', 'DELETE FROM device_pairings WHERE device_id = ?'],
+      ['device_usage', 'DELETE FROM device_usage WHERE device_id = ?'],
+      ['tool_call_events', 'DELETE FROM tool_call_events WHERE device_id = ?'],
+      ['device_status_events', 'DELETE FROM device_status_events WHERE device_id = ?']
+    ];
+    let began = false;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      began = true;
+      for (const [table, sql] of deletes) {
+        if (tableExistsStatement.get(table)) db.prepare(sql).run(normalizedId);
+      }
+      db.prepare('DELETE FROM devices WHERE device_id = ?').run(normalizedId);
+      db.exec('COMMIT');
+      began = false;
+    } catch (error) {
+      if (began) { try { db.exec('ROLLBACK'); } catch {} }
+      throw error;
     }
-    return get(normalizedId);
+    return { ...existing, forgottenAt: now() };
   }
 
   function withCurrentAuthorization({ deviceId, publicKeyPem, authorizationGeneration }, callback) {
@@ -256,5 +279,5 @@ export function createDeviceStore({ dbPath, now = () => new Date().toISOString()
 
   function close() { db.close(); }
 
-  return { get, list, enroll, rotate, updateMetadata, assignOwner, raiseProtocolFloor, revoke, withCurrentAuthorization, close };
+  return { get, list, containsEnrollmentAt, enroll, rotate, updateMetadata, assignOwner, raiseProtocolFloor, revoke, withCurrentAuthorization, close };
 }

@@ -55,3 +55,13 @@ test('device inventory pagination is stable, bounded, and reports truncation', (
     /cursor/i
   );
 });
+
+test('revoked legacy entries never reach list_devices output or totals', () => {
+  const page = paginateDeviceInventory([
+    { deviceId: 'active', online: true, revoked: false, capabilities: [] },
+    { deviceId: 'legacy-revoked', online: false, revoked: true, capabilities: [] }
+  ]);
+  assert.equal(page.total, 1);
+  assert.deepEqual(page.devices.map(item => item.device_id), ['active']);
+  assert.equal(page.devices[0].revoked, false);
+});

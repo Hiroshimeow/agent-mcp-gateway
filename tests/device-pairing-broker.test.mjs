@@ -331,7 +331,7 @@ test('account ownership filters inventory and is rechecked at every device dispa
   );
 });
 
-test('normal account can rename and revoke only its own device with immediate routing cutoff', async t => {
+test('normal account revoke hard-forgets its own device and a later pair is a fresh enrollment', async t => {
   const f = await fixture(t);
   const keys = keyPair();
   const grant = approvedGrant(f.pairingStore, {
@@ -356,16 +356,28 @@ test('normal account can rename and revoke only its own device with immediate ro
     () => f.broker.revokeOwnedDevice({ accountId: 'account-bob', deviceId: 'self-service-device' }),
     /DEVICE_ACCESS_DENIED/
   );
-  const revoked = f.broker.revokeOwnedDevice({ accountId: 'account-example', deviceId: 'self-service-device' });
-  assert.equal(revoked.revoked, true);
+  const forgotten = f.broker.revokeOwnedDevice({ accountId: 'account-example', deviceId: 'self-service-device' });
+  assert.equal(forgotten.forgotten, true);
+  assert.equal(f.deviceStore.get('self-service-device'), null);
+  assert.equal(f.broker.listDevices({ accountId: 'account-example' }).length, 0);
+  assert.equal(f.usageStore.getAccountUsage('account-example').deviceStatusEvents.length, 0);
   await assert.rejects(
     () => f.broker.callDevice({ accountId: 'account-example', deviceId: 'self-service-device', tool: 'ping' }),
     error => error.code === 'DEVICE_OFFLINE'
   );
 
-  const events = f.usageStore.getAccountUsage('account-example').deviceStatusEvents;
-  assert.equal(events[0].status, 'revoked');
-  assert.ok(events.some(event => event.status === 'online'));
+  const nextKeys = keyPair();
+  const nextGrant = approvedGrant(f.pairingStore, {
+    deviceId: 'self-service-device', deviceName: 'Paired Again', publicKeyPem: nextKeys.publicKeyPem
+  });
+  const nextWs = await openSocket(f.port, nextGrant.enrollmentGrant);
+  t.after(() => nextWs.close());
+  const nextChallenge = await sendEnrollHello(nextWs, { deviceId: 'self-service-device', publicKeyPem: nextKeys.publicKeyPem });
+  await answerChallenge(nextWs, { deviceId: 'self-service-device', privateKey: nextKeys.privateKey, challenge: nextChallenge });
+  const [pairedAgain] = f.broker.listDevices({ accountId: 'account-example' });
+  assert.equal(pairedAgain.deviceName, 'Paired Again');
+  assert.equal(pairedAgain.online, true);
+  assert.notEqual(f.deviceStore.get('self-service-device').publicKeyPem, keys.publicKeyPem);
   assert.equal(f.usageStore.getAccountUsage('account-bob').deviceStatusEvents.length, 0);
 });
 

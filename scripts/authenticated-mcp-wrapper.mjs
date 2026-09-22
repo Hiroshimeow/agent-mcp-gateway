@@ -126,20 +126,22 @@ const accountStore = createAccountStore({ dbPath: gatewayDbPath });
 const deviceStore = createDeviceStore({ dbPath: gatewayDbPath });
 const devicePairingStore = createDevicePairingStore({ dbPath: gatewayDbPath });
 const deviceUsageStore = createDeviceUsageStore({ dbPath: gatewayDbPath });
+const deviceAudit = createDeviceAuditRecorder({
+  auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
+  enabled: envFlag(process.env.MCP_DEVICE_AUDIT_ENABLED, false)
+});
 const deviceBroker = createDeviceBroker({
   enrollmentToken: process.env.MCP_DEVICE_ENROLLMENT_TOKEN,
   deviceStore,
   pairingStore: devicePairingStore,
   usageStore: deviceUsageStore,
+  auditRecorder: deviceAudit,
+  onDeviceForgotten: ({ deviceId }) => remoteProcessSessions.removeByDevice(deviceId),
   innerTls: loadDeviceInnerTlsConfig(process.env)
 });
 const deviceAccessPolicy = createDeviceAccessPolicy({
   raw: process.env.MCP_DEVICE_ACCESS_POLICY || '',
   profile: runtimeProfile.name
-});
-const deviceAudit = createDeviceAuditRecorder({
-  auditPath: path.join(runtimeDirectory, 'device-audit.jsonl'),
-  enabled: envFlag(process.env.MCP_DEVICE_AUDIT_ENABLED, false)
 });
 
 const skillRegistry = createSkillRegistry({ directory: path.join(packageRoot, 'scripts', 'skills') });
@@ -593,9 +595,16 @@ async function routeToolCall(request, context = {}) {
   throw new Error(`Unknown or disabled tool: ${toolName}`);
 }
 
-function recordToolUsage(metric) {
+function metricBelongsToCurrentDeviceEnrollment(metric, startedAt) {
+  const deviceId = String(metric?.deviceId || '').trim();
+  return !deviceId || deviceStore.containsEnrollmentAt(deviceId, startedAt);
+}
+
+function recordToolUsage(metric, startedAt) {
   try {
-    deviceUsageStore.recordToolCall(metric);
+    if (metricBelongsToCurrentDeviceEnrollment(metric, startedAt)) {
+      deviceUsageStore.recordToolCall(metric);
+    }
   } catch (error) {
     console.error(`[usage-store] tool event persist failed: ${error.message}`);
   }
@@ -626,7 +635,7 @@ async function routeObservedToolCall(request, context) {
       skillName,
       upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null
     });
-    recordToolUsage(metric);
+    recordToolUsage(metric, startedAt);
     return result;
   } catch (error) {
     const durationMs = Date.now() - startedAt;
@@ -643,7 +652,7 @@ async function routeObservedToolCall(request, context) {
       upstream: externalMcpManager.isExternalToolName(toolName) ? 'external-mcp' : null,
       error
     });
-    recordToolUsage(metric);
+    recordToolUsage(metric, startedAt);
     throw error;
   }
 }
@@ -680,7 +689,7 @@ function createProxyServer({ era = 'legacy', accountId, activitySessionId, calle
     {
       name: metadata.name,
       title: metadata.title,
-      version: '2.0.0',
+      version: gatewayPackageVersion,
       description: metadata.description
     },
     {

@@ -173,13 +173,21 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /16\s+tools/i);
     assert.match(html, /15,297|15297/);
     assert.match(html, /Usage for this account/i);
+    assert.match(html, /rolling 24H window/i);
+    assert.match(html, /href="\/dashboard\?range=day" class="active"|class="active" href="\/dashboard\?range=day"/);
+    assert.match(html, /Search name \/ host \/ id/);
+    assert.match(html, /All status/);
+    assert.match(html, /Recent activity/);
+    assert.match(html, /IN = gateway → device/);
+    assert.match(html, /OUT = device → gateway/);
+    assert.match(html, /v1\.0\.0 · testsha/);
     assert.match(html, /Estimated tokens/i);
     assert.match(html, /~216/);
     assert.doesNotMatch(html, /Estimated I\/O tokens|Estimated schema context|not billing tokens|estimated context size/i);
     assert.match(html, /Alice Laptop/);
     assert.match(html, /alice-laptop/);
-    assert.match(html, /href="\/dashboard\/devices\/alice-device"/);
-    assert.match(html, /href="\/dashboard\/devices\/alice-laptop"/);
+    assert.match(html, /href="\/dashboard\/devices\/alice-device\?range=day"/);
+    assert.match(html, /href="\/dashboard\/devices\/alice-laptop\?range=day"/);
     assert.doesNotMatch(html, /Platform \/ agent|agent ignored/i);
     assert.match(html, /<th>Device<\/th><th>Version<\/th><th>Last seen<\/th><th>OK \/ Fail<\/th><th>Input \/ Output<\/th><th>Estimated tokens<\/th>/);
     assert.match(html, /<code>1\.0\.5<\/code><small>latest 1\.0\.6<\/small>/);
@@ -192,13 +200,15 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /60 B/);
     assert.match(html, /80 B/);
     assert.match(html, /~35/);
-    assert.match(html, /Alice Idle[\s\S]*?alice-idle · offline[\s\S]*?<td>—<\/td>\s*<td>0 \/ 0<\/td>\s*<td>0 B \/ 0 B<\/td>\s*<td>~0<\/td>/);
-    assert.match(html, /section\{overflow-x:auto\}/);
+    assert.match(html, /Alice Idle[\s\S]*?alice-idle · offline[\s\S]*?<td>—<\/td>\s*<td>0 \/ 0<\/td>\s*<td><span[^>]*>IN 0 B<\/span>[\s\S]*?OUT 0 B<\/span><\/td>\s*<td>~0<\/td>/);
+    assert.match(html, /section,\.panel-details\{overflow-x:auto\}/);
     assert.match(html, /table\{min-width:760px\}/);
     assert.match(html, /shell_execute/);
     assert.match(html, /mcp-builder/);
     assert.match(html, /UNKNOWN_SKILL/);
     assert.match(html, /OAuth client sessions/i);
+    assert.match(html, /<details class="panel-details"[^>]*data-collapse-key="oauth-sessions"/);
+    assert.match(html, />2<\/span> active/);
     assert.match(html, /ChatGPT/);
     assert.match(html, /Pi Coding Agent/);
     assert.match(html, /<th>OAuth client<\/th>[\s\S]*?<th>Started<\/th>[\s\S]*?<th>Last seen<\/th>[\s\S]*?<th>Client session<\/th>[\s\S]*?<th>State<\/th>/);
@@ -212,6 +222,7 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.doesNotMatch(html, /action="\/dashboard\/devices\/alice-device\/revoke"/);
     assert.match(html, /visibilityState/);
     assert.match(html, /\/dashboard\/state/);
+    assert.match(html, /\/dashboard\/activity/);
     assert.match(html, /fetch\(/);
     assert.match(html, /dirty/);
     assert.doesNotMatch(html, /location\.reload\(/);
@@ -249,10 +260,10 @@ test('device usage detail is account-owned and aggregates only that device tools
     assert.match(html, /alice-activity/);
     assert.doesNotMatch(html, /NEVER_RENDER_REQUEST_BODY|NEVER_RENDER_RESPONSE_BODY/);
     assert.match(html, /Danger zone/i);
-    assert.match(html, /Revoke Alice Laptop/i);
-    assert.match(html, /onsubmit="return confirm\(&quot;Revoke Alice Laptop\?/i);
+    assert.match(html, /Revoke & forget Alice Laptop/i);
+    assert.match(html, /onsubmit="return confirm\(&quot;Revoke and forget Alice Laptop\?/i);
     assert.match(html, /disconnects this device/i);
-    assert.match(html, /revoked identity cannot reconnect/i);
+    assert.match(html, /forgets all product-facing device state/i);
     assert.doesNotMatch(html, /shell_execute|Bob Secret Workstation|bob-device|bob_secret_tool/);
 
     const foreign = await fetch(`${f.base}/dashboard/devices/bob-device`, { headers: { cookie: f.aliceCookie } });
@@ -275,6 +286,50 @@ test('dashboard live state returns account-scoped fragments without a page reloa
     assert.match(state.devices, /Alice Workstation/);
     assert.match(state.sessions, /ChatGPT/);
     assert.doesNotMatch(JSON.stringify(state), /Bob Secret Workstation|bob-device|bob-activity/);
+  } finally { await f.close(); }
+});
+
+test('dashboard activity endpoint is account-scoped and contains only lightweight RAM state', async () => {
+  const f = await fixture();
+  try {
+    const response = await fetch(`${f.base}/dashboard/activity`, { headers: { cookie: f.aliceCookie } });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(typeof payload.now, 'number');
+    assert.deepEqual(payload.devices.map(item => item.deviceId).sort(), ['alice-device', 'alice-idle', 'alice-laptop']);
+    assert.equal(payload.devices.every(item => Object.hasOwn(item, 'inFlight')), true);
+    assert.equal(JSON.stringify(payload).includes('bob-device'), false);
+  } finally { await f.close(); }
+});
+
+test('dashboard defaults to rolling 24h and supports 7d/30d usage windows', async () => {
+  const f = await fixture();
+  try {
+    f.usageStore.recordToolCall({
+      timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000,
+      accountId: f.alice.accountId,
+      activitySessionId: 'alice-idle-client',
+      deviceId: 'alice-idle',
+      tool: 'weekly_only_tool',
+      durationMs: 7,
+      success: true,
+      inputBytes: 7,
+      outputBytes: 11,
+      callerCategory: 'oauth'
+    });
+
+    const dayHtml = await (await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } })).text();
+    assert.doesNotMatch(dayHtml, /weekly_only_tool/);
+    assert.match(dayHtml, /rolling 24H window/i);
+
+    const weekHtml = await (await fetch(`${f.base}/dashboard?range=week`, { headers: { cookie: f.aliceCookie } })).text();
+    assert.match(weekHtml, /weekly_only_tool/);
+    assert.match(weekHtml, /rolling 7D window/i);
+    assert.match(weekHtml, /class="active" href="\/dashboard\?range=week"/);
+
+    const monthHtml = await (await fetch(`${f.base}/dashboard?range=month`, { headers: { cookie: f.aliceCookie } })).text();
+    assert.match(monthHtml, /weekly_only_tool/);
+    assert.match(monthHtml, /rolling 30D window/i);
   } finally { await f.close(); }
 });
 
@@ -317,7 +372,7 @@ test('recent errors prefer friendly device names and render only the newest boun
     const response = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
     assert.equal(response.status, 200);
     const html = await response.text();
-    assert.match(html, /Server 1\.0\.0 · testsha/);
+    assert.match(html, /v1\.0\.0 · testsha/);
     assert.match(html, /Alice Workstation/);
     assert.match(html, /Show 15 more \(max 20\)/);
     assert.match(html, /BOUNDED_24/);
@@ -382,13 +437,19 @@ test('dashboard mutations require CSRF and cannot mutate another account resourc
     assert.equal(ended.status, 303);
     assert.ok(f.usageStore.listActivitySessions(f.alice.accountId).find(item => item.activitySessionId === 'alice-activity')?.endedAt);
 
+    const afterEnd = await fetch(`${f.base}/dashboard`, { headers: { cookie: f.aliceCookie } });
+    const afterEndHtml = await afterEnd.text();
+    assert.doesNotMatch(afterEndHtml, /alice-activity/);
+    assert.match(afterEndHtml, /alice-idle-client/);
+    assert.match(afterEndHtml, />1<\/span> active/);
+
     const bobRevoke = await post(f.base, '/dashboard/devices/bob-device/revoke', { _csrf: csrf }, cookies);
     assert.equal(bobRevoke.status, 404);
     assert.equal(f.deviceStore.get('bob-device').revokedAt, null);
 
     const revoked = await post(f.base, '/dashboard/devices/alice-device/revoke', { _csrf: csrf }, cookies);
     assert.equal(revoked.status, 303);
-    assert.ok(f.deviceStore.get('alice-device').revokedAt);
+    assert.equal(f.deviceStore.get('alice-device'), null);
 
     const getMutation = await fetch(`${f.base}/dashboard/devices/bob-device/revoke`, { headers: { cookie: cookies } });
     assert.equal(getMutation.status, 404);

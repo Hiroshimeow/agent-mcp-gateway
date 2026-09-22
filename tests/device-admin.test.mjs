@@ -34,6 +34,6 @@ test('device admin supports operator pre-enroll, key rotation, then revoke', () 
   const revoke = JSON.parse(execFileSync(process.execPath, [adminScript, 'revoke', 'device'], { cwd: repoRoot, env, encoding: 'utf8' }));
   assert.equal(revoke.ok, true);
   assert.equal(revoke.deviceId, 'device');
-  assert.ok(revoke.revokedAt);
+  assert.ok(revoke.forgottenAt);
   fs.rmSync(runtime, { recursive: true, force: true });
 });

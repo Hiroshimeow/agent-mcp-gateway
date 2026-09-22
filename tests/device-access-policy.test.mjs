@@ -175,3 +175,29 @@ test('device audit stores metadata only and hashes caller identity', () => {
   assert.equal(text.includes('authorization'), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('device lifecycle audit survives disabled tool-call audit and stores only forensic metadata', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'device-lifecycle-audit-'));
+  const auditPath = path.join(root, 'audit.jsonl');
+  const recorder = createDeviceAuditRecorder({ auditPath, enabled: false });
+  recorder.record({
+    requestId: 'ignored', callerId: 'ignored', callerCategory: 'oauth', deviceId: 'device',
+    tool: 'shell_execute', outcome: 'success', durationMs: 1, inputBytes: 2, outputBytes: 3
+  });
+  recorder.recordEvent({
+    event: 'device_forgotten', callerId: 'account-secret-id', callerCategory: 'dashboard',
+    deviceId: 'device', details: { deviceName: 'Laptop', packageVersion: '1.0.5' }
+  });
+  recorder.close();
+
+  const lines = fs.readFileSync(auditPath, 'utf8').trim().split(/\r?\n/);
+  assert.equal(lines.length, 1);
+  const entry = JSON.parse(lines[0]);
+  assert.equal(entry.type, 'device_event');
+  assert.equal(entry.event, 'device_forgotten');
+  assert.equal(entry.deviceId, 'device');
+  assert.equal(entry.callerId.length, 16);
+  assert.equal(lines[0].includes('account-secret-id'), false);
+  assert.equal(lines[0].includes('public_key'), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});

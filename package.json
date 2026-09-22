@@ -1,6 +1,6 @@
 {
   "name": "agent-mcp-gateway",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Cross-platform local MCP gateway for coding agents.",
   "license": "MIT",
   "scripts": {
