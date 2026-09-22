@@ -457,7 +457,16 @@ function metricSkillName(toolName, args = {}) {
   return String(args.name || '').trim() || null;
 }
 
-async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args = {}, timeoutMs }) {
+async function callRemoteDevice({
+  context = {},
+  deviceId,
+  tool,
+  arguments: args = {},
+  timeoutMs,
+  expectedConnectionEpoch,
+  expectedExecutionRuntimeGeneration,
+  includeDispatchContext = false
+}) {
   const callerSubject = context.callerSubject || context.callerCategory || 'anonymous';
   const callerCategory = context.callerCategory || 'anonymous';
   const requestId = randomUUID();
@@ -471,14 +480,18 @@ async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args 
       tool,
       arguments: args
     });
-    const result = await deviceBroker.callDevice({
+    const brokerResult = await deviceBroker.callDevice({
       requestId,
       accountId: context.accountId || null,
       deviceId,
       tool,
       arguments: args,
-      ...(timeoutMs === undefined ? {} : { timeoutMs })
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(expectedConnectionEpoch === undefined ? {} : { expectedConnectionEpoch }),
+      ...(expectedExecutionRuntimeGeneration === undefined ? {} : { expectedExecutionRuntimeGeneration }),
+      ...(includeDispatchContext ? { includeDispatchContext: true } : {})
     });
+    const result = includeDispatchContext ? brokerResult?.result : brokerResult;
     const outputBytes = deviceAccessPolicy.assertOutput(grant, result);
     deviceAudit.record({
       requestId,
@@ -491,7 +504,9 @@ async function callRemoteDevice({ context = {}, deviceId, tool, arguments: args 
       inputBytes: grant.inputBytes,
       outputBytes
     });
-    return result;
+    return includeDispatchContext
+      ? { result, dispatchContext: brokerResult.dispatchContext }
+      : result;
   } catch (error) {
     const inputBytes = grant?.inputBytes ?? Buffer.byteLength(JSON.stringify(args ?? {}), 'utf8');
     deviceAudit.record({
@@ -543,16 +558,24 @@ async function routeToolCall(request, context = {}) {
     const ownerKey = callerKey || 'anonymous';
     if (toolName === 'start_process') {
       const { deviceId, toolArguments } = requireDeviceId(args);
-      const remote = await callRemoteDevice({
+      const dispatch = await callRemoteDevice({
         context,
         deviceId,
         tool: 'start_process',
         arguments: toolArguments,
-        timeoutMs: Math.min(Number(toolArguments.timeout_ms || 10000) + 2000, 30000)
+        timeoutMs: Math.min(Number(toolArguments.timeout_ms || 10000) + 2000, 30000),
+        includeDispatchContext: true
       });
+      const remote = dispatch.result;
       const remoteSessionId = remote?.sessionId ?? remote?.session_id;
       if (!remoteSessionId) throw new Error('Remote start_process did not return a session identifier.');
-      const sessionId = remoteProcessSessions.register({ ownerKey, deviceId, remoteSessionId });
+      const sessionId = remoteProcessSessions.register({
+        ownerKey,
+        deviceId: dispatch.dispatchContext.deviceId,
+        connectionEpoch: dispatch.dispatchContext.connectionEpoch,
+        executionRuntimeGeneration: dispatch.dispatchContext.executionRuntimeGeneration,
+        remoteSessionId
+      });
       return structuredToolText({ ...remote, sessionId, session_id: sessionId }, { includeStructured: true });
     }
     const remoteSession = remoteProcessSessions.resolve({ sessionId: args.session_id, ownerKey });
@@ -565,10 +588,14 @@ async function routeToolCall(request, context = {}) {
       deviceId: remoteSession.deviceId,
       tool: toolName,
       arguments: remoteArgs,
-      timeoutMs: remoteTimeoutMs
+      timeoutMs: remoteTimeoutMs,
+      expectedConnectionEpoch: remoteSession.connectionEpoch,
+      expectedExecutionRuntimeGeneration: remoteSession.executionRuntimeGeneration
     });
     if (toolName === 'terminate_process') {
       remoteProcessSessions.remove({ sessionId: args.session_id, ownerKey });
+    } else {
+      remoteProcessSessions.touch({ sessionId: args.session_id, ownerKey });
     }
     return structuredToolText({ ...remote, sessionId: args.session_id, session_id: args.session_id }, { includeStructured: true });
   }

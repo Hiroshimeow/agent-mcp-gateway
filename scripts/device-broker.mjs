@@ -111,6 +111,22 @@ function machineMetadata(payload = {}) {
   };
 }
 
+function runtimeMetadata(payload = {}) {
+  const hasReady = Object.prototype.hasOwnProperty.call(payload, 'runtime_ready');
+  const runtimeReady = hasReady
+    ? payload.runtime_ready === true
+    : null;
+  const runtimeReason = runtimeReady === false
+    ? (String(payload.runtime_reason || 'LOCAL_EXECUTION_ENGINE_UNAVAILABLE').trim().slice(0, 96) || 'LOCAL_EXECUTION_ENGINE_UNAVAILABLE')
+    : null;
+  const executionRuntimeGeneration = String(payload.execution_runtime_generation || '').trim().slice(0, 128) || null;
+  return { runtimeReady, runtimeReason, executionRuntimeGeneration };
+}
+
+function effectiveRuntimeGeneration(device) {
+  return device.executionRuntimeGeneration || `legacy:${device.connectionEpoch}`;
+}
+
 function publicDevice(device, { stored = null, usage = null, schema = null } = {}) {
   return {
     deviceId: device.deviceId,
@@ -127,6 +143,9 @@ function publicDevice(device, { stored = null, usage = null, schema = null } = {
     online: Boolean(device.online),
     revoked: Boolean(stored?.revokedAt || device.revoked),
     connectionEpoch: device.connectionEpoch || 0,
+    runtimeReady: device.runtimeReady ?? null,
+    runtimeReason: device.runtimeReason || null,
+    executionRuntimeGeneration: device.executionRuntimeGeneration || null,
     agentVersion: device.agentVersion || stored?.agentVersion || 'unknown',
     packageVersion: device.packageVersion || stored?.packageVersion || null,
     capabilities: [...(device.capabilities || [])],
@@ -262,6 +281,9 @@ export function createDeviceBroker(options = {}) {
         name: status.deviceName,
         online: status.online,
         connectionEpoch: status.connectionEpoch,
+        runtimeReady: status.runtimeReady,
+        runtimeReason: status.runtimeReason,
+        executionRuntimeGeneration: status.executionRuntimeGeneration,
         connectedAt: status.connectedAt,
         lastSeenAt: status.lastSeenAt
       },
@@ -332,6 +354,9 @@ export function createDeviceBroker(options = {}) {
         arch: stored.arch || null,
         pathStyle: stored.pathStyle || null,
         capabilities: [],
+        runtimeReady: null,
+        runtimeReason: null,
+        executionRuntimeGeneration: null,
         connectedAt: null,
         lastSeenAt: null,
         authenticatedPublicKeyPem: null,
@@ -340,19 +365,33 @@ export function createDeviceBroker(options = {}) {
     }
   }
 
-  function rejectPendingForConnection(deviceId, connectionEpoch, reason) {
+  function rejectPendingForConnection(deviceId, connectionEpoch, reason, { code = 'DEVICE_OFFLINE', outcome = 'disconnected' } = {}) {
     for (const [requestId, entry] of pending) {
       if (entry.deviceId !== deviceId || entry.connectionEpoch !== connectionEpoch) continue;
       clearTimeout(entry.timer);
       if (pending.get(requestId) !== entry) continue;
       pending.delete(requestId);
       if (pendingByWireRequestId.get(entry.wireRequestId) === entry) pendingByWireRequestId.delete(entry.wireRequestId);
-      noteActivityFinished(entry.deviceId, entry.tool, 'disconnected');
-      entry.reject(new Error(reason));
+      noteActivityFinished(entry.deviceId, entry.tool, outcome);
+      entry.reject(deviceBrokerError(reason, code));
     }
   }
 
-  function registerConnection(ws, { deviceId, agentVersion, packageVersion = null, capabilities, hostname = null, platform = null, arch = null, pathStyle = null, publicKeyPem = null, authorizationGeneration = null }) {
+  function registerConnection(ws, {
+    deviceId,
+    agentVersion,
+    packageVersion = null,
+    capabilities,
+    hostname = null,
+    platform = null,
+    arch = null,
+    pathStyle = null,
+    runtimeReady = null,
+    runtimeReason = null,
+    executionRuntimeGeneration = null,
+    publicKeyPem = null,
+    authorizationGeneration = null
+  }) {
     const previous = devices.get(deviceId);
     const connectionEpoch = (previous?.connectionEpoch || 0) + 1;
     const current = {
@@ -368,6 +407,9 @@ export function createDeviceBroker(options = {}) {
       arch: String(arch || '').trim().slice(0, 32) || null,
       pathStyle: ['windows', 'posix'].includes(String(pathStyle || '').trim()) ? String(pathStyle).trim() : null,
       capabilities: normalizeCapabilities(capabilities),
+      runtimeReady: typeof runtimeReady === 'boolean' ? runtimeReady : null,
+      runtimeReason: runtimeReady === false ? (String(runtimeReason || 'LOCAL_EXECUTION_ENGINE_UNAVAILABLE').slice(0, 96) || 'LOCAL_EXECUTION_ENGINE_UNAVAILABLE') : null,
+      executionRuntimeGeneration: String(executionRuntimeGeneration || '').trim().slice(0, 128) || null,
       connectedAt: Date.now(),
       lastSeenAt: Date.now(),
       authenticatedPublicKeyPem: durableAuth ? String(publicKeyPem || '') : null,
@@ -390,6 +432,42 @@ export function createDeviceBroker(options = {}) {
       if (previous.socket.readyState === WebSocket.OPEN) previous.socket.close(4001, 'replaced by newer connection');
     }
     return current;
+  }
+
+  function applyRuntimeState(device, payload = {}) {
+    const hasReady = Object.prototype.hasOwnProperty.call(payload, 'runtime_ready');
+    const hasReason = Object.prototype.hasOwnProperty.call(payload, 'runtime_reason');
+    const hasGeneration = Object.prototype.hasOwnProperty.call(payload, 'execution_runtime_generation');
+    if (!hasReady && !hasReason && !hasGeneration) return;
+
+    const beforeGeneration = effectiveRuntimeGeneration(device);
+    const metadata = runtimeMetadata(payload);
+    if (hasReady) device.runtimeReady = metadata.runtimeReady;
+    if (hasReady || hasReason) {
+      device.runtimeReason = device.runtimeReady === false
+        ? metadata.runtimeReason
+        : null;
+    }
+    if (hasGeneration) device.executionRuntimeGeneration = metadata.executionRuntimeGeneration;
+    const afterGeneration = effectiveRuntimeGeneration(device);
+
+    if (device.runtimeReady === false) {
+      rejectPendingForConnection(
+        device.deviceId,
+        device.connectionEpoch,
+        'Device execution runtime became unavailable before the request result was known; the request was not replayed.',
+        { code: 'DEVICE_NOT_READY', outcome: 'not_ready' }
+      );
+      return;
+    }
+    if (beforeGeneration !== afterGeneration) {
+      rejectPendingForConnection(
+        device.deviceId,
+        device.connectionEpoch,
+        'Device execution runtime changed before the request result was known; the request was not replayed.',
+        { code: 'DEVICE_RUNTIME_CHANGED', outcome: 'runtime_changed' }
+      );
+    }
   }
 
   function invalidateAuthorization(device, { revoked, reason, closeCode }) {
@@ -486,6 +564,7 @@ export function createDeviceBroker(options = {}) {
         packageVersion: message.payload?.package_version,
         capabilities: message.payload?.capabilities,
         ...machineMetadata(message.payload),
+        ...runtimeMetadata(message.payload),
         legacyEnrollmentAuthorized,
         enrollmentGrant: pairingCredential
       });
@@ -507,6 +586,7 @@ export function createDeviceBroker(options = {}) {
         packageVersion: message.payload?.package_version,
         capabilities: message.payload?.capabilities,
         ...machineMetadata(message.payload),
+        ...runtimeMetadata(message.payload),
         authorizationGeneration: stored?.authorizationGeneration ?? null,
         wasEnrolled: Boolean(stored),
         enrollmentGrant: pairingCredential
@@ -523,6 +603,7 @@ export function createDeviceBroker(options = {}) {
       packageVersion: message.payload?.package_version,
       capabilities: message.payload?.capabilities,
       ...machineMetadata(message.payload),
+      ...runtimeMetadata(message.payload),
       authorizationGeneration: stored.authorizationGeneration
     });
   }
@@ -664,7 +745,8 @@ export function createDeviceBroker(options = {}) {
       agentVersion: message.payload?.agent_version,
       packageVersion: message.payload?.package_version,
       capabilities: message.payload?.capabilities,
-      ...machineMetadata(message.payload)
+      ...machineMetadata(message.payload),
+      ...runtimeMetadata(message.payload)
     });
     ws.send(JSON.stringify({
       protocol_version: DEVICE_PROTOCOL_VERSION,
@@ -692,6 +774,7 @@ export function createDeviceBroker(options = {}) {
       return;
     }
     if (message.type === 'heartbeat') {
+      applyRuntimeState(device, message.payload || {});
       usageStore?.touch(device.deviceId);
       sendStatusSnapshot(ws, device);
       return;
@@ -743,7 +826,9 @@ export function createDeviceBroker(options = {}) {
         entry.reject(error);
       } else {
         usageOutcome = { ok: true };
-        entry.resolve(message.payload);
+        entry.resolve(entry.includeDispatchContext
+          ? { result: message.payload, dispatchContext: entry.dispatchContext }
+          : message.payload);
       }
     };
     try {
@@ -1013,13 +1098,37 @@ export function createDeviceBroker(options = {}) {
     return updateStates.get(device.deviceId);
   }
 
-  async function callDevice({ requestId: requestedRequestId, accountId = null, deviceId, tool, arguments: args = {}, timeoutMs = requestTimeoutMs }) {
+  async function callDevice({
+    requestId: requestedRequestId,
+    accountId = null,
+    deviceId,
+    tool,
+    arguments: args = {},
+    timeoutMs = requestTimeoutMs,
+    expectedConnectionEpoch,
+    expectedExecutionRuntimeGeneration,
+    includeDispatchContext = false
+  }) {
     const device = devices.get(String(deviceId || ''));
     if (device?.online && !refreshAuthorization(device)) {
       throw deviceBrokerError(`Device ${deviceId} authorization changed or was revoked; it is offline.`, 'DEVICE_OFFLINE');
     }
     if (!device?.online || device.revoked || !device.socket || device.socket.readyState !== WebSocket.OPEN) {
       throw deviceBrokerError(`Device ${deviceId} is offline or unknown.`, 'DEVICE_OFFLINE');
+    }
+    const currentRuntimeGeneration = effectiveRuntimeGeneration(device);
+    if (expectedConnectionEpoch !== undefined && String(expectedConnectionEpoch) !== String(device.connectionEpoch)) {
+      throw deviceBrokerError('Process session is stale because the device connection changed.', 'PROCESS_SESSION_STALE');
+    }
+    if (expectedExecutionRuntimeGeneration !== undefined &&
+        String(expectedExecutionRuntimeGeneration) !== currentRuntimeGeneration) {
+      throw deviceBrokerError('Process session is stale because the execution runtime changed.', 'PROCESS_SESSION_STALE');
+    }
+    if (device.runtimeReady === false) {
+      throw deviceBrokerError(
+        `Device ${deviceId} execution runtime is not ready${device.runtimeReason ? `: ${device.runtimeReason}` : '.'}`,
+        'DEVICE_NOT_READY'
+      );
     }
     if (durableAuth && requireAccountOwnership) {
       const owner = String(accountId || '').trim();
@@ -1046,9 +1155,39 @@ export function createDeviceBroker(options = {}) {
     return await new Promise((resolve, reject) => {
       let entry = null;
       const dispatch = () => {
+        const current = devices.get(device.deviceId);
+        if (current !== device || !device.online || device.revoked ||
+            !device.socket || device.socket.readyState !== WebSocket.OPEN) {
+          if (expectedConnectionEpoch !== undefined || expectedExecutionRuntimeGeneration !== undefined) {
+            throw deviceBrokerError('Process session is stale because the device connection changed.', 'PROCESS_SESSION_STALE');
+          }
+          throw deviceBrokerError(`Device ${deviceId} connection changed before dispatch.`, 'DEVICE_OFFLINE');
+        }
+        const dispatchRuntimeGeneration = effectiveRuntimeGeneration(device);
+        if (expectedConnectionEpoch !== undefined && String(expectedConnectionEpoch) !== String(device.connectionEpoch)) {
+          throw deviceBrokerError('Process session is stale because the device connection changed.', 'PROCESS_SESSION_STALE');
+        }
+        if (expectedExecutionRuntimeGeneration !== undefined &&
+            String(expectedExecutionRuntimeGeneration) !== dispatchRuntimeGeneration) {
+          throw deviceBrokerError('Process session is stale because the execution runtime changed.', 'PROCESS_SESSION_STALE');
+        }
+        if (device.runtimeReady === false) {
+          throw deviceBrokerError(
+            `Device ${deviceId} execution runtime is not ready${device.runtimeReason ? `: ${device.runtimeReason}` : '.'}`,
+            'DEVICE_NOT_READY'
+          );
+        }
+        const dispatchContext = {
+          deviceId: device.deviceId,
+          connectionEpoch: device.connectionEpoch,
+          executionRuntimeGeneration: dispatchRuntimeGeneration
+        };
         entry = {
           requestId, wireRequestId, resolve, reject, timer: null,
           deviceId: device.deviceId, connectionEpoch: device.connectionEpoch,
+          executionRuntimeGeneration: dispatchRuntimeGeneration,
+          includeDispatchContext: includeDispatchContext === true,
+          dispatchContext,
           tool, startedAt: Date.now()
         };
         const timer = setTimeout(() => {

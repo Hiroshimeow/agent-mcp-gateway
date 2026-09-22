@@ -14,14 +14,23 @@ export function createRemoteProcessSessionRegistry(options = {}) {
     }
   }
 
-  function register({ ownerKey, deviceId, remoteSessionId }) {
+  function register({ ownerKey, deviceId, connectionEpoch, executionRuntimeGeneration, remoteSessionId }) {
     sweep();
+    if (connectionEpoch === undefined || connectionEpoch === null || String(connectionEpoch).trim() === '') {
+      throw new Error('Process session requires a connection epoch.');
+    }
+    const runtimeGeneration = String(executionRuntimeGeneration || '').trim();
+    if (!runtimeGeneration) throw new Error('Process session requires an execution runtime generation.');
     const sessionId = `remote-${randomUUID()}`;
+    const createdAt = now();
     sessions.set(sessionId, {
       ownerKey: String(ownerKey || 'anonymous'),
       deviceId: String(deviceId),
+      connectionEpoch,
+      executionRuntimeGeneration: runtimeGeneration,
       remoteSessionId: String(remoteSessionId),
-      lastUsedAt: now()
+      createdAt,
+      lastUsedAt: createdAt
     });
     return sessionId;
   }
@@ -32,8 +41,15 @@ export function createRemoteProcessSessionRegistry(options = {}) {
     if (!record) throw new Error(`Unknown or expired process session ${sessionId}.`);
     const caller = String(ownerKey || 'anonymous');
     if (record.ownerKey !== caller) throw new Error('Process session belongs to a different caller.');
-    record.lastUsedAt = now();
     return { ...record };
+  }
+
+  function touch({ sessionId, ownerKey }) {
+    const record = resolve({ sessionId, ownerKey });
+    const current = sessions.get(String(sessionId));
+    if (!current) throw new Error(`Unknown or expired process session ${sessionId}.`);
+    current.lastUsedAt = now();
+    return { ...current };
   }
 
   function remove({ sessionId, ownerKey }) {
@@ -58,5 +74,5 @@ export function createRemoteProcessSessionRegistry(options = {}) {
     return sessions.size;
   }
 
-  return { register, resolve, remove, removeByDevice, size };
+  return { register, resolve, touch, remove, removeByDevice, size };
 }
