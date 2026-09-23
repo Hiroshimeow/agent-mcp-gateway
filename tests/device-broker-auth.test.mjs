@@ -1138,6 +1138,32 @@ test('device update request times out without progress and can be retried safely
   assert.equal(retryMessage.request_id, retry.requestId);
 });
 
+test('legacy Linux 1.0.7 device requires one-time 1.0.8 bootstrap before dashboard self-update', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-linux-bootstrap-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'linux-107',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.7',
+    platform: 'linux'
+  });
+
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'linux-107', privateKey: keys.privateKey, packageVersion: '1.0.7' });
+
+  assert.throws(
+    () => broker.requestDeviceUpdate({ accountId: 'account-1', deviceId: 'linux-107', targetVersion: '1.0.8' }),
+    error => error?.code === 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED' && /1\.0\.8/.test(error.message)
+  );
+});
+
 test('legacy Windows 1.0.5 device requires one-time bootstrap before dashboard self-update', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-windows-bootstrap-'));
   const dbPath = path.join(dir, 'devices.sqlite');

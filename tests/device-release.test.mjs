@@ -21,12 +21,14 @@ test('stable device versions compare without accepting tags or ranges', () => {
   assert.throws(() => normalizeStableVersion('1.0.5-beta.1'));
 });
 
-test('self-update minimum is platform-aware for legacy Windows clients', () => {
+test('self-update minimum is platform-aware for legacy Windows and Linux clients', () => {
   assert.equal(minimumSelfUpdateVersion('win32'), '1.0.6');
-  assert.equal(minimumSelfUpdateVersion('linux'), '1.0.5');
+  assert.equal(minimumSelfUpdateVersion('linux'), '1.0.8');
+  assert.equal(minimumSelfUpdateVersion(null), '1.0.5');
   assert.equal(supportsDeviceSelfUpdate('1.0.5', 'win32'), false);
   assert.equal(supportsDeviceSelfUpdate('1.0.6', 'win32'), true);
-  assert.equal(supportsDeviceSelfUpdate('1.0.5', 'linux'), true);
+  assert.equal(supportsDeviceSelfUpdate('1.0.7', 'linux'), false);
+  assert.equal(supportsDeviceSelfUpdate('1.0.8', 'linux'), true);
 });
 
 test('release provider fetches npm latest and caches it', async () => {

@@ -22,7 +22,10 @@ export function isNewerStableVersion(current, latest) {
 }
 
 export function minimumSelfUpdateVersion(platform) {
-  return String(platform || '').trim().toLowerCase() === 'win32' ? '1.0.6' : '1.0.5';
+  const normalized = String(platform || '').trim().toLowerCase();
+  if (normalized === 'win32') return '1.0.6';
+  if (normalized === 'linux') return '1.0.8';
+  return '1.0.5';
 }
 
 export function supportsDeviceSelfUpdate(packageVersion, platform) {
