@@ -1244,7 +1244,7 @@ export function createDeviceBroker(options = {}) {
           if (pendingByWireRequestId.get(wireRequestId) === entry) pendingByWireRequestId.delete(wireRequestId);
           usageStore?.recordToolFailed(device.deviceId, 0, 'DEVICE_REQUEST_TIMEOUT');
           noteActivityFinished(device.deviceId, tool, 'timeout');
-          entry.reject(new Error(`Device request ${requestId} timed out; it was not replayed.`));
+          entry.reject(deviceBrokerError(`Device request ${requestId} timed out; it was not replayed.`, 'DEVICE_REQUEST_TIMEOUT'));
         }, timeoutMs);
         entry.timer = timer;
         timer.unref?.();

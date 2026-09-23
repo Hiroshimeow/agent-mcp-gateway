@@ -1005,7 +1005,10 @@ test('request id can be safely reused within the same connection epoch after tim
     broker.callDevice({ requestId: 'same-epoch-id', deviceId: 'request-reuse-device', tool: 'ping', timeoutMs: 20 }),
     /already pending/i
   );
-  await assert.rejects(firstCall, /timed out/i);
+  await assert.rejects(
+    firstCall,
+    error => error?.code === 'DEVICE_REQUEST_TIMEOUT' && /timed out/i.test(error.message)
+  );
   assert.equal(typeof heldCallback, 'function');
 
   const secondToolCallPromise = nextMessage(ws);
