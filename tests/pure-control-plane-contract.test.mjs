@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { processToolSchemas, shellExecuteSchema } from '../scripts/device-execution-tool-definitions.mjs';
 
 const wrapper = fs.readFileSync(new URL('../scripts/authenticated-mcp-wrapper.mjs', import.meta.url), 'utf8');
 const customTools = fs.readFileSync(new URL('../scripts/custom-tools/index.mjs', import.meta.url), 'utf8');
@@ -9,8 +10,8 @@ const repoResources = fs.readFileSync(new URL('../scripts/resources/index.mjs', 
 const workspaceRegistry = fs.readFileSync(new URL('../scripts/workspace-registry.mjs', import.meta.url), 'utf8');
 
 test('gateway execution surface requires explicit device routing and has no local execution fallback', () => {
-  assert.match(wrapper, /required:\s*\['command',\s*'working_directory',\s*'device_id'\]/);
-  assert.match(wrapper, /required:\s*\['command',\s*'working_directory',\s*'device_id'\]/);
+  assert.deepEqual(shellExecuteSchema.required, ['command', 'working_directory', 'device_id']);
+  assert.deepEqual(processToolSchemas.start_process.required, ['command', 'working_directory', 'device_id']);
   assert.match(wrapper, /function requireDeviceId\(/);
   assert.match(wrapper, /DEVICE_ID_REQUIRED/);
 

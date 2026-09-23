@@ -1,0 +1,612 @@
+{
+  "schemaVersion": 1,
+  "scope": "gateway-device-execution-tools",
+  "mcpSpecificationRevision": "2026-07-28",
+  "resultEnvelope": {
+    "success": {
+      "content": "MCP CallToolResult content array",
+      "structuredContent": "JSON object when the gateway normalizes a structured device result"
+    }
+  },
+  "errorEnvelope": {
+    "transport": "MCP tools/call request error",
+    "internalCodes": [
+      "DEVICE_ID_REQUIRED",
+      "DEVICE_NOT_READY",
+      "DEVICE_OFFLINE",
+      "PROCESS_SESSION_STALE",
+      "DEVICE_ACCESS_DENIED",
+      "DEVICE_PATH_DENIED",
+      "DEVICE_RATE_LIMIT",
+      "DEVICE_INPUT_TOO_LARGE",
+      "DEVICE_OUTPUT_TOO_LARGE"
+    ]
+  },
+  "tools": [
+    {
+      "name": "read_text_file",
+      "description": "Read a text file from one explicit owned online device. Use head or tail to bound large reads.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "tail": {
+            "type": "number",
+            "description": "If provided, returns only the last N lines of the file."
+          },
+          "head": {
+            "type": "number",
+            "description": "If provided, returns only the first N lines of the file."
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device that will perform this filesystem operation."
+          }
+        },
+        "required": [
+          "path",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "filesystem",
+        "profileVisibility": {
+          "safe": true,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create or completely overwrite a text file on one explicit owned online device.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device that will perform this filesystem operation."
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": true,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "filesystem",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Make one exact guarded text replacement on one explicit owned online device.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "old_text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact text to replace. No fuzzy matching is applied."
+          },
+          "new_text": {
+            "type": "string",
+            "description": "Replacement text."
+          },
+          "expected_replacements": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Required exact occurrence count before mutation."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Validate without writing."
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device that will perform this filesystem operation."
+          }
+        },
+        "required": [
+          "path",
+          "old_text",
+          "new_text",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "filesystem",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "shell_execute",
+      "description": "Use this when the task needs terminal access on the selected device for file discovery, content search, git, tests, builds, package management, or scripts not covered by read_text_file, write_file, or edit_file. Set device_id explicitly and working_directory to the active project folder.\n\nExecution is routed through the authenticated device broker. Oversized device results fail closed at the transport/output budget rather than falling back to gateway-host execution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The system instruction to execute in the verified environment."
+          },
+          "working_directory": {
+            "type": "string",
+            "description": "The target workspace for execution."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 28000,
+            "description": "Optional one-shot execution timeout in milliseconds. Defaults to 28000; use start_process for longer work."
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device that will execute this command."
+          }
+        },
+        "required": [
+          "command",
+          "working_directory",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "workingDirectoryResolved": {
+            "type": "string"
+          },
+          "exitCode": {
+            "type": "number"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "timedOut": {
+            "type": "boolean"
+          },
+          "stdoutTruncated": {
+            "type": "boolean"
+          },
+          "stderrTruncated": {
+            "type": "boolean"
+          },
+          "stdoutBytes": {
+            "type": "number"
+          },
+          "stderrBytes": {
+            "type": "number"
+          },
+          "stdoutSpillPath": {},
+          "stderrSpillPath": {}
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "shell",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": false,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "start_process",
+      "description": "Start a command with retained bounded output. Short commands may complete immediately; long commands return RUNNING plus sessionId after timeout_ms without being killed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Command to execute in a retained process session."
+          },
+          "working_directory": {
+            "type": "string",
+            "description": "Trusted workspace directory for the process."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30000,
+            "default": 10000,
+            "description": "Foreground wait before yielding RUNNING. Does not kill the process."
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device that will start the process. Follow-up calls use session_id only."
+          }
+        },
+        "required": [
+          "command",
+          "working_directory",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "shell",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": false,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "read_process_output",
+      "description": "Read a bounded page of retained process output using absolute offset/length. Completed output remains available for a bounded retention period.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65536,
+            "default": 8192
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "shell",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": false,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "interact_with_process",
+      "description": "Write raw stdin to a running process session and optionally wait briefly for progress.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "input": {
+            "type": "string",
+            "description": "Raw stdin text; include a newline when the target program requires one."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000,
+            "default": 0,
+            "description": "Optional wait after writing stdin. Does not kill the process."
+          }
+        },
+        "required": [
+          "session_id",
+          "input"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "shell",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": false,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "terminate_process",
+      "description": "Terminate a caller-owned running process session and its process tree where supported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": true,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "shell",
+        "profileVisibility": {
+          "safe": false,
+          "assisted": false,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "image_preview",
+      "description": "Load a bounded image preview from one explicit owned online device for visual inspection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device containing the image."
+          },
+          "path": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "embed": {
+            "type": "boolean",
+            "default": true
+          },
+          "includeImage": {
+            "type": "boolean",
+            "default": true
+          },
+          "includeData": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxBytes": {
+            "type": "number",
+            "default": 8388608
+          }
+        },
+        "required": [
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "filesystem",
+        "profileVisibility": {
+          "safe": true,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "project_inspect",
+      "description": "Inspect one configured project through bounded summary, tree, Git, README, or package views. Use read_text_file for generic file bodies.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device id associated with the project."
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Configured project id on that device."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "tree",
+              "git_status",
+              "git_diff",
+              "readme",
+              "package"
+            ]
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          },
+          "staged": {
+            "type": "boolean",
+            "default": false
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor returned by a bounded tree page."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 200
+          }
+        },
+        "required": [
+          "device_id",
+          "project_id",
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "ok",
+          "tool",
+          "summary",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "platform",
+        "profileVisibility": {
+          "safe": true,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    }
+  ]
+}

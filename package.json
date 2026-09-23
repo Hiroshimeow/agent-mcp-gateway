@@ -15,6 +15,7 @@
     "smoke:mcp:tools": "node scripts/smoke-mcp-tools.mjs",
     "smoke:mcp:upstreams": "node scripts/smoke-mcp-upstreams.mjs",
     "benchmark:catalog": "node scripts/benchmark-mcp-catalog.mjs",
+    "contract:device:check": "node scripts/check-device-public-contract.mjs",
     "device:revoke": "node scripts/device-admin.mjs revoke",
     "device:rotate": "node scripts/device-admin.mjs rotate",
     "device:enroll": "node scripts/device-admin.mjs enroll",
@@ -27,16 +28,19 @@
     "admin:invite:revoke": "node scripts/admin.mjs invite revoke"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/core": "^2.0.0",
-    "@modelcontextprotocol/express": "^2.0.0",
-    "@modelcontextprotocol/node": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
+    "@modelcontextprotocol/express": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "cors": "^2.8.6",
     "express": "5.1.0",
     "express-rate-limit": "^8.7.0",
     "smol-toml": "^1.4.2",
     "ws": "^8.21.3",
     "yaml": "^2.9.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
