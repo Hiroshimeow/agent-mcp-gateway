@@ -125,7 +125,7 @@ async function reconnect(ws, { deviceId, privateKey, packageVersion = null }) {
   return await okPromise;
 }
 
-async function createHarness(t, dbPath) {
+async function createHarness(t, dbPath, brokerOptions = {}) {
   const store = createDeviceStore({ dbPath });
   const server = http.createServer((_req, res) => res.end('ok'));
   const broker = createDeviceBroker({
@@ -133,7 +133,8 @@ async function createHarness(t, dbPath) {
     deviceStore: store,
     requestTimeoutMs: 1000,
     requireAccountOwnership: false,
-    innerTls: { cert: innerTlsCert, key: innerTlsKey }
+    innerTls: { cert: innerTlsCert, key: innerTlsKey },
+    ...brokerOptions
   });
   broker.attach(server);
   const port = await listen(server);
@@ -1097,5 +1098,69 @@ test('account owner can dispatch a fixed-version device update and completion fo
   const visible = broker.listDevices({ accountId: 'account-1' })[0];
   assert.equal(visible.packageVersion, '1.0.6');
   assert.equal(visible.update.state, 'complete');
+});
+
+test('device update request times out without progress and can be retried safely', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-update-timeout-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath, { updateTimeoutMs: 40 });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'timeout-device',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.6'
+  });
+
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'timeout-device', privateKey: keys.privateKey, packageVersion: '1.0.6' });
+
+  const firstMessagePromise = nextMessage(ws);
+  const first = broker.requestDeviceUpdate({ accountId: 'account-1', deviceId: 'timeout-device', targetVersion: '1.0.7' });
+  const firstMessage = await firstMessagePromise;
+  assert.equal(firstMessage.type, 'device_update');
+  assert.equal(first.state, 'requested');
+
+  await new Promise(resolve => setTimeout(resolve, 70));
+  const timedOut = broker.listDevices({ accountId: 'account-1' })[0].update;
+  assert.equal(timedOut.state, 'failed');
+  assert.equal(timedOut.error.code, 'DEVICE_UPDATE_TIMEOUT');
+
+  const retryMessagePromise = nextMessage(ws);
+  const retry = broker.requestDeviceUpdate({ accountId: 'account-1', deviceId: 'timeout-device', targetVersion: '1.0.7' });
+  const retryMessage = await retryMessagePromise;
+  assert.equal(retry.state, 'requested');
+  assert.notEqual(retry.requestId, first.requestId);
+  assert.equal(retryMessage.request_id, retry.requestId);
+});
+
+test('legacy Windows 1.0.5 device requires one-time bootstrap before dashboard self-update', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-auth-windows-bootstrap-'));
+  const dbPath = path.join(dir, 'devices.sqlite');
+  const { store, broker, port } = await createHarness(t, dbPath);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const keys = keyPair();
+  store.enroll({
+    deviceId: 'windows-105',
+    publicKeyPem: keys.publicKeyPem,
+    ownerAccountId: 'account-1',
+    agentVersion: 'test-1',
+    packageVersion: '1.0.5',
+    platform: 'win32'
+  });
+
+  const ws = await openSocket(port);
+  t.after(() => ws.close());
+  await reconnect(ws, { deviceId: 'windows-105', privateKey: keys.privateKey, packageVersion: '1.0.5' });
+
+  assert.throws(
+    () => broker.requestDeviceUpdate({ accountId: 'account-1', deviceId: 'windows-105', targetVersion: '1.0.7' }),
+    error => error?.code === 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED' && /1\.0\.6/.test(error.message)
+  );
 });
 

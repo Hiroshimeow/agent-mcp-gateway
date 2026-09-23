@@ -6,13 +6,14 @@ import {
   createServerInnerTls,
   encodeJsonFrame
 } from './device-secure-transport.mjs';
-import { compareStableVersions, normalizeStableVersion } from './device-release.mjs';
+import { compareStableVersions, minimumSelfUpdateVersion, normalizeStableVersion, supportsDeviceSelfUpdate } from './device-release.mjs';
 
 export const DEVICE_PROTOCOL_VERSION = 1;
 export const DEVICE_PROTOCOL_VERSION_V2 = 2;
 const DEVICE_AUTH_EXPORTER_LABEL = 'EXPERIMENTAL-HCU-MCP-DEVICE-AUTH-V2';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+const DEFAULT_UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -179,10 +180,12 @@ export function createDeviceBroker(options = {}) {
   let schemaSnapshot = normalizeSchemaSnapshot(options.schemaSnapshot);
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
+  const updateTimeoutMs = options.updateTimeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS;
   const devices = new Map();
   const pending = new Map();
   const pendingByWireRequestId = new Map();
   const updateStates = new Map();
+  const updateTimers = new Map();
   const activityStates = new Map();
   const sockets = new Set();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
@@ -209,6 +212,33 @@ export function createDeviceBroker(options = {}) {
     const usage = usageStore ? usageStore.get(device.deviceId) : null;
     const status = publicDevice(device, { stored, usage, schema: schemaSnapshot });
     return { ...status, update: updateStates.get(device.deviceId) || null };
+  }
+
+  function clearUpdateTimer(deviceId) {
+    const timer = updateTimers.get(deviceId);
+    if (timer) clearTimeout(timer);
+    updateTimers.delete(deviceId);
+  }
+
+  function armUpdateTimer(deviceId, requestId) {
+    clearUpdateTimer(deviceId);
+    const delay = Number(updateTimeoutMs) > 0 ? Number(updateTimeoutMs) : DEFAULT_UPDATE_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      updateTimers.delete(deviceId);
+      const current = updateStates.get(deviceId);
+      if (!current || current.requestId !== requestId || !['requested', 'accepted', 'installed'].includes(current.state)) return;
+      updateStates.set(deviceId, {
+        ...current,
+        state: 'failed',
+        updatedAt: Date.now(),
+        error: {
+          code: 'DEVICE_UPDATE_TIMEOUT',
+          message: 'Device update stopped reporting progress before completion; retry only after the device is online.'
+        }
+      });
+    }, delay);
+    timer.unref?.();
+    updateTimers.set(deviceId, timer);
   }
 
   function recordDeviceStatus(device, status) {
@@ -418,6 +448,7 @@ export function createDeviceBroker(options = {}) {
     devices.set(deviceId, current);
     const update = updateStates.get(deviceId);
     if (update?.targetVersion && current.packageVersion === update.targetVersion) {
+      clearUpdateTimer(deviceId);
       updateStates.set(deviceId, { ...update, state: 'complete', completedAt: Date.now(), error: null });
     }
     ws.deviceId = deviceId;
@@ -479,6 +510,7 @@ export function createDeviceBroker(options = {}) {
       `${reason} before the request result was known; the request was not replayed.`
     );
     if (revoked) {
+      clearUpdateTimer(device.deviceId);
       updateStates.delete(device.deviceId);
       activityStates.delete(device.deviceId);
       devices.delete(device.deviceId);
@@ -806,6 +838,8 @@ export function createDeviceBroker(options = {}) {
           message: String(message.payload?.message || 'Device update failed.').slice(0, 240)
         } : null
       });
+      if (state === 'failed') clearUpdateTimer(device.deviceId);
+      else armUpdateTimer(device.deviceId, requestId);
       return;
     }
     if (message.type !== 'tool_result' && message.type !== 'tool_error') return;
@@ -1003,6 +1037,7 @@ export function createDeviceBroker(options = {}) {
         'Device was forgotten before the request result was known; the request was not replayed.'
       );
     }
+    clearUpdateTimer(normalized);
     updateStates.delete(normalized);
     activityStates.delete(normalized);
     devices.delete(normalized);
@@ -1043,9 +1078,11 @@ export function createDeviceBroker(options = {}) {
     const target = normalizeStableVersion(targetVersion);
     let current;
     try { current = normalizeStableVersion(device.packageVersion || stored.packageVersion); }
-    catch { throw deviceBrokerError('Device package version is unavailable; bootstrap MCP Device 1.0.5 once before dashboard updates.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'); }
-    if (compareStableVersions(current, '1.0.5') < 0) {
-      throw deviceBrokerError('Device must be bootstrapped to MCP Device 1.0.5 before dashboard self-update is available.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED');
+    catch { throw deviceBrokerError('Device package version is unavailable; bootstrap MCP Device before dashboard updates.', 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED'); }
+    const platform = device.platform || stored.platform || null;
+    const minimumVersion = minimumSelfUpdateVersion(platform);
+    if (!supportsDeviceSelfUpdate(current, platform)) {
+      throw deviceBrokerError(`Device must be bootstrapped to MCP Device ${minimumVersion} before dashboard self-update is available.`, 'DEVICE_UPDATE_BOOTSTRAP_REQUIRED');
     }
     if (compareStableVersions(target, current) <= 0) {
       throw deviceBrokerError(`Device is already on ${current} or newer.`, 'DEVICE_UPDATE_NOT_NEEDED');
@@ -1078,6 +1115,7 @@ export function createDeviceBroker(options = {}) {
         if (!error) return;
         const currentUpdate = updateStates.get(device.deviceId);
         if (currentUpdate?.requestId !== requestId) return;
+        clearUpdateTimer(device.deviceId);
         updateStates.set(device.deviceId, {
           ...currentUpdate,
           state: 'failed',
@@ -1085,7 +1123,17 @@ export function createDeviceBroker(options = {}) {
           error: { code: 'DEVICE_UPDATE_SEND_ERROR', message: String(error.message || error).slice(0, 240) }
         });
       });
-      if (!sent) throw deviceBrokerError('Device update could not be sent.', 'DEVICE_UPDATE_SEND_ERROR');
+      if (!sent) {
+        clearUpdateTimer(device.deviceId);
+        updateStates.set(device.deviceId, {
+          ...update,
+          state: 'failed',
+          updatedAt: Date.now(),
+          error: { code: 'DEVICE_UPDATE_SEND_ERROR', message: 'Device update could not be sent.' }
+        });
+        throw deviceBrokerError('Device update could not be sent.', 'DEVICE_UPDATE_SEND_ERROR');
+      }
+      armUpdateTimer(device.deviceId, requestId);
     };
     deviceStore.withCurrentAuthorization(
       {
@@ -1249,6 +1297,7 @@ export function createDeviceBroker(options = {}) {
     }
     pending.clear();
     pendingByWireRequestId.clear();
+    for (const deviceId of updateTimers.keys()) clearUpdateTimer(deviceId);
     for (const ws of sockets) { try { ws.terminate(); } catch {} }
     sockets.clear();
     await new Promise(resolve => wss.close(() => resolve()));

@@ -21,6 +21,18 @@ export function isNewerStableVersion(current, latest) {
   catch { return false; }
 }
 
+export function minimumSelfUpdateVersion(platform) {
+  return String(platform || '').trim().toLowerCase() === 'win32' ? '1.0.6' : '1.0.5';
+}
+
+export function supportsDeviceSelfUpdate(packageVersion, platform) {
+  try {
+    return Boolean(packageVersion) && compareStableVersions(packageVersion, minimumSelfUpdateVersion(platform)) >= 0;
+  } catch {
+    return false;
+  }
+}
+
 export function createDeviceReleaseProvider(options = {}) {
   const packageName = String(options.packageName || DEFAULT_PACKAGE).trim();
   const registryUrl = String(options.registryUrl || DEFAULT_REGISTRY).replace(/\/+$/, '');

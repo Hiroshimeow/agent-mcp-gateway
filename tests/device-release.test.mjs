@@ -5,7 +5,9 @@ import {
   compareStableVersions,
   createDeviceReleaseProvider,
   isNewerStableVersion,
-  normalizeStableVersion
+  minimumSelfUpdateVersion,
+  normalizeStableVersion,
+  supportsDeviceSelfUpdate
 } from '../scripts/device-release.mjs';
 
 test('stable device versions compare without accepting tags or ranges', () => {
@@ -17,6 +19,14 @@ test('stable device versions compare without accepting tags or ranges', () => {
   assert.equal(isNewerStableVersion('1.0.5', '1.0.5'), false);
   assert.throws(() => normalizeStableVersion('latest'));
   assert.throws(() => normalizeStableVersion('1.0.5-beta.1'));
+});
+
+test('self-update minimum is platform-aware for legacy Windows clients', () => {
+  assert.equal(minimumSelfUpdateVersion('win32'), '1.0.6');
+  assert.equal(minimumSelfUpdateVersion('linux'), '1.0.5');
+  assert.equal(supportsDeviceSelfUpdate('1.0.5', 'win32'), false);
+  assert.equal(supportsDeviceSelfUpdate('1.0.6', 'win32'), true);
+  assert.equal(supportsDeviceSelfUpdate('1.0.5', 'linux'), true);
 });
 
 test('release provider fetches npm latest and caches it', async () => {

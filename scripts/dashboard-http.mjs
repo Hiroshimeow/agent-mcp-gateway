@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { escapeHtml, quickGuide } from './enduser-ui.mjs';
-import { compareStableVersions, isNewerStableVersion } from './device-release.mjs';
+import { isNewerStableVersion, minimumSelfUpdateVersion, supportsDeviceSelfUpdate } from './device-release.mjs';
 
 const CSRF_COOKIE = 'hcu_dashboard_csrf';
 const CSRF_TTL_MS = 8 * 60 * 60 * 1000;
@@ -99,7 +99,7 @@ function renderDeviceRows(devices, csrf, period) {
     } else if (device.updateAvailable && device.selfUpdateSupported && device.online) {
       updateControl = `<form method="post" action="/dashboard/devices/${encodeURIComponent(device.deviceId)}/update">${csrfField(csrf)}<button type="submit">Update → ${escapeHtml(device.latestPackageVersion)}</button></form>`;
     } else if (device.updateAvailable && !device.selfUpdateSupported) {
-      updateControl = '<span class="muted">Bootstrap 1.0.5 once</span>';
+      updateControl = `<span class="muted">Bootstrap ${escapeHtml(device.minimumSelfUpdateVersion || '1.0.5')} once</span>`;
     } else if (device.packageVersion && device.latestPackageVersion && !device.updateAvailable) {
       updateControl = '<span class="muted">Up to date</span>';
     }
@@ -421,12 +421,13 @@ export function installDashboardRoutes(app, { accountFromRequest, usageStore, de
       .filter(device => !device.revoked)
       .map(device => {
         const packageVersion = device.packageVersion || null;
-        let selfUpdateSupported = false;
-        try { selfUpdateSupported = Boolean(packageVersion) && compareStableVersions(packageVersion, '1.0.5') >= 0; } catch {}
+        const minimumVersion = minimumSelfUpdateVersion(device.platform);
+        const selfUpdateSupported = supportsDeviceSelfUpdate(packageVersion, device.platform);
         const updateAvailable = Boolean(latestPackageVersion) && (!packageVersion || isNewerStableVersion(packageVersion, latestPackageVersion));
         return {
         ...device,
         latestPackageVersion,
+        minimumSelfUpdateVersion: minimumVersion,
         selfUpdateSupported,
         updateAvailable,
         attributedUsage: usageByDevice.get(device.deviceId) || {

@@ -31,7 +31,7 @@ async function fixture() {
   const bobBrowser = accountStore.createSession(bob.accountId);
   const adminBrowser = accountStore.createSession(admin.accountId);
 
-  deviceStore.enroll({ deviceId: 'alice-device', deviceName: 'Alice Workstation', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId, agentVersion: 'ignored', packageVersion: '1.0.5' });
+  deviceStore.enroll({ deviceId: 'alice-device', deviceName: 'Alice Workstation', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId, agentVersion: 'ignored', packageVersion: '1.0.5', platform: 'win32' });
   deviceStore.enroll({ deviceId: 'alice-laptop', deviceName: 'Alice Laptop', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId, packageVersion: '1.0.4' });
   deviceStore.enroll({ deviceId: 'alice-idle', deviceName: 'Alice Idle', publicKeyPem: publicKeyPem(), ownerAccountId: alice.accountId });
   deviceStore.enroll({ deviceId: 'bob-device', deviceName: 'Bob Secret Workstation', publicKeyPem: publicKeyPem(), ownerAccountId: bob.accountId });
@@ -192,6 +192,7 @@ test('dashboard is user-only, account-isolated, compact, and labels token values
     assert.match(html, /<th>Device<\/th><th>Version<\/th><th>Last seen<\/th><th>OK \/ Fail<\/th><th>Input \/ Output<\/th><th>Estimated tokens<\/th>/);
     assert.match(html, /<code>1\.0\.5<\/code><small>latest 1\.0\.6<\/small>/);
     assert.match(html, /<code>1\.0\.4<\/code><small>latest 1\.0\.6<\/small>/);
+    assert.match(html, /Bootstrap 1\.0\.6 once/);
     assert.match(html, /Bootstrap 1\.0\.5 once/);
     assert.match(html, /<strong>0<\/strong> online[\s\S]*?<strong>3<\/strong> offline/i);
     assert.match(html, /100 B/);
