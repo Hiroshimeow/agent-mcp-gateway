@@ -4,13 +4,13 @@
 
 The client-facing MCP server is the gateway. It uses the stable MCP TypeScript SDK v2 split packages at exact version 2.0.0 and targets the 2026-07-28 MCP specification.
 
-The gateway owns the public execution-tool contract exposed to clients. The frozen machine-readable baseline is:
+The gateway owns the stable public device-tool contract exposed to clients, including device/project discovery plus execution tools. The frozen machine-readable baseline is:
 
 - `contracts/device-public-contract-v1.json`
 - regenerate intentionally with `node scripts/check-device-public-contract.mjs --write`
 - verify with `npm run contract:device:check`
 
-The check classifies tool-surface changes as `unchanged`, `additive`, `deprecated`, or `breaking`, and exits non-zero for breaking changes.
+The check classifies tool-surface changes as `unchanged`, `additive`, `deprecated`, or `breaking`, and exits non-zero for breaking changes. Current SDK v2 request-handler failures surface to MCP clients as JSON-RPC `-32603` errors with the gateway/device message; internal routing codes such as `DEVICE_NOT_READY` remain internal metadata rather than public JSON-RPC codes.
 
 ## Gateway-to-device boundary
 

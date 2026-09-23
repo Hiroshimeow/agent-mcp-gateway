@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "scope": "gateway-device-execution-tools",
+  "scope": "gateway-device-public-tools",
   "mcpSpecificationRevision": "2026-07-28",
   "resultEnvelope": {
     "success": {
@@ -9,20 +9,141 @@
     }
   },
   "errorEnvelope": {
-    "transport": "MCP tools/call request error",
-    "internalCodes": [
+    "publicProtocolError": {
+      "type": "JSON-RPC request error",
+      "code": -32603,
+      "message": "Gateway/device error message",
+      "customInternalCodeExposed": false
+    },
+    "internalRoutingCodes": [
       "DEVICE_ID_REQUIRED",
       "DEVICE_NOT_READY",
       "DEVICE_OFFLINE",
+      "DEVICE_RUNTIME_CHANGED",
       "PROCESS_SESSION_STALE",
       "DEVICE_ACCESS_DENIED",
       "DEVICE_PATH_DENIED",
       "DEVICE_RATE_LIMIT",
       "DEVICE_INPUT_TOO_LARGE",
-      "DEVICE_OUTPUT_TOO_LARGE"
+      "DEVICE_OUTPUT_TOO_LARGE",
+      "DEVICE_NOT_FOUND",
+      "DEVICE_SELECTION_AMBIGUOUS",
+      "PATH_HINT_REQUIRED",
+      "PATH_HINT_UNSUPPORTED",
+      "REMOTE_DEVICE_ERROR"
     ]
   },
   "tools": [
+    {
+      "name": "list_devices",
+      "description": "List currently paired device identities and bounded capability/status metadata. Forgotten devices are excluded; adding or removing devices does not change the MCP tool schema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor returned by the previous page."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "path_hint": {
+            "type": "string",
+            "description": "Optional absolute Windows/POSIX path hint. Returns selected_device_id only when exactly one owned online device is compatible."
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "platform",
+        "profileVisibility": {
+          "safe": true,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
+    {
+      "name": "project_list",
+      "description": "List configured projects for one explicit owned online device. Local absolute paths stay hidden unless path exposure is explicitly enabled.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owned online device id whose configured projects should be listed."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional project id or display-name filter."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor returned by the previous page."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          }
+        },
+        "required": [
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "ok",
+          "tool",
+          "summary",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "_meta": {
+        "riskLevel": "low",
+        "category": "platform",
+        "profileVisibility": {
+          "safe": true,
+          "assisted": true,
+          "yolo": true
+        }
+      }
+    },
     {
       "name": "read_text_file",
       "description": "Read a text file from one explicit owned online device. Use head or tail to bound large reads.",

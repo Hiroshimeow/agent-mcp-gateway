@@ -1,4 +1,4 @@
-import { DEVICE_EXECUTION_TOOL_NAMES, listStaticDeviceExecutionTools } from './device-execution-tool-definitions.mjs';
+import { DEVICE_PUBLIC_TOOL_NAMES, listStaticDevicePublicTools } from './device-execution-tool-definitions.mjs';
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -16,13 +16,13 @@ function toolContract(tool) {
 }
 
 export function buildDevicePublicContract() {
-  const tools = listStaticDeviceExecutionTools();
-  if (tools.length !== DEVICE_EXECUTION_TOOL_NAMES.length) {
-    throw new Error('Device public contract tool count drifted from the fixed execution surface.');
+  const tools = listStaticDevicePublicTools();
+  if (tools.length !== DEVICE_PUBLIC_TOOL_NAMES.length) {
+    throw new Error('Device public contract tool count drifted from the fixed device surface.');
   }
   return {
     schemaVersion: 1,
-    scope: 'gateway-device-execution-tools',
+    scope: 'gateway-device-public-tools',
     mcpSpecificationRevision: '2026-07-28',
     resultEnvelope: {
       success: {
@@ -31,17 +31,28 @@ export function buildDevicePublicContract() {
       }
     },
     errorEnvelope: {
-      transport: 'MCP tools/call request error',
-      internalCodes: [
+      publicProtocolError: {
+        type: 'JSON-RPC request error',
+        code: -32603,
+        message: 'Gateway/device error message',
+        customInternalCodeExposed: false
+      },
+      internalRoutingCodes: [
         'DEVICE_ID_REQUIRED',
         'DEVICE_NOT_READY',
         'DEVICE_OFFLINE',
+        'DEVICE_RUNTIME_CHANGED',
         'PROCESS_SESSION_STALE',
         'DEVICE_ACCESS_DENIED',
         'DEVICE_PATH_DENIED',
         'DEVICE_RATE_LIMIT',
         'DEVICE_INPUT_TOO_LARGE',
-        'DEVICE_OUTPUT_TOO_LARGE'
+        'DEVICE_OUTPUT_TOO_LARGE',
+        'DEVICE_NOT_FOUND',
+        'DEVICE_SELECTION_AMBIGUOUS',
+        'PATH_HINT_REQUIRED',
+        'PATH_HINT_UNSUPPORTED',
+        'REMOTE_DEVICE_ERROR'
       ]
     },
     tools: tools.map(toolContract)

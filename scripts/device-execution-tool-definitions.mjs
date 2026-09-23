@@ -1,4 +1,5 @@
 import { listCustomTools } from './custom-tools/index.mjs';
+import { listDevicesToolDefinition } from './device-inventory.mjs';
 import { buildShellExecuteAnnotations, buildShellExecuteDescription } from './shell-tool-descriptor.mjs';
 import { applyToolRisk } from './tool-risk.mjs';
 import { stableToolDefinition } from './tool-surface-stability.mjs';
@@ -14,6 +15,12 @@ export const DEVICE_EXECUTION_TOOL_NAMES = Object.freeze([
   'terminate_process',
   'image_preview',
   'project_inspect'
+]);
+
+export const DEVICE_PUBLIC_TOOL_NAMES = Object.freeze([
+  'list_devices',
+  'project_list',
+  ...DEVICE_EXECUTION_TOOL_NAMES
 ]);
 
 export const shellExecuteSchema = {
@@ -190,6 +197,21 @@ export function listStaticDeviceExecutionTools() {
   return DEVICE_EXECUTION_TOOL_NAMES.map(name => {
     const tool = byName.get(name);
     if (!tool) throw new Error(`Missing static device execution tool definition: ${name}`);
+    return tool;
+  });
+}
+
+export function listStaticDevicePublicTools() {
+  const customByName = new Map(listCustomTools().map(tool => [tool.name, tool]));
+  const tools = [
+    applyToolRisk(listDevicesToolDefinition()),
+    customByName.get('project_list'),
+    ...listStaticDeviceExecutionTools()
+  ].filter(Boolean);
+  const byName = new Map(tools.map(tool => [tool.name, tool]));
+  return DEVICE_PUBLIC_TOOL_NAMES.map(name => {
+    const tool = byName.get(name);
+    if (!tool) throw new Error(`Missing static device public tool definition: ${name}`);
     return tool;
   });
 }
